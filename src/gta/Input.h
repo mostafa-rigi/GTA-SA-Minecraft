@@ -11,5 +11,9 @@ namespace mc {
 void PollKeys();
 // raw keys, for what belongs to the mod in GTA and not to Minecraft (F6 mod on / off, F8 Steve / CJ, F9 radar, menus)
 bool KeyPressed(int vk);
+// GTA SA loses its DirectInput mouse after the menu or after the game was in the background (the camera stops
+// turning until GTA's display settings make the device anew). Call every game frame: it makes the device anew
+// whenever the game comes back.
+void KeepMouseAlive();
 
 } // namespace mc

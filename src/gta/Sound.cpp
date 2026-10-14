@@ -44,9 +44,11 @@ bool Ready() {
     if (gState != 0)
         return gState > 0;
     gState = -1;
-    HMODULE h = LoadLibraryA((GameDir() + "\\bass.dll").c_str());
+    HMODULE h = LoadLibraryA(ModPath("bass.dll").c_str());
+    if (!h)
+        h = LoadLibraryA((GameDir() + "\\bass.dll").c_str());
     if (!h) {
-        Log("Sound: bass.dll not found, no sounds");
+        Log("Sound: bass.dll not found (MinecraftSA folder or game folder), no sounds");
         return false;
     }
 #define LOAD(field, name) B.field = (decltype(B.field))GetProcAddress(h, name); if (!B.field) { Log("Sound: missing " name); return false; }

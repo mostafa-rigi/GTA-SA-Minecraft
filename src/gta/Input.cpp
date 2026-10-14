@@ -1,5 +1,8 @@
 #include "Input.h"
 
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
+
 #include "CPad.h"
 #include "RenderWare.h"
 
@@ -100,6 +103,23 @@ void PollKeys() {
         gNow[k] = focus && (GetAsyncKeyState(k) & 0x8000) != 0;
     }
     FillControls();
+}
+
+void KeepMouseAlive() {
+    static DWORD lastFrame = 0;
+    static bool wasFocused = true;
+    const DWORD now = GetTickCount();
+    const bool focused = WindowFocused();
+    const bool resumed = (lastFrame != 0 && now - lastFrame > 400) || (focused && !wasFocused);
+    lastFrame = now;
+    wasFocused = focused;
+    psGlobalType* ps = RsGlobal.ps;
+    if (!resumed || !ps || !ps->diMouse)
+        return;
+    auto* dev = static_cast<IDirectInputDevice8A*>(ps->diMouse);
+    dev->Unacquire();
+    dev->Release();
+    ps->diMouse = nullptr; // CPad::UpdateMouse makes it again, exclusive outside the menu
 }
 
 bool KeyPressed(int vk) { return vk > 0 && vk < 256 && gNow[vk] && !gPrev[vk]; }

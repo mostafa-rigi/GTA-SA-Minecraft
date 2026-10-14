@@ -435,6 +435,7 @@ void GameShutdown() {
 
 void GameProcess() {
     float dt = FrameDelta();
+    KeepMouseAlive();
     PollKeys();
     gGame.viewW = (float)RsGlobal.maximumWidth;
     gGame.viewH = (float)RsGlobal.maximumHeight;

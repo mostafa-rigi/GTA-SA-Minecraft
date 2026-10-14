@@ -404,7 +404,23 @@ void Controller(float dt, CPlayerPed* ped, bool menuOpen) {
     in.mortal = gGame.gameMode == MODE_SURVIVAL;
 
     WalkEvents ev;
+    const Vec3 before = gBody.pos;
     WalkStep(gBody, in, dt, gMap, ev);
+    {
+        // straight above the new spot, between the old feet and the new ones, a GTA surface (a steep ramp, a thin
+        // roof) that the step went through: stand on it
+        const float oldFeet = before.z - 1.0f, newFeet = gBody.pos.z - 1.0f;
+        CColPoint cp;
+        CEntity* e = nullptr;
+        if (gBody.vel.z <= 0.0f && oldFeet - newFeet > 0.02f &&
+            GtaRay(CVector(gBody.pos.x, gBody.pos.y, oldFeet + 0.3f), CVector(gBody.pos.x, gBody.pos.y, newFeet - 0.05f), cp, e) &&
+            cp.m_vecNormal.z > 0.35f && cp.m_vecPoint.z > newFeet + 0.02f) {
+            gBody.pos.z = cp.m_vecPoint.z + 1.0f;
+            gBody.vel.z = 0.0f;
+            gBody.onGround = true;
+            gBody.fallTop = gBody.pos.z;
+        }
+    }
 
     // what happened on the way: damage, hunger (the sounds were the core's to play)
     if (ev.landed) {

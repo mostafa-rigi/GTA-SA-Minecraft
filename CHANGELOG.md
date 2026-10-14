@@ -2,6 +2,12 @@
 
 All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is in active development (0.x); Turkish release notes for every version are in [OKUBENI.txt](OKUBENI.txt).
 
+## [0.52] - 2026-10-15
+### Fixed
+- The camera no longer stops turning after the pause menu or after switching to another window. The mouse is re-created whenever the game comes back.
+- Falling through ramps and thin GTA surfaces: a step that went through a surface puts you on top of it.
+- No sounds without CLEO: the sound library (`bass.dll`) is now loaded from the `MinecraftSA` folder too, and the release ships it.
+
 ## [0.51] - 2026-10-09
 ### Added
 - English and Turkish for everything the Minecraft side says: block and item names, menus, creative tabs, messages, effect names and the death screen. The texts come from Minecraft's own language files.
