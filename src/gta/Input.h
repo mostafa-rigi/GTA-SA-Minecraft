@@ -15,5 +15,8 @@ bool KeyPressed(int vk);
 // turning until GTA's display settings make the device anew). Call every game frame: it makes the device anew
 // whenever the game comes back.
 void KeepMouseAlive();
+// what the keyboard typed goes to the core (TypeChar / TypeKey); while the core takes the keyboard (the chat, the
+// creative search) GTA does not see the keys. Call every game frame.
+void FeedTypedText();
 
 } // namespace mc

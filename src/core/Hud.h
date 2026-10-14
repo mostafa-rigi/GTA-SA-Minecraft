@@ -31,6 +31,7 @@ enum HudAnchor {
     AT_BOTTOM,    // the middle of the bottom edge
     AT_WINDOW,    // the open screen's window, top left corner
     AT_CURSOR,    // the mouse pointer
+    AT_BOTTOM_LEFT,
 };
 enum HudTexture { HT_GUI, HT_MENU };
 
@@ -64,6 +65,7 @@ struct HudFacts {
     float mouseX = 0.0f, mouseY = 0.0f; // the mouse in GUI pixels from the open window's corner
     const char* playerName = "Steve";
     float aspect = 16.0f / 9.0f; // the screen's width / height
+    float guiW = 427.0f;         // the screen's width in GUI pixels
 };
 
 // What to draw this frame, in the order to draw it. While a screen is open the host has built its slots (BuildSlots)

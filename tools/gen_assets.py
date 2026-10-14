@@ -1148,6 +1148,7 @@ chest.paste(chest_bot, (0, 71))
 gui_add("WIN_CHEST", chest)
 gui_add("WIN_CREATIVE", gimg("gui/container/creative_inventory/tab_items", (0, 0, 195, 136)))
 gui_add("WIN_CREATIVE_INV", gimg("gui/container/creative_inventory/tab_inventory", (0, 0, 195, 136)))
+gui_add("WIN_CREATIVE_SEARCH", gimg("gui/container/creative_inventory/tab_item_search", (0, 0, 195, 136)))
 S = "gui/sprites/"
 for name, rel in [("HOTBAR", "hud/hotbar"), ("SELECTION", "hud/hotbar_selection"), ("CROSSHAIR", "hud/crosshair"),
                   ("HEART_CONTAINER", "hud/heart/container"), ("HEART_FULL", "hud/heart/full"),
@@ -1312,6 +1313,7 @@ MENU_STRINGS = OrderedDict([
     ("TAB_NATURAL", "itemGroup.natural"), ("TAB_FUNCTIONAL", "itemGroup.functional"), ("TAB_TOOLS", "itemGroup.tools"),
     ("TAB_COMBAT", "itemGroup.combat"), ("TAB_FOOD", "itemGroup.foodAndDrink"), ("TAB_INGREDIENTS", "itemGroup.ingredients"),
     ("TAB_REDSTONE", "itemGroup.redstone"), ("TAB_SPAWN_EGGS", "itemGroup.spawnEggs"), ("TAB_INVENTORY", "itemGroup.inventory"),
+    ("TAB_SEARCH", "itemGroup.search"),
     ("VILLAGER", "entity.minecraft.villager.none"), ("FARMER", "entity.minecraft.villager.farmer"),
     ("LIBRARIAN", "entity.minecraft.villager.librarian"), ("BUTCHER", "entity.minecraft.villager.butcher"),
     ("CLERIC", "entity.minecraft.villager.cleric"), ("ARMORER", "entity.minecraft.villager.armorer"),

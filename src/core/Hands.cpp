@@ -8,6 +8,7 @@
 #include "Host.h"
 #include "Interact.h"
 #include "Beds.h"
+#include "Chat.h"
 #include "Inventory.h"
 #include "Items.h"
 #include "Mobs.h"
@@ -23,7 +24,8 @@ HandsResult HandsTick(float dt, const HandsFacts& f) {
     HandsResult r;
     // ------------------------------------------------ open screen
     if (gGame.screen != SCREEN_NONE) {
-        if (ActionPressed(ACT_INVENTORY) || ActionPressed(ACT_BACK) || !f.alive)
+        // (while the keyboard writes - the chat, the creative search - only its own keys close it)
+        if ((!TextInputActive() && (ActionPressed(ACT_INVENTORY) || ActionPressed(ACT_BACK))) || !f.alive)
             CloseScreen();
         r.blockPad = true;
         return r;
@@ -45,6 +47,11 @@ HandsResult HandsTick(float dt, const HandsFacts& f) {
     // ------------------------------------------------ hotbar (also while driving)
     HotbarTick();
 
+    if (ActionPressed(ACT_CHAT)) {
+        OpenChat("", 'T');
+        r.blockPad = true;
+        return r;
+    }
     if (ActionPressed(ACT_INVENTORY)) {
         OpenScreen(gGame.gameMode == MODE_CREATIVE ? SCREEN_CREATIVE : SCREEN_INVENTORY);
         r.blockPad = true;

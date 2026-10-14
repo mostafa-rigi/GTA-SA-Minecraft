@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "Beds.h"
+#include "Chat.h"
 #include "BlockRules.h"
 #include "GameState.h"
 #include "Inventory.h"
@@ -212,12 +213,57 @@ void Tab(Pieces& P, int t, bool selected) {
     P.Icon(AT_WINDOW, kTabIcons[t], x + 5, y + (p.top ? 9 : 7));
 }
 
+// the chat: the last lines at the bottom left above the hotbar (all of them while it is open), the line being typed
+// in a dark bar along the bottom, what a command can go on with above it
+void ChatPieces(Pieces& P, const HudFacts& f) {
+    const bool open = gGame.screen == SCREEN_CHAT;
+    float y = -40.0f;
+    int shown = 0;
+    for (int i = (int)gChatLines.size() - 1; i >= 0 && shown < (open ? 20 : 10); --i, ++shown) {
+        const ChatLine& l = gChatLines[i];
+        float a = 1.0f;
+        if (!open) {
+            a = Clamp((kChatLineSeconds - l.age) / 1.0f, 0.0f, 1.0f);
+            a *= a;
+            if (a <= 0.02f)
+                break;
+        }
+        y -= 9.0f;
+        P.Fill(AT_BOTTOM_LEFT, 0, y, kChatWidth + 4.0f, 9, Argb(0, 0, 0, (int)(a * 127.0f)));
+        const uint32_t alpha = (uint32_t)(a * 255.0f) << 24;
+        P.Text(AT_BOTTOM_LEFT, l.text, 2, y + 1, (l.color & 0x00FFFFFF) | alpha, true, 0);
+    }
+    if (!open)
+        return;
+    P.Fill(AT_BOTTOM_LEFT, 2, -14, f.guiW - 4.0f, 12, Argb(0, 0, 0, 128));
+    const std::string& t = gChatInput.text;
+    P.Text(AT_BOTTOM_LEFT, t, 4, -12, 0xFFE0E0E0, true, 0);
+    if (((int)(gChatInput.blink * 3.0f)) % 2 == 0) {
+        if (gChatInput.cursor >= t.size())
+            P.Text(AT_BOTTOM_LEFT, "_", 4.0f + GuiTextWidth(t) + 1.0f, -12, 0xFFE0E0E0, true, 0);
+        else
+            P.Fill(AT_BOTTOM_LEFT, 4.0f + GuiTextWidth(t.substr(0, gChatInput.cursor)), -13, 1, 10, 0xFFD0D0D0);
+    }
+    const std::vector<std::string>& s = ChatSuggestions();
+    if (!s.empty()) {
+        const size_t space = t.find_last_of(' ');
+        const float x = 4.0f + GuiTextWidth(space == std::string::npos ? std::string("/") : t.substr(0, space + 1));
+        int w = 0;
+        for (const std::string& o : s)
+            w = std::max(w, GuiTextWidth(o));
+        const float top = -15.0f - 12.0f * s.size();
+        P.Fill(AT_BOTTOM_LEFT, x - 1, top, w + 2.0f, 12.0f * s.size(), Argb(0, 0, 0, 208));
+        for (size_t i = 0; i < s.size(); ++i)
+            P.Text(AT_BOTTOM_LEFT, s[i], x, top + 2.0f + 12.0f * i, i == 0 ? 0xFFFFFF55 : 0xFFAAAAAA, true, 0);
+    }
+}
+
 void OpenScreenPieces(Pieces& P, const HudFacts& f) {
     P.FillScreen(Argb(16, 16, 16, 150)); // Minecraft darkens the world behind menus
     const uint32_t labelCol = Argb(64, 64, 64);
 
     if (gGame.screen == SCREEN_CREATIVE)
-        for (int t = 0; t <= CAT_COUNT; ++t)
+        for (int t = 0; t < TAB_COUNT; ++t)
             if (t != gGame.creativeTab)
                 Tab(P, t, false);
 
@@ -226,7 +272,9 @@ void OpenScreenPieces(Pieces& P, const HudFacts& f) {
     case SCREEN_CRAFTING: win = &GUI_WIN_CRAFTING; break;
     case SCREEN_FURNACE: win = &FurnaceWindow(); break;
     case SCREEN_CHEST: win = &GUI_WIN_CHEST; break;
-    case SCREEN_CREATIVE: win = CreativeInventoryTab() ? &GUI_WIN_CREATIVE_INV : &GUI_WIN_CREATIVE; break;
+    case SCREEN_CREATIVE:
+        win = CreativeInventoryTab() ? &GUI_WIN_CREATIVE_INV : CreativeSearchActive() ? &GUI_WIN_CREATIVE_SEARCH : &GUI_WIN_CREATIVE;
+        break;
     default: break;
     }
     P.Sprite(AT_WINDOW, *win, 0, 0);
@@ -243,6 +291,11 @@ void OpenScreenPieces(Pieces& P, const HudFacts& f) {
             P.Add(HP_PLAYER, AT_WINDOW, 89, 6).scale = 0.65f;
         } else {
             P.Text(AT_WINDOW, ScreenTitle(), 8, 6, labelCol, false, 0);
+            if (CreativeSearchActive()) {
+                // the search box (Minecraft's: white text, a blinking _)
+                const bool blink = ((int)(gChatInput.blink * 3.0f)) % 2 == 0;
+                P.Text(AT_WINDOW, CreativeSearchText() + (blink ? "_" : ""), 82, 6, 0xFFFFFFFF, true, 0);
+            }
             int rows = PaletteRows();
             int maxScroll = std::max(1, rows - 5);
             float t = (float)gGame.creativeScroll / maxScroll;
@@ -355,8 +408,9 @@ void BuildHud(const HudFacts& f, std::vector<HudPiece>& out) {
             c.invert = true;
         }
         HotbarAndStats(P, f);
-        if (gGame.screen != SCREEN_NONE)
+        if (gGame.screen != SCREEN_NONE && gGame.screen != SCREEN_CHAT)
             OpenScreenPieces(P, f);
+        ChatPieces(P, f);
         if (gGame.deathTime >= 0.0f)
             DeathScreen(P, f);
     }

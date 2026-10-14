@@ -24,6 +24,7 @@
 #include "Blocks.h"
 #include "Buildings.h"
 #include "Carve.h"
+#include "Chat.h"
 #include "Collision.h"
 #include "Combat.h"
 #include "GtaCombat.h"
@@ -399,6 +400,7 @@ void GameInit() {
 }
 
 void GameOnNewSession() {
+    ChatClear();
     CollisionForgetAll();
     gDrops.clear();
     gPrimedTnt.clear();
@@ -552,6 +554,7 @@ void GameProcess() {
         }
     }
     const HandsResult r = HandsTick(dt, f);
+    FeedTypedText(); // (after the hands: the T that opened the chat does not write into it)
     if (r.finished && Item(r.finished).special == SP_MILK)
         MilkDrunk(ped, r.hadFireResistance);
     if (r.aimed) {

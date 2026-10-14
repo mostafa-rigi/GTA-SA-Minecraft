@@ -1,5 +1,7 @@
 #include "Screens.h"
 
+#include "Chat.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -14,18 +16,19 @@ std::vector<UiSlot> gSlots;
 int gWinW = 176, gWinH = 166;
 
 namespace {
-const int kTabTitles[CAT_COUNT + 1] = { STR_TAB_BUILDING, STR_TAB_COLORED, STR_TAB_NATURAL, STR_TAB_FUNCTIONAL, STR_TAB_TOOLS,
-                                        STR_TAB_COMBAT, STR_TAB_FOOD, STR_TAB_INGREDIENTS, STR_TAB_REDSTONE,
-                                        STR_TAB_SPAWN_EGGS, STR_TAB_INVENTORY };
+const int kTabTitles[TAB_COUNT] = { STR_TAB_BUILDING, STR_TAB_COLORED, STR_TAB_NATURAL, STR_TAB_FUNCTIONAL, STR_TAB_TOOLS,
+                                    STR_TAB_COMBAT, STR_TAB_FOOD, STR_TAB_INGREDIENTS, STR_TAB_REDSTONE,
+                                    STR_TAB_SPAWN_EGGS, STR_TAB_INVENTORY, STR_TAB_SEARCH };
+std::string gSearch; // the search tab's text
 } // namespace
-const char* TabName(int tab) { return LangStr(kTabTitles[std::clamp(tab, 0, (int)CAT_COUNT)]); }
-const uint16_t kTabIcons[CAT_COUNT + 1] = { ID_BRICKS, ID_CYAN_WOOL, ID_GRASS_BLOCK, ID_CRAFTING_TABLE, ID_DIAMOND_PICKAXE,
-                                            ID_DIAMOND_SWORD, ID_GOLDEN_APPLE, ID_IRON_INGOT, ID_REDSTONE, ID_PIG_SPAWN_EGG,
-                                            ID_CHEST };
+const char* TabName(int tab) { return LangStr(kTabTitles[std::clamp(tab, 0, TAB_COUNT - 1)]); }
+const uint16_t kTabIcons[TAB_COUNT] = { ID_BRICKS, ID_CYAN_WOOL, ID_GRASS_BLOCK, ID_CRAFTING_TABLE, ID_DIAMOND_PICKAXE,
+                                        ID_DIAMOND_SWORD, ID_GOLDEN_APPLE, ID_IRON_INGOT, ID_REDSTONE, ID_PIG_SPAWN_EGG,
+                                        ID_CHEST, ID_SPYGLASS };
 // (Minecraft: building, coloured, natural, functional, redstone on top; tools, combat, food, ingredients, spawn eggs
-// below; the survival inventory at the far right)
-const TabPos kTabPos[CAT_COUNT + 1] = { { true, 0 },  { true, 1 },  { true, 2 },  { true, 3 },  { false, 0 }, { false, 1 },
-                                        { false, 2 }, { false, 3 }, { true, 4 },  { false, 4 }, { false, 6 } };
+// below; the search at the top right, the survival inventory at the bottom right)
+const TabPos kTabPos[TAB_COUNT] = { { true, 0 },  { true, 1 },  { true, 2 },  { true, 3 },  { false, 0 }, { false, 1 },
+                                    { false, 2 }, { false, 3 }, { true, 4 },  { false, 4 }, { false, 6 }, { true, 6 } };
 
 namespace {
 ItemStack gResult2, gResult3, gTrash;
@@ -296,10 +299,89 @@ FurnaceState* OpenFurnace() { return &gWorld.furnaces[gGame.openPos]; }
 
 bool CreativeInventoryTab() { return gGame.screen == SCREEN_CREATIVE && gGame.creativeTab == CAT_COUNT; }
 
-int PaletteRows() {
-    int tab = std::min(gGame.creativeTab, (int)CAT_COUNT - 1);
-    return ((int)CreativeItems(tab).size() + 8) / 9;
+namespace {
+// for searching: lower case, Turkish letters too (I, İ and ı all as i)
+std::string Fold(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char c = (unsigned char)s[i];
+        const unsigned char n = i + 1 < s.size() ? (unsigned char)s[i + 1] : 0;
+        if (c >= 'A' && c <= 'Z') {
+            out += (char)(c == 'I' ? 'i' : c - 'A' + 'a');
+        } else if (c == 0xC4 && (n == 0xB0 || n == 0xB1)) {
+            out += 'i';
+            ++i;
+        } else if ((c == 0xC3 && (n == 0x87 || n == 0x96 || n == 0x9C)) || (c == 0xC4 && n == 0x9E) || (c == 0xC5 && n == 0x9E)) {
+            out += (char)c;
+            out += (char)(c == 0xC3 ? n + 0x20 : n + 1);
+            ++i;
+        } else {
+            out += (char)c;
+        }
+    }
+    return out;
 }
+} // namespace
+
+bool CreativeSearchActive() { return gGame.screen == SCREEN_CREATIVE && gGame.creativeTab == TAB_SEARCH; }
+const std::string& CreativeSearchText() { return gSearch; }
+
+void CreativeSearchType(uint32_t cp) {
+    if (gSearch.size() >= 50)
+        return;
+    if (cp < 0x80) {
+        gSearch += (char)cp;
+    } else if (cp < 0x800) {
+        gSearch += (char)(0xC0 | (cp >> 6));
+        gSearch += (char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        gSearch += (char)(0xE0 | (cp >> 12));
+        gSearch += (char)(0x80 | ((cp >> 6) & 0x3F));
+        gSearch += (char)(0x80 | (cp & 0x3F));
+    }
+    gGame.creativeScroll = 0;
+}
+
+void CreativeSearchKey(int key) {
+    if (key == TK_BACKSPACE && !gSearch.empty()) {
+        size_t i = gSearch.size() - 1;
+        while (i > 0 && ((unsigned char)gSearch[i] & 0xC0) == 0x80)
+            --i;
+        gSearch.erase(i);
+        gGame.creativeScroll = 0;
+    } else if (key == TK_DELETE) {
+        gSearch.clear(); // (Minecraft: a right click on the box)
+        gGame.creativeScroll = 0;
+    } else if (key == TK_ESCAPE) {
+        CloseScreen();
+    }
+}
+
+const std::vector<uint16_t>& PaletteItems() {
+    if (gGame.creativeTab != TAB_SEARCH)
+        return CreativeItems(std::min(gGame.creativeTab, (int)CAT_COUNT - 1));
+    static std::string forText = "\x01";
+    static int forLanguage = -1;
+    static std::vector<uint16_t> list;
+    if (forText != gSearch || forLanguage != gLanguage) {
+        forText = gSearch;
+        forLanguage = gLanguage;
+        list.clear();
+        const std::string q = Fold(gSearch);
+        for (int c = 0; c < CAT_COUNT; ++c)
+            for (uint16_t id : CreativeItems(c)) {
+                std::string key = Item(id).key;
+                for (char& ch : key)
+                    if (ch == '_')
+                        ch = ' ';
+                if (q.empty() || Fold(ItemName(id)).find(q) != std::string::npos || key.find(q) != std::string::npos)
+                    list.push_back(id);
+            }
+    }
+    return list;
+}
+
+int PaletteRows() { return ((int)PaletteItems().size() + 8) / 9; }
 
 void BuildSlots() {
     gSlots.clear();
@@ -356,7 +438,7 @@ void BuildSlots() {
             gTrash.Clear();
             gSlots.push_back({ &gTrash, 173, 112, SK_TRASH, G_CONTAINER, 0 });
         } else {
-            const auto& items = CreativeItems(gGame.creativeTab);
+            const auto& items = PaletteItems();
             int maxScroll = std::max(0, PaletteRows() - 5);
             gGame.creativeScroll = std::clamp(gGame.creativeScroll, 0, maxScroll);
             for (int r = 0; r < 5; ++r)
@@ -398,7 +480,7 @@ void TabBox(int tab, float& x, float& y, float& w, float& h) {
 int TabAt(float gx, float gy) {
     if (gGame.screen != SCREEN_CREATIVE)
         return -1;
-    for (int t = 0; t <= CAT_COUNT; ++t) {
+    for (int t = 0; t < TAB_COUNT; ++t) {
         float x, y, w, h;
         TabBox(t, x, y, w, h);
         if (gx >= x && gx < x + w && gy >= y && gy < y + h)

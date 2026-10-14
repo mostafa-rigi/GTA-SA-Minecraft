@@ -1,4 +1,7 @@
 #pragma once
+
+#include <string>
+#include <vector>
 // Minecraft's inventory screens: which slots each one has and where (GUI pixels from the window's top left corner),
 // the creative tabs, and what clicking does (picking up, splitting, shift-moving, crafting, armour, the creative
 // palette, the trash slot, throwing out what the cursor holds outside the window). The host draws them and turns its
@@ -22,7 +25,8 @@ struct UiSlot {
 extern std::vector<UiSlot> gSlots; // the open screen's (BuildSlots)
 extern int gWinW, gWinH;           // the open screen's window, GUI pixels
 
-// creative tabs (CAT_COUNT item tabs + the survival inventory)
+// creative tabs (CAT_COUNT item tabs + the survival inventory + the search)
+constexpr int TAB_SEARCH = CAT_COUNT + 1, TAB_COUNT = CAT_COUNT + 2;
 struct TabPos {
     bool top;
     int col; // 0..5 from the left; 6 = the right end
@@ -30,6 +34,12 @@ struct TabPos {
 extern const TabPos kTabPos[];
 extern const uint16_t kTabIcons[];
 const char* TabName(int tab); // in the current language
+// the search tab: what is typed (TypeChar / TypeKey) filters every item by its name in the language, or its id
+bool CreativeSearchActive();
+void CreativeSearchType(uint32_t codepoint);
+void CreativeSearchKey(int key);
+const std::string& CreativeSearchText();
+const std::vector<uint16_t>& PaletteItems(); // the items of the open creative tab
 
 void BuildSlots(); // for gGame.screen
 UiSlot* SlotAt(float gx, float gy);

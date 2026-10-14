@@ -303,7 +303,7 @@ int GuiScale() {
 }
 
 void GuiProcessInput() {
-    if (gGame.screen == SCREEN_NONE)
+    if (gGame.screen == SCREEN_NONE || gGame.screen == SCREEN_CHAT)
         return;
     PlaceWindow();
     bool lClick = CPad::NewMouseControllerState.lmb && !CPad::OldMouseControllerState.lmb;
@@ -363,6 +363,7 @@ static void Anchor(const HudPiece& p, int s, float& x, float& y) {
     case AT_BOTTOM: x = (float)(W / 2) + p.x * s; y = (float)H + p.y * s; break;
     case AT_WINDOW: x = gWinX + p.x * s; y = gWinY + p.y * s; break;
     case AT_CURSOR: x = gGame.cursorX + p.x * s; y = gGame.cursorY + p.y * s; break;
+    case AT_BOTTOM_LEFT: x = p.x * s; y = (float)H + p.y * s; break;
     default: x = p.x * s; y = p.y * s; break;
     }
 }
@@ -493,6 +494,7 @@ void GuiDrawHud() {
     f.camera = TheCamera.GetPosition();
     f.playerName = gGta.steve ? "Steve" : "CJ";
     f.aspect = (float)RsGlobal.maximumWidth / std::max(1, RsGlobal.maximumHeight);
+    f.guiW = (float)RsGlobal.maximumWidth / s;
     static std::vector<HudPiece> pieces;
     pieces.clear();
     BuildHud(f, pieces);
@@ -500,7 +502,7 @@ void GuiDrawHud() {
         Paint(p, s);
     if (gGta.hudVisible)
         DrawWantedStars();
-    if (gGta.hudVisible && gGame.screen != SCREEN_NONE)
+    if (gGta.hudVisible && gGame.screen != SCREEN_NONE && gGame.screen != SCREEN_CHAT)
         GuiSprite(GUI_CURSOR, gGame.cursorX, gGame.cursorY, (float)std::max(1, s / 2)); // the mouse pointer
     Flush();
     saved.Restore();

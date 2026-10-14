@@ -2,6 +2,15 @@
 
 All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is in active development (0.x); Turkish release notes for every version are in [OKUBENI.txt](OKUBENI.txt).
 
+## [0.54] - 2026-10-15
+### Added
+- **Chat:** `T` opens it and `/` starts a command. Enter sends; Up brings back what you sent; Tab completes, with suggestions shown above the line.
+- **Commands:**
+  - `/gamemode`, `/time`, `/weather`, `/give`, `/clear`, `/tp`, `/kill`, `/effect`, `/xp`
+  - `/summon`, `/setblock`, `/fill`, `/gamerule`, `/say`, `/help`
+  - `/wanted 0-6` for GTA's police
+- **Creative search tab:** type to filter every item by its name, in English or Turkish, or by its id.
+
 ## [0.53] - 2026-10-15
 ### Changed
 - Steve turns as in Minecraft: walking backwards or sideways he keeps facing where you look. The body follows the walk, at most 50° from the look; the head turns the rest.

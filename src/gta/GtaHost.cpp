@@ -18,6 +18,7 @@
 #include "Carve.h"
 #include "Collision.h"
 #include "Entities.h"
+#include "Game.h"
 #include "GameState.h"
 #include "GtaCombat.h"
 #include "GtaFishing.h"
@@ -167,6 +168,23 @@ struct GtaHost : Host {
     void Douse(const Vec3& at, float radius) override { gFireManager.ExtinguishPoint(at, radius); }
     void Ignite(const Vec3& at, float seconds, int spread) override { GtaIgnite(at, seconds, spread); }
     bool Thunderstorm() override { return CWeather::Rain > 0.1f; }
+    std::string PlayerName() override { return gGta.steve ? "Steve" : "CJ"; }
+    void KillPlayer() override {
+        if (CPlayerPed* ped = FindPlayerPed())
+            ped->m_fHealth = 0.0f;
+    }
+    void SetWeather(int kind) override {
+        // GTA's weathers: sunny, rainy, and the rainy one of San Fierro with its thunder
+        static const short kTypes[3] = { WEATHER_SUNNY_LA, WEATHER_RAINY_COUNTRYSIDE, WEATHER_RAINY_SF };
+        CWeather::ForceWeatherNow(kTypes[std::clamp(kind, 0, 2)]);
+        CWeather::ReleaseWeather(); // (and it goes on from there)
+        if (kind == 0)
+            CWeather::Rain = 0.0f;
+    }
+    void SetWanted(int level) override {
+        if (CPlayerPed* ped = FindPlayerPed())
+            ped->SetWantedLevel(level);
+    }
     float ClockHours() override { return CClock::ms_nGameClockHours + CClock::ms_nGameClockMinutes / 60.0f; }
     void SetClock(float hours, bool nextDay) override {
         const int h = (int)hours, m = (int)((hours - h) * 60.0f);

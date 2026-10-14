@@ -1,5 +1,7 @@
 #include "GameState.h"
 
+#include "Chat.h"
+
 #include "Audio.h"
 #include "Entities.h"
 #include "Host.h"
@@ -15,6 +17,7 @@ void GameTimersTick(float dt) {
     gGame.messageTimer = std::max(0.0f, gGame.messageTimer - dt);
     gGame.selectedNameTimer = std::max(0.0f, gGame.selectedNameTimer - dt);
     gGame.attackTimer += dt;
+    ChatTick(dt);
 }
 
 void ShowMessage(const std::string& text, float seconds) {

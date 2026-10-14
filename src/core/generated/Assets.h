@@ -81,76 +81,77 @@ constexpr GuiRect GUI_WIN_BLAST = { 708, 0, 176, 166 };
 constexpr GuiRect GUI_WIN_CHEST = { 0, 167, 176, 167 };
 constexpr GuiRect GUI_WIN_CREATIVE = { 177, 167, 195, 136 };
 constexpr GuiRect GUI_WIN_CREATIVE_INV = { 373, 167, 195, 136 };
-constexpr GuiRect GUI_HOTBAR = { 569, 167, 182, 22 };
-constexpr GuiRect GUI_SELECTION = { 752, 167, 24, 23 };
-constexpr GuiRect GUI_CROSSHAIR = { 777, 167, 15, 15 };
-constexpr GuiRect GUI_HEART_CONTAINER = { 793, 167, 9, 9 };
-constexpr GuiRect GUI_HEART_FULL = { 803, 167, 9, 9 };
-constexpr GuiRect GUI_HEART_HALF = { 813, 167, 9, 9 };
-constexpr GuiRect GUI_FOOD_EMPTY = { 823, 167, 9, 9 };
-constexpr GuiRect GUI_FOOD_FULL = { 833, 167, 9, 9 };
-constexpr GuiRect GUI_FOOD_HALF = { 843, 167, 9, 9 };
-constexpr GuiRect GUI_ARMOR_EMPTY = { 853, 167, 9, 9 };
-constexpr GuiRect GUI_ARMOR_FULL = { 863, 167, 9, 9 };
-constexpr GuiRect GUI_ARMOR_HALF = { 873, 167, 9, 9 };
-constexpr GuiRect GUI_AIR = { 883, 167, 9, 9 };
-constexpr GuiRect GUI_XP_BG = { 0, 335, 182, 5 };
-constexpr GuiRect GUI_XP_PROGRESS = { 183, 335, 182, 5 };
-constexpr GuiRect GUI_BURN = { 366, 335, 24, 16 };
-constexpr GuiRect GUI_LIT = { 391, 335, 14, 14 };
-constexpr GuiRect GUI_SCROLLER = { 406, 335, 12, 15 };
-constexpr GuiRect GUI_SCROLLER_OFF = { 419, 335, 12, 15 };
-constexpr GuiRect GUI_SLOT_HELMET = { 432, 335, 16, 16 };
-constexpr GuiRect GUI_SLOT_CHESTPLATE = { 449, 335, 16, 16 };
-constexpr GuiRect GUI_SLOT_LEGGINGS = { 466, 335, 16, 16 };
-constexpr GuiRect GUI_SLOT_BOOTS = { 483, 335, 16, 16 };
-constexpr GuiRect GUI_SLOT_SHIELD = { 500, 335, 16, 16 };
-constexpr GuiRect GUI_OFFHAND = { 517, 335, 29, 24 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_1 = { 547, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_1 = { 574, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_1 = { 601, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_1 = { 628, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_2 = { 655, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_2 = { 682, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_2 = { 709, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_2 = { 736, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_3 = { 763, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_3 = { 790, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_3 = { 817, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_3 = { 844, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_4 = { 871, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_4 = { 898, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_4 = { 925, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_4 = { 952, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_5 = { 979, 335, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_5 = { 0, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_5 = { 27, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_5 = { 54, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_6 = { 81, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_6 = { 108, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_6 = { 135, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_6 = { 162, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_SELECTED_7 = { 189, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_TOP_UNSELECTED_7 = { 216, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_7 = { 243, 368, 26, 32 };
-constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_7 = { 270, 368, 26, 32 };
-constexpr GuiRect GUI_HEART_ABSORBING_FULL = { 297, 368, 9, 9 };
-constexpr GuiRect GUI_HEART_ABSORBING_HALF = { 307, 368, 9, 9 };
-constexpr GuiRect GUI_HEART_POISONED_FULL = { 317, 368, 9, 9 };
-constexpr GuiRect GUI_HEART_POISONED_HALF = { 327, 368, 9, 9 };
-constexpr GuiRect GUI_FOOD_EMPTY_HUNGER = { 337, 368, 9, 9 };
-constexpr GuiRect GUI_FOOD_FULL_HUNGER = { 347, 368, 9, 9 };
-constexpr GuiRect GUI_FOOD_HALF_HUNGER = { 357, 368, 9, 9 };
-constexpr GuiRect GUI_AIR_BURSTING = { 367, 368, 9, 9 };
-constexpr GuiRect GUI_EFFECT_BG = { 377, 368, 24, 24 };
-constexpr GuiRect GUI_EFFECT_ABSORPTION = { 402, 368, 18, 18 };
-constexpr GuiRect GUI_EFFECT_REGENERATION = { 421, 368, 18, 18 };
-constexpr GuiRect GUI_EFFECT_FIRE_RESISTANCE = { 440, 368, 18, 18 };
-constexpr GuiRect GUI_EFFECT_RESISTANCE = { 459, 368, 18, 18 };
-constexpr GuiRect GUI_EFFECT_HUNGER = { 478, 368, 18, 18 };
-constexpr GuiRect GUI_EFFECT_POISON = { 497, 368, 18, 18 };
-constexpr GuiRect GUI_CURSOR = { 516, 368, 11, 17 };
-constexpr GuiRect GUI_WHITE = { 528, 368, 4, 4 };
+constexpr GuiRect GUI_WIN_CREATIVE_SEARCH = { 569, 167, 195, 136 };
+constexpr GuiRect GUI_HOTBAR = { 765, 167, 182, 22 };
+constexpr GuiRect GUI_SELECTION = { 948, 167, 24, 23 };
+constexpr GuiRect GUI_CROSSHAIR = { 973, 167, 15, 15 };
+constexpr GuiRect GUI_HEART_CONTAINER = { 989, 167, 9, 9 };
+constexpr GuiRect GUI_HEART_FULL = { 999, 167, 9, 9 };
+constexpr GuiRect GUI_HEART_HALF = { 1009, 167, 9, 9 };
+constexpr GuiRect GUI_FOOD_EMPTY = { 0, 335, 9, 9 };
+constexpr GuiRect GUI_FOOD_FULL = { 10, 335, 9, 9 };
+constexpr GuiRect GUI_FOOD_HALF = { 20, 335, 9, 9 };
+constexpr GuiRect GUI_ARMOR_EMPTY = { 30, 335, 9, 9 };
+constexpr GuiRect GUI_ARMOR_FULL = { 40, 335, 9, 9 };
+constexpr GuiRect GUI_ARMOR_HALF = { 50, 335, 9, 9 };
+constexpr GuiRect GUI_AIR = { 60, 335, 9, 9 };
+constexpr GuiRect GUI_XP_BG = { 70, 335, 182, 5 };
+constexpr GuiRect GUI_XP_PROGRESS = { 253, 335, 182, 5 };
+constexpr GuiRect GUI_BURN = { 436, 335, 24, 16 };
+constexpr GuiRect GUI_LIT = { 461, 335, 14, 14 };
+constexpr GuiRect GUI_SCROLLER = { 476, 335, 12, 15 };
+constexpr GuiRect GUI_SCROLLER_OFF = { 489, 335, 12, 15 };
+constexpr GuiRect GUI_SLOT_HELMET = { 502, 335, 16, 16 };
+constexpr GuiRect GUI_SLOT_CHESTPLATE = { 519, 335, 16, 16 };
+constexpr GuiRect GUI_SLOT_LEGGINGS = { 536, 335, 16, 16 };
+constexpr GuiRect GUI_SLOT_BOOTS = { 553, 335, 16, 16 };
+constexpr GuiRect GUI_SLOT_SHIELD = { 570, 335, 16, 16 };
+constexpr GuiRect GUI_OFFHAND = { 587, 335, 29, 24 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_1 = { 617, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_1 = { 644, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_1 = { 671, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_1 = { 698, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_2 = { 725, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_2 = { 752, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_2 = { 779, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_2 = { 806, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_3 = { 833, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_3 = { 860, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_3 = { 887, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_3 = { 914, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_4 = { 941, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_4 = { 968, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_4 = { 995, 335, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_4 = { 0, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_5 = { 27, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_5 = { 54, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_5 = { 81, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_5 = { 108, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_6 = { 135, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_6 = { 162, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_6 = { 189, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_6 = { 216, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_SELECTED_7 = { 243, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_TOP_UNSELECTED_7 = { 270, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_SELECTED_7 = { 297, 368, 26, 32 };
+constexpr GuiRect GUI_TAB_BOTTOM_UNSELECTED_7 = { 324, 368, 26, 32 };
+constexpr GuiRect GUI_HEART_ABSORBING_FULL = { 351, 368, 9, 9 };
+constexpr GuiRect GUI_HEART_ABSORBING_HALF = { 361, 368, 9, 9 };
+constexpr GuiRect GUI_HEART_POISONED_FULL = { 371, 368, 9, 9 };
+constexpr GuiRect GUI_HEART_POISONED_HALF = { 381, 368, 9, 9 };
+constexpr GuiRect GUI_FOOD_EMPTY_HUNGER = { 391, 368, 9, 9 };
+constexpr GuiRect GUI_FOOD_FULL_HUNGER = { 401, 368, 9, 9 };
+constexpr GuiRect GUI_FOOD_HALF_HUNGER = { 411, 368, 9, 9 };
+constexpr GuiRect GUI_AIR_BURSTING = { 421, 368, 9, 9 };
+constexpr GuiRect GUI_EFFECT_BG = { 431, 368, 24, 24 };
+constexpr GuiRect GUI_EFFECT_ABSORPTION = { 456, 368, 18, 18 };
+constexpr GuiRect GUI_EFFECT_REGENERATION = { 475, 368, 18, 18 };
+constexpr GuiRect GUI_EFFECT_FIRE_RESISTANCE = { 494, 368, 18, 18 };
+constexpr GuiRect GUI_EFFECT_RESISTANCE = { 513, 368, 18, 18 };
+constexpr GuiRect GUI_EFFECT_HUNGER = { 532, 368, 18, 18 };
+constexpr GuiRect GUI_EFFECT_POISON = { 551, 368, 18, 18 };
+constexpr GuiRect GUI_CURSOR = { 570, 368, 11, 17 };
+constexpr GuiRect GUI_WHITE = { 582, 368, 4, 4 };
 
 // average colour (0xRRGGBB) of every block's side texture
 constexpr uint32_t kBlockColor[697] = {
@@ -445,7 +446,7 @@ constexpr GuiRect MENU_FOOTER_SEP = { 760, 264, 32, 2 };
 constexpr GuiRect MENU_JOIN = { 800, 258, 32, 32 };
 constexpr GuiRect MENU_JOIN_HI = { 836, 258, 32, 32 };
 constexpr GuiRect MENU_PACK = { 872, 258, 32, 32 };
-enum Str { STR_SINGLEPLAYER, STR_OPTIONS, STR_QUIT, STR_SELECT_WORLD, STR_PLAY_WORLD, STR_CREATE_WORLD, STR_DELETE, STR_CANCEL, STR_BACK, STR_RETURN_TO_GAME, STR_GAME_MENU, STR_STATS, STR_SURVIVAL, STR_CREATIVE, STR_NEW_WORLD, STR_DELETE_QUESTION, STR_DELETE_WARNING, STR_YOU_DIED, STR_RESPAWN, STR_TITLE_SCREEN, STR_SCORE, STR_DEATH_GENERIC, STR_DEATH_DROWN, STR_DEATH_LAVA, STR_DEATH_FALL, STR_DEATH_FIRE, STR_DEATH_EXPLOSION, STR_DEATH_STARVE, STR_WORLDS, STR_LANGUAGE, STR_LANGUAGE_TITLE, STR_DONE, STR_SET_SPAWN, STR_NO_SLEEP, STR_NOT_SAFE, STR_NO_SPAWN, STR_GAMEMODE_SET, STR_CRAFTING, STR_INVENTORY, STR_TAB_BUILDING, STR_TAB_COLORED, STR_TAB_NATURAL, STR_TAB_FUNCTIONAL, STR_TAB_TOOLS, STR_TAB_COMBAT, STR_TAB_FOOD, STR_TAB_INGREDIENTS, STR_TAB_REDSTONE, STR_TAB_SPAWN_EGGS, STR_TAB_INVENTORY, STR_VILLAGER, STR_FARMER, STR_LIBRARIAN, STR_BUTCHER, STR_CLERIC, STR_ARMORER, STR_COUNT };
+enum Str { STR_SINGLEPLAYER, STR_OPTIONS, STR_QUIT, STR_SELECT_WORLD, STR_PLAY_WORLD, STR_CREATE_WORLD, STR_DELETE, STR_CANCEL, STR_BACK, STR_RETURN_TO_GAME, STR_GAME_MENU, STR_STATS, STR_SURVIVAL, STR_CREATIVE, STR_NEW_WORLD, STR_DELETE_QUESTION, STR_DELETE_WARNING, STR_YOU_DIED, STR_RESPAWN, STR_TITLE_SCREEN, STR_SCORE, STR_DEATH_GENERIC, STR_DEATH_DROWN, STR_DEATH_LAVA, STR_DEATH_FALL, STR_DEATH_FIRE, STR_DEATH_EXPLOSION, STR_DEATH_STARVE, STR_WORLDS, STR_LANGUAGE, STR_LANGUAGE_TITLE, STR_DONE, STR_SET_SPAWN, STR_NO_SLEEP, STR_NOT_SAFE, STR_NO_SPAWN, STR_GAMEMODE_SET, STR_CRAFTING, STR_INVENTORY, STR_TAB_BUILDING, STR_TAB_COLORED, STR_TAB_NATURAL, STR_TAB_FUNCTIONAL, STR_TAB_TOOLS, STR_TAB_COMBAT, STR_TAB_FOOD, STR_TAB_INGREDIENTS, STR_TAB_REDSTONE, STR_TAB_SPAWN_EGGS, STR_TAB_INVENTORY, STR_TAB_SEARCH, STR_VILLAGER, STR_FARMER, STR_LIBRARIAN, STR_BUTCHER, STR_CLERIC, STR_ARMORER, STR_COUNT };
 // [language][text]: English, Turkish
 inline const char* const kStrs[LANG_COUNT][STR_COUNT] = {
     {
@@ -499,6 +500,7 @@ inline const char* const kStrs[LANG_COUNT][STR_COUNT] = {
         "Redstone Blocks",
         "Spawn Eggs",
         "Survival Inventory",
+        "Search Items",
         "Villager",
         "Farmer",
         "Librarian",
@@ -557,6 +559,7 @@ inline const char* const kStrs[LANG_COUNT][STR_COUNT] = {
         "Redstone Bloklar\xC4\xB1",
         "\xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtalar\xC4\xB1",
         "Hayatta Kalma Envanteri",
+        "E\xC5\x9Fya Ara",
         "K\xC3\xB6yl\xC3\xBC",
         "\xC3\x87ift\xC3\xA7i",
         "K\xC3\xBCt\xC3\xBCphaneci",

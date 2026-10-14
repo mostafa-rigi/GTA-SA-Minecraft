@@ -29,6 +29,7 @@ const ActionDef kActions[ACT_COUNT] = {
     { "Toggle Perspective", KEY_F5 },            // ACT_PERSPECTIVE
     { "Switch Game Mode", KEY_F7 },              // ACT_GAME_MODE
     { "Close Screen", KEY_ESCAPE },              // ACT_BACK
+    { "Open Chat", KEY_T },                      // ACT_CHAT
 };
 
 } // namespace mc

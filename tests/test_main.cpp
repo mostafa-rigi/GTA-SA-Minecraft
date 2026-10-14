@@ -22,6 +22,8 @@
 #include "Screens.h"
 #include "Shapes.h"
 #include "Beds.h"
+#include "Chat.h"
+#include "Commands.h"
 #include "Villagers.h"
 #include "Particles.h"
 #include "PlayerAnim.h"
@@ -660,6 +662,11 @@ struct TestHost : Host {
     }
     void Ignite(const Vec3&, float seconds, int) override { fires.push_back(seconds); }
     bool Thunderstorm() override { return storm; }
+    int weather = -1, wanted = -1;
+    bool killed = false;
+    void SetWeather(int kind) override { weather = kind; }
+    void SetWanted(int level) override { wanted = level; }
+    void KillPlayer() override { killed = true; }
     float hours = 12.0f, clockSet = -1.0f;
     bool clockNextDay = false;
     float ClockHours() override { return hours; }
@@ -3806,7 +3813,7 @@ static void TestHud() {
         f.mouseY = -20;
         v.clear();
         BuildHud(f, v);
-        CHECK(CountKind(v, HP_ICON) == CAT_COUNT + 1 && FindSprite(v, GUI_TAB_TOP_SELECTED_1) && CountSprites(v, GUI_TAB_TOP_UNSELECTED_1) == 0,
+        CHECK(CountKind(v, HP_ICON) == TAB_COUNT && FindSprite(v, GUI_TAB_TOP_SELECTED_1) && CountSprites(v, GUI_TAB_TOP_UNSELECTED_1) == 0,
               "creative: every tab with its icon, the first one picked");
         CHECK(CountSprites(v, GUI_SCROLLER) == 1 && FindSprite(v, GUI_SCROLLER)->y == 18.0f, "the scroller at the top");
         CHECK(CountKind(v, HP_TOOLTIP) == 1 && v.back().text == TabName(0), "the tab under the mouse says its name");
@@ -4774,6 +4781,114 @@ static void TestBodyYaw() {
     CHECK(std::fabs(BodyYawStep(1.0f, look, Vec3(0, 0, 0), true, 0.5f)) < 0.05f, "a swing turns it to the look");
 }
 
+static void RunChatLine(const char* line) {
+    OpenChat(line);
+    TypeKey(TK_ENTER);
+}
+
+static void TestChat() {
+    TestHost host;
+    SetHost(&host);
+    CombatStage(host);
+    ChatClear();
+    for (auto& sl : gInv.slots)
+        sl.Clear();
+    gGame.gameMode = MODE_SURVIVAL;
+
+    // typing
+    OpenChat("", 'T');
+    TypeChar('t');
+    CHECK(gGame.screen == SCREEN_CHAT && gChatInput.text.empty() && TextInputActive(), "T opens the chat, without its t");
+    for (char c : std::string("hi"))
+        TypeChar((uint32_t)c);
+    TypeChar(0x15F); // ş
+    TypeKey(TK_BACKSPACE);
+    TypeKey(TK_ENTER);
+    CHECK(gGame.screen == SCREEN_NONE && !gChatLines.empty() && gChatLines.back().text == "<Steve> hi", "Enter sends a message");
+    TypeChar('/');
+    CHECK(gGame.screen == SCREEN_CHAT && gChatInput.text == "/", "/ opens it with a slash");
+    for (char c : std::string("gam"))
+        TypeChar((uint32_t)c);
+    TypeKey(TK_TAB);
+    const std::string first = gChatInput.text;
+    TypeKey(TK_TAB);
+    CHECK(first == "/gamemode" && gChatInput.text == "/gamerule" && ChatSuggestions().empty(), "Tab completes, again: the next one");
+    TypeKey(TK_ESCAPE);
+    CHECK(gGame.screen == SCREEN_NONE, "Escape closes it");
+    ChatPrint(std::string(200, 'w'));
+    bool narrow = true;
+    for (const ChatLine& l : gChatLines)
+        narrow = narrow && GuiTextWidth(l.text) <= kChatWidth;
+    CHECK(narrow && gChatLines.size() >= 4, "long lines wrap at the chat's width");
+
+    // commands
+    RunChatLine("/gamemode creative");
+    CHECK(gGame.gameMode == MODE_CREATIVE && gChatLines.back().text.find("Creative") != std::string::npos, "/gamemode");
+    RunChatLine("/gamemode s");
+    RunChatLine("/give diamond 70");
+    RunChatLine("/give @s minecraft:oak_log");
+    CHECK(gInv.CountOf(ID_DIAMOND) == 70 && gInv.CountOf(ID_OAK_LOG) == 1 && gChatLines.back().color == 0xFFFFFFFF, "/give, in stacks");
+    RunChatLine("/give no_such_thing");
+    CHECK(gChatLines.back().color == kChatError, "an unknown item is an error");
+    RunChatLine("/clear diamond");
+    CHECK(gInv.CountOf(ID_DIAMOND) == 0 && gInv.CountOf(ID_OAK_LOG) == 1, "/clear an item");
+    RunChatLine("/time set night");
+    RunChatLine("/weather thunder");
+    CHECK(host.clockSet == 19.0f && host.weather == 2, "/time set night (19:00), /weather thunder");
+    RunChatLine("/tp 10 20 ~5");
+    CHECK(host.player.x == 10.0f && host.player.y == 20.0f && host.player.z == 16.0f, "/tp, ~ is the player's own (%.1f)", host.player.z);
+    host.player = Vec3(0.5f, 0.5f, 11.0f);
+    RunChatLine("/setblock 2 2 10 stone");
+    RunChatLine("/fill 0 0 12 1 1 12 glass");
+    CHECK(gWorld.GetBlock(2, 2, 10) == ID_STONE && gWorld.GetBlock(1, 1, 12) == ID_GLASS && gWorld.GetBlock(0, 0, 12) == ID_GLASS,
+          "/setblock and /fill");
+    MobsClear();
+    RunChatLine("/summon creeper 3 0 10");
+    CHECK(gMobs.size() == 1 && gMobs[0].kind == MOB_CREEPER, "/summon");
+    RunChatLine("/effect give regeneration 10 1");
+    RunChatLine("/xp add 2 levels");
+    CHECK(HasEffect(EFFECT_REGENERATION) && gSurvival.xpLevel >= 2, "/effect and /xp");
+    RunChatLine("/gamerule keepInventory false");
+    CHECK(!gRules.keepInventory, "/gamerule");
+    RunChatLine("/gamerule keepInventory true");
+    RunChatLine("/wanted 3");
+    RunChatLine("/kill");
+    CHECK(host.wanted == 3 && host.killed, "/wanted (GTA's police), /kill");
+    RunChatLine("/nonsense");
+    CHECK(gChatLines.back().color == kChatError, "an unknown command");
+    OpenChat("");
+    TypeKey(TK_UP);
+    CHECK(gChatInput.text == "/nonsense", "up: what was sent before");
+    TypeKey(TK_ESCAPE);
+    CHECK(ItemByName("minecraft:diamond_sword") == ID_DIAMOND_SWORD && ItemByName("red_bed_head") == 0, "names of things");
+
+    // the creative search
+    OpenScreen(SCREEN_CREATIVE);
+    gGame.creativeTab = TAB_SEARCH;
+    for (char c : std::string("diamond s"))
+        TypeChar((uint32_t)c);
+    const std::vector<uint16_t>& found = PaletteItems();
+    CHECK(TextInputActive() && std::find(found.begin(), found.end(), ID_DIAMOND_SWORD) != found.end() &&
+              std::find(found.begin(), found.end(), ID_STONE) == found.end(),
+          "the search tab finds things by name (%d)", (int)found.size());
+    TypeKey(TK_DELETE);
+    gLanguage = LANG_TR;
+    for (const char* c = "ELMAS KILIÇ"; *c; ++c)
+        TypeChar((unsigned char)*c < 0x80 ? (uint32_t)*c : 0); // ("ELMAS KILI": the Ç's bytes are not characters)
+    TypeChar(0xC7); // Ç
+    const std::vector<uint16_t>& tr = PaletteItems();
+    CHECK(std::find(tr.begin(), tr.end(), ID_DIAMOND_SWORD) != tr.end(), "in Turkish too, whatever the case (%s, %d)",
+          CreativeSearchText().c_str(), (int)tr.size());
+    gLanguage = LANG_EN;
+    TypeKey(TK_DELETE);
+    TypeKey(TK_ESCAPE);
+    CHECK(gGame.screen == SCREEN_NONE, "Escape closes the inventory from the search box");
+    gGame.creativeTab = 0;
+    ChatClear();
+    MobsClear();
+    gWorld.Clear();
+}
+
 static void TestSave() {
     const char* kPath = "mc_tests_world.tmp";
     BlockStage();
@@ -5081,6 +5196,7 @@ int main(int argc, char** argv) {
     TestWarden();
     TestLanguage();
     TestBodyYaw();
+    TestChat();
     TestModels();
     TestPlayerAnim();
     TestRenderers();

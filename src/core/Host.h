@@ -1,4 +1,6 @@
 #pragma once
+
+#include <string>
 // The game Minecraft runs in ("the host"): its own map, its water and weather, and what only it can do. The core
 // asks through this interface; the host registers its answers once with SetHost. Every question has a "there is
 // no such thing here" answer by default, so a host without a map of its own (the offline tests) says nothing.
@@ -71,6 +73,10 @@ struct Host {
     virtual void BreakTarget() {}                                            // gTarget, a thing of the host's, was mined
     // ---- the player, as long as the host keeps him (feet + 1 m; false: there is no player)
     virtual bool PlayerPos(Vec3* pos) { return false; }
+    virtual std::string PlayerName() { return "Steve"; }
+    virtual void KillPlayer() {}                                             // /kill
+    virtual void SetWeather(int kind) {}                                     // /weather: 0 clear, 1 rain, 2 thunder
+    virtual void SetWanted(int level) {}                                     // /wanted: its police, 0..6
     virtual Vec3 PlayerVelocity() { return Vec3(); }                         // m/s (his vehicle's when he sits in one)
     virtual bool PlayerOnGround() { return true; }
     virtual bool PlayerFalling() { return false; }                           // coming down through the air: his blows are critical

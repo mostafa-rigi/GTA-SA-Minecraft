@@ -6,6 +6,7 @@
 #include "CPad.h"
 #include "RenderWare.h"
 
+#include "Chat.h"
 #include "Config.h"
 #include "ModCommon.h"
 
@@ -103,6 +104,55 @@ void PollKeys() {
         gNow[k] = focus && (GetAsyncKeyState(k) & 0x8000) != 0;
     }
     FillControls();
+}
+
+namespace {
+WNDPROC gGameWndProc = nullptr;
+std::vector<std::pair<int, uint32_t>> gTyped; // (an editing key, 0) or (0, a character)
+
+LRESULT CALLBACK TextWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_CHAR) {
+        uint32_t cp = (uint32_t)w;
+        if (!IsWindowUnicode(h) && w >= 0x80) {
+            const char c = (char)w;
+            wchar_t wc = 0;
+            if (MultiByteToWideChar(CP_ACP, 0, &c, 1, &wc, 1) == 1)
+                cp = wc;
+        }
+        gTyped.push_back({ 0, cp });
+        if (TextInputActive())
+            return 0;
+    } else if (TextInputActive() && (m == WM_KEYDOWN || m == WM_SYSKEYDOWN)) {
+        int k = 0;
+        switch (w) {
+        case VK_LEFT: k = TK_LEFT; break;
+        case VK_RIGHT: k = TK_RIGHT; break;
+        case VK_UP: k = TK_UP; break;
+        case VK_DOWN: k = TK_DOWN; break;
+        case VK_HOME: k = TK_HOME; break;
+        case VK_END: k = TK_END; break;
+        case VK_DELETE: k = TK_DELETE; break;
+        }
+        if (k)
+            gTyped.push_back({ k, 0 });
+        if (w != VK_SNAPSHOT && w != VK_F12)
+            return 0; // the game does not see the keys while one types
+    }
+    return CallWindowProcA(gGameWndProc, h, m, w, l);
+}
+} // namespace
+
+void FeedTypedText() {
+    if (!gGameWndProc && RsGlobal.ps && RsGlobal.ps->window)
+        gGameWndProc = (WNDPROC)SetWindowLongPtrA(RsGlobal.ps->window, GWLP_WNDPROC, (LONG_PTR)&TextWndProc);
+    std::vector<std::pair<int, uint32_t>> typed;
+    typed.swap(gTyped);
+    for (const auto& t : typed) {
+        if (t.first)
+            TypeKey(t.first);
+        else
+            TypeChar(t.second);
+    }
 }
 
 void KeepMouseAlive() {

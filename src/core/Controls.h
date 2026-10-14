@@ -37,6 +37,7 @@ enum Action : uint8_t {
     ACT_PERSPECTIVE, // first person / third person from behind / from the front
     ACT_GAME_MODE,   // survival <-> creative
     ACT_BACK,        // closes the screen that is open
+    ACT_CHAT,        // opens the chat
     ACT_COUNT
 };
 
