@@ -200,4 +200,5 @@ All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](h
   - Survival and creative modes and the Minecraft HUD.
   - Mining the GTA map, Steve, animals, villagers and Minecraft weapons.
 
+[0.56]: https://github.com/muki01/GTA-SA-Minecraft/releases/tag/v0.56
 [0.51]: https://github.com/muki01/GTA-SA-Minecraft/releases/tag/v0.51

@@ -72,12 +72,20 @@ The mod uses Minecraft's original textures, sounds, models, recipes and loot tab
 - **Shaped blocks:** stairs, slabs, fences, walls, glass panes, iron bars and beds.
 - **Nearly 900 recipes:** crafting table, 2×2 inventory crafting, furnace, smoker and blast furnace.
 - **Survival:** health, hunger, saturation, XP and levels, armour, fall damage, drowning and burning.
-- **Creative mode:** flying, pick block, and creative tabs laid out and sorted as in Minecraft.
+- **Creative mode:** flying, pick block, and creative tabs laid out and sorted as in Minecraft, with a search tab.
+- **Chat and commands:**
+  - Open the chat with `T`, or start a command with `/`.
+  - Commands: `/gamemode`, `/time`, `/weather`, `/give`, `/tp`, `/summon`, `/setblock`, `/fill`, `/effect`, `/xp`, `/gamerule`, `/kill`, `/clear`.
+  - `/wanted` sets GTA's wanted level.
+  - Tab completes, and `/help` lists everything.
+- **F3 debug screen** with your coordinates, facing and the block you look at. **F1** hides the HUD.
 - **Beds:** sleep through the night and set your respawn point.
 - **Day and night** follow the GTA clock. Monsters come out in the dark.
 - **Minecraft physics** for walking, sprinting, sneaking, jumping and swimming. Water and lava flow; sand and gravel fall; fire spreads.
 - **First- and third-person camera,** with the Minecraft player model (Steve) and armour shown on him.
-- **Minecraft-style menus:** title screen, world list and pause menu.
+- **Minecraft-style menus:**
+  - Title screen with the panorama, world list and pause menu.
+  - An **Options** screen with sliders for FOV, sensitivity, render distance, GUI scale and sounds.
 - **English or Turkish:** every block and item name, menu, tab, message and death screen switches language. English is the default; pick another language with the **Language...** button, as in Minecraft.
 
 ### Mobs and people
@@ -130,6 +138,7 @@ GTA San Andreas/
 └── MinecraftSA/
     ├── atlas.png, entity.png, font.png, gui.png, menu.png
     ├── sounds/*.ogg
+    ├── bass.dll              (the sound library)
     ├── OKUBENI.txt           (full guide in Turkish)
     └── MinecraftSA.ini       (written on first start)
 ```
@@ -195,12 +204,16 @@ build/Release/mc_tests.exe
 | `F7` | survival / creative |
 | `F8` | CJ / Steve |
 | `F9` | GTA radar on / off |
+| `T` | chat (Enter sends, Up: what you sent before, Tab completes) |
+| `/` | chat, starting a command (`/help` lists them) |
+| `F3` | debug screen: coordinates, facing, targeted block |
+| `F1` | hide / show the HUD |
 
 In a car you drive as in GTA. The hotbar, the inventory and right-click items such as food, bow and fireworks still work.
 
 ## Settings
 
-`MinecraftSA/MinecraftSA.ini` in the game folder:
+Most of these can also be changed in the game: **Options...** on the title screen or in the pause menu. They are kept in `MinecraftSA/MinecraftSA.ini` in the game folder:
 
 | Setting | Meaning |
 |---------|---------|
@@ -217,6 +230,8 @@ In a car you drive as in GTA. The hotbar, the inventory and right-click items su
 | `BreakBuildings=1` | buildings and cliffs can be broken into |
 | `MinecraftMenu=1` | Minecraft-style menus |
 | `ShowRadar=1` | GTA radar |
+| `SoundVolume=1.0` | volume of the Minecraft sounds |
+| `MenuBackground=minecraft` | menu background: `minecraft` (the panorama) or `gta` (GTA's artwork) |
 
 ## Project structure
 
@@ -266,6 +281,7 @@ Bug reports, ideas, screenshots and pull requests are welcome. Start with [CONTR
 
 - [plugin-sdk](https://github.com/DK22Pac/plugin-sdk) by DK22Pac and contributors: the GTA SA modding SDK (includes [safetyhook](https://github.com/cursey/safetyhook)).
 - [gta-reversed](https://github.com/gta-reversed/gta-reversed): used as a reference for the GTA SA engine.
+- [BASS](https://www.un4seen.com) by un4seen: the audio library that plays the sounds (`bass.dll`, free for non-commercial use).
 - Minecraft is by Mojang Studios; Grand Theft Auto: San Andreas is by Rockstar Games.
 
 ## License
