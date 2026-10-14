@@ -182,7 +182,7 @@ void RenderPlayerInVehicle(float light) { RenderPlayer(light, true); }
 void RenderFirstPersonHand() {
     CPlayerPed* ped = FindPlayerPed();
     if (!gGta.enabled || !gGta.inWorld || !ped || gGame.cameraMode != CAM_FIRST || !gEntityTex.tex ||
-        ped->m_fHealth <= 0.0f || gGame.spyglass)
+        ped->m_fHealth <= 0.0f || gGame.spyglass || gGame.hideHud)
         return;
     // clear the depth buffer so the hand never pokes into walls (the world is already drawn)
     if (auto* dev = reinterpret_cast<IDirect3DDevice9*>(GetD3DDevice()))

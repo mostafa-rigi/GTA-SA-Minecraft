@@ -5,6 +5,7 @@
 #include "CCamera.h"
 
 #include "CPad.h"
+#include "CTimer.h"
 #include "CPlayerPed.h"
 #include "CSprite2d.h"
 #include "CWanted.h"
@@ -12,6 +13,7 @@
 #include "common.h"
 
 #include "Config.h"
+#include "McMenu.h"
 #include "Game.h"
 #include "Gui2D.h"
 #include "Hud.h"
@@ -495,6 +497,8 @@ void GuiDrawHud() {
     f.playerName = gGta.steve ? "Steve" : "CJ";
     f.aspect = (float)RsGlobal.maximumWidth / std::max(1, RsGlobal.maximumHeight);
     f.guiW = (float)RsGlobal.maximumWidth / s;
+    f.fps = CTimer::game_FPS;
+    f.title = ModTitle();
     static std::vector<HudPiece> pieces;
     pieces.clear();
     BuildHud(f, pieces);

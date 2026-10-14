@@ -169,6 +169,10 @@ void GameKeysTick() {
         ShowMessage(msg);
         gWorld.dirty = true;
     }
+    if (ActionPressed(ACT_DEBUG))
+        gGame.debugScreen = !gGame.debugScreen;
+    if (ActionPressed(ACT_HIDE_HUD))
+        gGame.hideHud = !gGame.hideHud;
     if (ActionPressed(ACT_PERSPECTIVE)) {
         // Minecraft order: first person -> third person back -> third person front
         gGame.cameraMode = gGame.cameraMode == CAM_FIRST ? CAM_THIRD_BACK

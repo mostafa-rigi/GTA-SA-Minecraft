@@ -2,6 +2,14 @@
 
 All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is in active development (0.x); Turkish release notes for every version are in [OKUBENI.txt](OKUBENI.txt).
 
+## [0.56] - 2026-10-15
+### Added
+- **F3 debug screen**, as in Minecraft:
+  - FPS, coordinates and the block you stand on.
+  - Facing, time and game mode.
+  - The block you look at.
+- **F1** hides the HUD and the hand.
+
 ## [0.55] - 2026-10-15
 ### Added
 - An **Options** screen like Minecraft's, with sliders for FOV, sensitivity, render distance, GUI scale and the Minecraft sounds. It also toggles view bobbing, the language, the menu background and GTA's own settings.

@@ -35,6 +35,8 @@ struct GameState {
     bool gliding = false;     // elytra
     bool jumping = false;     // jump / fall in progress
     bool sprinting = false;
+    bool debugScreen = false; // F3
+    bool hideHud = false;     // F1
     bool sneaking = false;  // (a warden does not hear him)
     bool sprintLatch = false; // the sprint key was tapped: keep sprinting until the player stops
     uint32_t ridingMob = 0;   // id of the animal we sit on (0 = none)

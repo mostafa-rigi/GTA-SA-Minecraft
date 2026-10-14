@@ -38,6 +38,8 @@ enum Action : uint8_t {
     ACT_GAME_MODE,   // survival <-> creative
     ACT_BACK,        // closes the screen that is open
     ACT_CHAT,        // opens the chat
+    ACT_DEBUG,       // the debug screen (coordinates...)
+    ACT_HIDE_HUD,    // hides the HUD and the hand
     ACT_COUNT
 };
 

@@ -66,6 +66,8 @@ struct HudFacts {
     const char* playerName = "Steve";
     float aspect = 16.0f / 9.0f; // the screen's width / height
     float guiW = 427.0f;         // the screen's width in GUI pixels
+    float fps = 0.0f;            // (the debug screen)
+    std::string title;           // the mod and its version
 };
 
 // What to draw this frame, in the order to draw it. While a screen is open the host has built its slots (BuildSlots)

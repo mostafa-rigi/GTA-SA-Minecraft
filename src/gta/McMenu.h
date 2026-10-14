@@ -7,5 +7,6 @@ namespace mc {
 
 // hooks into CMenuManager's drawing and input and into the save / delete of a save slot
 void InstallMenuHooks();
+const char* ModTitle(); // "GTA SA Minecraft <version>"
 
 } // namespace mc

@@ -30,6 +30,8 @@ const ActionDef kActions[ACT_COUNT] = {
     { "Switch Game Mode", KEY_F7 },              // ACT_GAME_MODE
     { "Close Screen", KEY_ESCAPE },              // ACT_BACK
     { "Open Chat", KEY_T },                      // ACT_CHAT
+    { "Debug Screen", KEY_F3 },                  // ACT_DEBUG
+    { "Hide HUD", KEY_F1 },                      // ACT_HIDE_HUD
 };
 
 } // namespace mc

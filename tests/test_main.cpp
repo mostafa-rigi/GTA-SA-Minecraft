@@ -4889,6 +4889,31 @@ static void TestChat() {
     gWorld.Clear();
 }
 
+static void TestDebugScreen() {
+    TestHost host;
+    SetHost(&host);
+    host.hasPlayer = true;
+    host.player = Vec3(10.5f, -3.25f, 21.0f);
+    gGame = GameState();
+    gGame.lookDir = Vec3(0, 1, 0);
+    HudFacts f;
+    f.title = "GTA SA Minecraft test";
+    std::vector<HudPiece> v;
+    BuildHud(f, v);
+    CHECK(!FindText(v, "XYZ:") && FindSprite(v, GUI_HOTBAR), "no debug screen at first");
+    gGame.debugScreen = true;
+    v.clear();
+    BuildHud(f, v);
+    const HudPiece* xyz = FindText(v, "XYZ: 10.500 / -3.250 / 20.000");
+    CHECK(xyz && FindText(v, "Facing: north") && FindText(v, "GTA SA Minecraft test"), "F3: where he is (feet) and looks");
+    gGame.debugScreen = false;
+    gGame.hideHud = true;
+    v.clear();
+    BuildHud(f, v);
+    CHECK(!FindSprite(v, GUI_HOTBAR) && !FindSprite(v, GUI_CROSSHAIR), "F1: no HUD");
+    gGame = GameState();
+}
+
 static void TestSave() {
     const char* kPath = "mc_tests_world.tmp";
     BlockStage();
@@ -5197,6 +5222,7 @@ int main(int argc, char** argv) {
     TestLanguage();
     TestBodyYaw();
     TestChat();
+    TestDebugScreen();
     TestModels();
     TestPlayerAnim();
     TestRenderers();

@@ -1,9 +1,13 @@
-GTA San Andreas - Minecraft Modu (surum 0.55)
+GTA San Andreas - Minecraft Modu (surum 0.56)
 ============================================
 Orijinal Minecraft dokulari, sesleri, modelleri, Turkce isimleri ve tarifleri kullanilir:
 410 blok, 390 esya, 543 tarif.
 
-0.55 SURUMUNDE YENILER
+0.56 SURUMUNDE YENILER
+- F3: Minecraft'in hata ayiklama ekrani (Ingilizce, Minecraft'taki gibi): FPS, XYZ koordinatlari (/tp ve /setblock icin), blok, baktigin yon, saat, oyun modu, mob sayisi ve baktigin blogun konumu ve adi.
+- F1: arayuzu ve eli gizler / gosterir (ekran goruntusu icin).
+
+0.55 SURUMUNDE GELENLER
 - MENULER MINECRAFT GIBI: ana menunun arkasinda Minecraft'in panoramasi yavasca donuyor (diger menulerde karartilmis). Ana menu duzeni Minecraft'taki gibi: Tek Oyunculu; altinda yan yana Ayarlar ve Oyundan Cik; solunda dil icin kure simgeli dugme.
 - YENI AYARLAR EKRANI (Minecraft'in Ayarlar'i gibi, kaydiricilarla): Gorus Acisi, Hassasiyet, Gorus Mesafesi (yigin), Arayuz Olcegi, Minecraft Sesleri, Sarsilmayi Goster, Dil, Menu Arka Plani (Minecraft / GTA) ve GTA'nin kendi ayarlari icin "GTA Ayarlari...". Degisiklikler aninda olur ve MinecraftSA.ini'ye kaydedilir.
 - Duraklatma menusu Minecraft duzeninde; Ayarlar artik bu yeni ekrani acar.
@@ -466,6 +470,10 @@ TUSLAR (yaya iken)
   F7                   : Hayatta kalma <-> Yaratici mod
   F8                   : CJ <-> Steve
   F9                   : sol alttaki GTA haritasi (radar) ac / kapat
+  T                    : sohbet (Enter gonder, Esc kapat, yukari ok: onceki, Tab: tamamla)
+  /                    : sohbeti komutla ac (/help komut listesi)
+  F3                   : hata ayiklama ekrani (koordinatlar, yon, baktigin blok)
+  F1                   : arayuzu gizle / goster
   Esc / E              : acik pencereyi kapat
 
 SUDA

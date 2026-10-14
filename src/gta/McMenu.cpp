@@ -230,7 +230,7 @@ void TitlePage() {
     if (Button("", x - 24.0f * s, y, 20.0f * s))
         gPage = PAGE_LANGUAGE;
     ui::Image(gMenuTex, MENU_LANGUAGE_ICON, x - 21.5f * s, y + 2.5f * s, x - 6.5f * s, y + 17.5f * s);
-    ui::Label("GTA SA Minecraft 0.55", 2.0f * s, gF.H - 10.0f * s, s);
+    ui::Label(ModTitle(), 2.0f * s, gF.H - 10.0f * s, s);
     const char* right = Tr("F10: GTA menu", "F10: GTA menüsü");
     ui::Label(right, gF.W - ui::TextW(right, s) - 2.0f * s, gF.H - 10.0f * s, s, ui::Color(200, 200, 200));
 }
@@ -583,6 +583,8 @@ bool __fastcall HookDeleteSlot(void* self, void*, int slot) {
     return ok;
 }
 } // namespace
+
+const char* ModTitle() { return "GTA SA Minecraft 0.56"; }
 
 void InstallMenuHooks() {
     static bool done = false;

@@ -6,6 +6,11 @@
 #include <cstdlib>
 
 #include "Beds.h"
+#include "World.h"
+#include "Host.h"
+#include "Interact.h"
+#include "Mobs.h"
+#include "Entities.h"
 #include "Chat.h"
 #include "BlockRules.h"
 #include "GameState.h"
@@ -213,6 +218,51 @@ void Tab(Pieces& P, int t, bool selected) {
     P.Icon(AT_WINDOW, kTabIcons[t], x + 5, y + (p.top ? 9 : 7));
 }
 
+// F3: Minecraft's debug screen (always in English, as there): where the player is and looks, what he looks at
+void DebugScreen(Pieces& P, const HudFacts& f) {
+    std::vector<std::string> lines;
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%s (%d fps)", f.title.c_str(), (int)(f.fps + 0.5f));
+    lines.push_back(buf);
+    lines.push_back("");
+    Vec3 p;
+    if (TheHost().PlayerPos(&p)) {
+        const Vec3 feet = p - Vec3(0, 0, 1.0f);
+        snprintf(buf, sizeof(buf), "XYZ: %.3f / %.3f / %.3f", feet.x, feet.y, feet.z);
+        lines.push_back(buf);
+        snprintf(buf, sizeof(buf), "Block: %d %d %d", FloorI(feet.x), FloorI(feet.y), FloorI(feet.z));
+        lines.push_back(buf);
+    }
+    const Vec3& d = gGame.lookDir;
+    const char* facing = std::fabs(d.x) > std::fabs(d.y) ? (d.x > 0 ? "east (Towards positive X)" : "west (Towards negative X)")
+                                                        : (d.y > 0 ? "north (Towards positive Y)" : "south (Towards negative Y)");
+    const float yaw = std::atan2(-d.x, d.y) * 180.0f / kPi, pitch = std::asin(Clamp(d.z, -1.0f, 1.0f)) * 180.0f / kPi;
+    snprintf(buf, sizeof(buf), "Facing: %s (%.1f / %.1f)", facing, yaw, pitch);
+    lines.push_back(buf);
+    const float h = TheHost().ClockHours();
+    snprintf(buf, sizeof(buf), "Time: %02d:%02d (%s)", (int)h, (int)((h - (int)h) * 60.0f), gGame.gameMode == MODE_CREATIVE ? "creative" : "survival");
+    lines.push_back(buf);
+    snprintf(buf, sizeof(buf), "Mobs: %d  Drops: %d", (int)gMobs.size(), (int)gDrops.size());
+    lines.push_back(buf);
+    lines.push_back("");
+    if (gTarget.valid && gTarget.voxel) {
+        const Int3& t = gTarget.pos;
+        snprintf(buf, sizeof(buf), "Targeted Block: %d, %d, %d", t.x, t.y, t.z);
+        lines.push_back(buf);
+        lines.push_back(std::string("minecraft:") + Block(gWorld.GetBlock(t.x, t.y, t.z)).key);
+    } else if (gTarget.valid) {
+        lines.push_back("Targeted: GTA's world");
+    }
+    float y = 2.0f;
+    for (const std::string& l : lines) {
+        if (!l.empty()) {
+            P.Fill(AT_TOP_LEFT, 1, y - 1, GuiTextWidth(l) + 2.0f, 9, Argb(80, 80, 80, 144));
+            P.Text(AT_TOP_LEFT, l, 2, y, 0xFFE0E0E0, false, 0);
+        }
+        y += 9.0f;
+    }
+}
+
 // the chat: the last lines at the bottom left above the hotbar (all of them while it is open), the line being typed
 // in a dark bar along the bottom, what a command can go on with above it
 void ChatPieces(Pieces& P, const HudFacts& f) {
@@ -402,12 +452,15 @@ void BuildHud(const HudFacts& f, std::vector<HudPiece>& out) {
         Effects(P);
         if (SleepFade() > 0.0f) // (Minecraft's dark blue)
             P.FillScreen(Argb(0x10, 0x10, 0x20, (int)(SleepFade() * 255.0f)));
-        if (gGame.screen == SCREEN_NONE && gGame.cameraMode != CAM_THIRD_FRONT) {
+        if (gGame.debugScreen)
+            DebugScreen(P, f);
+        if (gGame.screen == SCREEN_NONE && gGame.cameraMode != CAM_THIRD_FRONT && !gGame.hideHud) {
             HudPiece& c = P.Add(HP_SPRITE, AT_CENTRE, -7.5f, -7.5f);
             c.src = GUI_CROSSHAIR;
             c.invert = true;
         }
-        HotbarAndStats(P, f);
+        if (!gGame.hideHud || gGame.screen != SCREEN_NONE)
+            HotbarAndStats(P, f);
         if (gGame.screen != SCREEN_NONE && gGame.screen != SCREEN_CHAT)
             OpenScreenPieces(P, f);
         ChatPieces(P, f);
