@@ -77,7 +77,11 @@ static const char* kDefaultIni =
     "; 1 = GTA buildings, roofs and rocks can be broken into, block by block\r\n"
     "BreakBuildings=1\r\n"
     "; 1 = title screen, world list and pause menu look like Minecraft's. 0 = GTA's own menu\r\n"
-    "MinecraftMenu=1\r\n";
+    "MinecraftMenu=1\r\n"
+    "; volume of the Minecraft sounds, 0.0 - 1.0 (GTA's effects volume counts too)\r\n"
+    "SoundVolume=1.0\r\n"
+    "; background of the Minecraft menus: minecraft = the panorama, gta = GTA's own artwork\r\n"
+    "MenuBackground=minecraft\r\n";
 
 // settings added by newer versions are appended to an existing ini so they can be found and changed
 static void EnsureKey(const char* key, const char* value, const std::string& path, const char* section = "Settings") {
@@ -145,6 +149,14 @@ void LoadConfig() {
         char lang[16];
         GetPrivateProfileStringA("Settings", "Language", "en", lang, sizeof(lang), path.c_str());
         gLanguage = LanguageFromCode(lang);
+    }
+    EnsureKey("SoundVolume", "1.0", path);
+    EnsureKey("MenuBackground", "minecraft", path);
+    c.soundVolume = Clamp(ReadFloat("Settings", "SoundVolume", c.soundVolume, path), 0.0f, 1.0f);
+    {
+        char bg[16];
+        GetPrivateProfileStringA("Settings", "MenuBackground", "minecraft", bg, sizeof(bg), path.c_str());
+        c.gtaMenuBackground = std::string(bg) == "gta";
     }
     EnsureKey("FOV", "70", path);
     EnsureKey("MinecraftControls", "1", path);

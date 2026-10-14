@@ -1290,6 +1290,11 @@ menu_add("FOOTER_SEP", gimg("gui/footer_separator"), 760, 264)
 menu_add("JOIN", gimg("gui/sprites/world_list/join"), 800, 258)
 menu_add("JOIN_HI", gimg("gui/sprites/world_list/join_highlighted"), 836, 258)
 menu_add("PACK", gimg("misc/unknown_pack").resize((32, 32), Image.LANCZOS), 872, 258)
+menu_add("SLIDER", gimg("gui/sprites/widget/slider"), 516, 330)
+menu_add("SLIDER_HI", gimg("gui/sprites/widget/slider_highlighted"), 516, 352)
+menu_add("SLIDER_HANDLE", gimg("gui/sprites/widget/slider_handle"), 720, 330)
+menu_add("SLIDER_HANDLE_HI", gimg("gui/sprites/widget/slider_handle_highlighted"), 730, 330)
+menu_add("LANGUAGE_ICON", gimg("gui/sprites/icon/language"), 740, 330)
 menu.save(os.path.join(OUT, "menu.png"))
 
 # texts of the screens the mod draws itself
@@ -1314,6 +1319,10 @@ MENU_STRINGS = OrderedDict([
     ("TAB_COMBAT", "itemGroup.combat"), ("TAB_FOOD", "itemGroup.foodAndDrink"), ("TAB_INGREDIENTS", "itemGroup.ingredients"),
     ("TAB_REDSTONE", "itemGroup.redstone"), ("TAB_SPAWN_EGGS", "itemGroup.spawnEggs"), ("TAB_INVENTORY", "itemGroup.inventory"),
     ("TAB_SEARCH", "itemGroup.search"),
+    ("OPTIONS_TITLE", "options.title"), ("FOV", "options.fov"), ("FOV_MIN", "options.fov.min"), ("FOV_MAX", "options.fov.max"),
+    ("SENSITIVITY", "options.sensitivity"), ("RENDER_DISTANCE", "options.renderDistance"), ("CHUNKS", "options.chunks"),
+    ("GUI_SCALE", "options.guiScale"), ("GUI_AUTO", "options.guiScale.auto"), ("VIEW_BOBBING", "options.viewBobbing"),
+    ("ON", "options.on"), ("OFF", "options.off"),
     ("VILLAGER", "entity.minecraft.villager.none"), ("FARMER", "entity.minecraft.villager.farmer"),
     ("LIBRARIAN", "entity.minecraft.villager.librarian"), ("BUTCHER", "entity.minecraft.villager.butcher"),
     ("CLERIC", "entity.minecraft.villager.cleric"), ("ARMORER", "entity.minecraft.villager.armorer"),

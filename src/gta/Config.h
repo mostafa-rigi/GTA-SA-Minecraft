@@ -39,6 +39,8 @@ struct Config {
     bool minecraftMenu = true;  // title screen, world list and pause menu drawn the Minecraft way
     bool breakBuildings = true; // GTA buildings can be broken into, block by block
     bool groundHoles = true;   // dug holes are drawn into the GTA ground (needs a stencil buffer)
+    float soundVolume = 1.0f;  // the Minecraft sounds (on top of GTA's own effects volume)
+    bool gtaMenuBackground = false; // the menus on GTA's black artwork instead of Minecraft's panorama
 };
 
 extern Config gConfig;

@@ -25,7 +25,7 @@ enum : int {
     SCR_STATS = 0, SCR_START_GAME = 1, SCR_MAP = 5, SCR_LOAD_GAME = 9, SCR_DELETE_GAME = 10, SCR_LOAD_FIRST_SAVE = 13,
     SCR_DELETE_FINISHED = 14, SCR_OPTIONS = 33, SCR_MAIN_MENU = 34, SCR_QUIT_ASK = 35, SCR_PAUSE = 41
 };
-enum Page { PAGE_HOME, PAGE_WORLDS, PAGE_DELETE, PAGE_LANGUAGE };
+enum Page { PAGE_HOME, PAGE_WORLDS, PAGE_DELETE, PAGE_LANGUAGE, PAGE_OPTIONS };
 
 SafetyHookInline gDrawHook, gInputHook, gSaveHook, gDeleteHook;
 Page gPage = PAGE_HOME;
@@ -71,6 +71,7 @@ bool Active() {
 struct Frame {
     float mx = 0, my = 0;
     bool click = false; // left button went down this frame
+    bool down = false;  // and is held
     float s = 1;        // GUI scale
     float W = 0, H = 0;
 };
@@ -118,6 +119,63 @@ void GtaBackground(int sprite) {
     ui::Linear(false);
 }
 
+// Minecraft's title screen: its panorama turning slowly round (the four sides of the cube scroll by); the other
+// screens darken it
+void Panorama(bool dim) {
+    const float W = gF.W, H = gF.H, side = H, strip = side * 4.0f;
+    const float off = std::fmod(GetTickCount() / 1000.0f * side * 0.02f, strip);
+    ui::Linear(true);
+    for (float x = -off; x < W; x += strip)
+        ui::Image(gMenuTex, MENU_PANORAMA, x, 0.0f, x + strip, H);
+    ui::Linear(false);
+    if (dim)
+        ui::Rect(-1.0f, -1.0f, W + 1.0f, H + 1.0f, ui::Color(0, 0, 0, 110));
+}
+
+void Background(int gtaSprite, bool title) {
+    if (gConfig.gtaMenuBackground)
+        GtaBackground(gtaSprite);
+    else
+        Panorama(!title);
+}
+
+// a Minecraft slider: the bar with its handle at `v` (0..1) and the label in the middle. 1 while it is dragged
+// (v changes), 2 when it is let go
+int gDragging = -1;
+int Slider(int id, const std::string& label, float x, float y, float w, float* v) {
+    const float s = gF.s, h = 20.0f * s;
+    const bool hover = gF.mx >= x && gF.mx < x + w && gF.my >= y && gF.my < y + h;
+    if (hover && gF.click)
+        gDragging = id;
+    int result = 0;
+    if (gDragging == id) {
+        if (gF.down) {
+            *v = Clamp((gF.mx - x - 4.0f * s) / std::max(1.0f, w - 8.0f * s), 0.0f, 1.0f);
+            result = 1;
+        } else {
+            gDragging = -1;
+            result = 2;
+            PlaySfx(SND_CLICK, nullptr, 0.25f);
+        }
+    }
+    const GuiRect& r = hover || gDragging == id ? MENU_SLIDER_HI : MENU_SLIDER;
+    const float half = std::min(w * 0.5f, 100.0f * s);
+    const int px = (int)(half / s);
+    ui::Image(gMenuTex, { r.x, r.y, px, r.h }, x, y, x + half, y + h);
+    ui::Image(gMenuTex, { r.x + r.w - px, r.y, px, r.h }, x + w - half, y, x + w, y + h);
+    if (w > half * 2.0f + 0.5f)
+        ui::Image(gMenuTex, { r.x + 20, r.y, 160, r.h }, x + half, y, x + w - half, y + h);
+    const float hx = x + *v * (w - 8.0f * s);
+    ui::Image(gMenuTex, hover || gDragging == id ? MENU_SLIDER_HANDLE_HI : MENU_SLIDER_HANDLE, hx, y, hx + 8.0f * s, y + h);
+    ui::LabelCentered(label.c_str(), x + w * 0.5f, y + 6.0f * s, s, hover ? ui::Color(255, 255, 160) : 0xFFFFFFFF);
+    return result;
+}
+
+// "Name: value", as both languages write it
+std::string Option(int name, const std::string& value) { return std::string(LangStr(name)) + ": " + value; }
+
+std::string OnOff(bool on) { return LangStr(on ? STR_ON : STR_OFF); }
+
 void TiledDark(float y0, float y1, const GuiRect& tile, int alpha) {
     // menu_background is a dark see-through 16x16 tile: a plain dark veil does the same
     (void)tile;
@@ -146,9 +204,9 @@ void DeleteWorld(int slot) {
 // ---------------------------------------------------------------- pages
 void TitlePage() {
     const float s = gF.s, cx = gF.W * 0.5f;
-    GtaBackground(SPR_BACK8);
+    Background(SPR_BACK8, true);
     // the title: "GTA SA" in the Minecraft logo's stone letters, 256x64 GUI pixels
-    const float lw = 256.0f * s, lh = 64.0f * s, ly = 22.0f * s;
+    const float lw = 256.0f * s, lh = 64.0f * s, ly = 30.0f * s;
     ui::Linear(true);
     ui::Image(gMenuTex, MENU_LOGO, cx - lw * 0.5f, ly, cx + lw * 0.5f, ly + lh);
     ui::Linear(false);
@@ -163,23 +221,23 @@ void TitlePage() {
         gSelected = -1;
         gScroll = 0;
     }
-    y += 24.0f * s;
-    if (Button(LangStr(STR_OPTIONS), x, y, bw))
-        Switch(SCR_OPTIONS);
-    y += 24.0f * s;
-    if (Button(LangStr(STR_LANGUAGE), x, y, bw))
-        gPage = PAGE_LANGUAGE;
-    y += 24.0f * s;
-    if (Button(LangStr(STR_QUIT), x, y, bw))
+    y += 36.0f * s;
+    const float hw = 98.0f * s;
+    if (Button(LangStr(STR_OPTIONS), x, y, hw))
+        gPage = PAGE_OPTIONS;
+    if (Button(LangStr(STR_QUIT), x + bw - hw, y, hw))
         Switch(SCR_QUIT_ASK);
-    ui::Label("GTA SA Minecraft 0.54", 2.0f * s, gF.H - 10.0f * s, s);
+    if (Button("", x - 24.0f * s, y, 20.0f * s))
+        gPage = PAGE_LANGUAGE;
+    ui::Image(gMenuTex, MENU_LANGUAGE_ICON, x - 21.5f * s, y + 2.5f * s, x - 6.5f * s, y + 17.5f * s);
+    ui::Label("GTA SA Minecraft 0.55", 2.0f * s, gF.H - 10.0f * s, s);
     const char* right = Tr("F10: GTA menu", "F10: GTA menüsü");
     ui::Label(right, gF.W - ui::TextW(right, s) - 2.0f * s, gF.H - 10.0f * s, s, ui::Color(200, 200, 200));
 }
 
 void PausePage() {
     const float s = gF.s, cx = gF.W * 0.5f;
-    GtaBackground(SPR_BACK8);
+    Background(SPR_BACK8, false);
     ui::LabelCentered(LangStr(STR_GAME_MENU), cx, 40.0f * s, s);
     const float bw = 204.0f * s, x = cx - bw * 0.5f, hw = 98.0f * s;
     float y = gF.H * 0.25f + 8.0f * s;
@@ -192,16 +250,13 @@ void PausePage() {
         Switch(SCR_MAP);
     y += 24.0f * s;
     if (Button(LangStr(STR_OPTIONS), x, y, hw))
-        Switch(SCR_OPTIONS);
+        gPage = PAGE_OPTIONS;
     if (Button(LangStr(STR_SELECT_WORLD), x + bw - hw, y, hw)) {
         PopulateSlots();
         gPage = PAGE_WORLDS;
         gSelected = -1;
         gScroll = 0;
     }
-    y += 24.0f * s;
-    if (Button(LangStr(STR_LANGUAGE), x, y, bw))
-        gPage = PAGE_LANGUAGE;
     y += 36.0f * s;
     if (Button(LangStr(STR_QUIT), x, y, bw))
         Switch(SCR_QUIT_ASK);
@@ -209,7 +264,7 @@ void PausePage() {
 
 void WorldsPage() {
     const float s = gF.s, cx = gF.W * 0.5f, W = gF.W, H = gF.H;
-    GtaBackground(SPR_BACK2);
+    Background(SPR_BACK2, false);
     const float top = 32.0f * s, bottom = H - 64.0f * s;
     TiledDark(top, bottom, MENU_LIST_BG, 110);
     ui::Image(gMenuTex, MENU_HEADER_SEP, 0, top - 2.0f * s, W, top);
@@ -302,7 +357,7 @@ void WorldsPage() {
 
 void DeletePage() {
     const float s = gF.s, cx = gF.W * 0.5f;
-    GtaBackground(SPR_BACK2);
+    Background(SPR_BACK2, false);
     if (gSelected < 0 || !SlotFilled(gSelected)) {
         gPage = PAGE_WORLDS;
         return;
@@ -330,7 +385,7 @@ void DeletePage() {
 // Minecraft's language list: click one, and everything Minecraft says changes at once (kept in the ini)
 void LanguagePage() {
     const float s = gF.s, cx = gF.W * 0.5f, W = gF.W, H = gF.H;
-    GtaBackground(SPR_BACK2);
+    Background(SPR_BACK2, false);
     const float top = 32.0f * s, bottom = H - 40.0f * s;
     TiledDark(top, bottom, MENU_LIST_BG, 110);
     ui::Image(gMenuTex, MENU_HEADER_SEP, 0, top - 2.0f * s, W, top);
@@ -352,6 +407,99 @@ void LanguagePage() {
         }
     }
     if (Button(LangStr(STR_DONE), cx - 100.0f * s, H - 30.0f * s, 200.0f * s) || KeyPressed(VK_ESCAPE))
+        gPage = PAGE_HOME;
+}
+
+// Minecraft's Options screen: two columns of sliders and buttons; what changes is kept in the ini
+void OptionsPage() {
+    const float s = gF.s, cx = gF.W * 0.5f, H = gF.H;
+    Background(SPR_BACK2, false);
+    ui::LabelCentered(LangStr(STR_OPTIONS_TITLE), cx, 15.0f * s, s);
+    const float cw = 150.0f * s, lx = cx - 155.0f * s, rx = cx + 5.0f * s;
+    float y = H / 6.0f - 12.0f * s;
+    char num[32];
+
+    // field of view: 30..110 (70 Normal, 110 Quake Pro)
+    float fov = (Clamp(gConfig.fov > 0.0f ? gConfig.fov : 70.0f, 30.0f, 110.0f) - 30.0f) / 80.0f;
+    const int fovNow = (int)(30.0f + fov * 80.0f + 0.5f);
+    snprintf(num, sizeof(num), "%d", fovNow);
+    const int f1 = Slider(1, Option(STR_FOV, fovNow == 70 ? LangStr(STR_FOV_MIN) : fovNow == 110 ? LangStr(STR_FOV_MAX) : num), lx, y, cw, &fov);
+    if (f1) {
+        gConfig.fov = (float)(int)(30.0f + fov * 80.0f + 0.5f);
+        if (f1 == 2) {
+            snprintf(num, sizeof(num), "%d", (int)gConfig.fov);
+            SaveConfigValue("Settings", "FOV", num);
+        }
+    }
+    // mouse sensitivity: 10..200 %
+    float sens = Clamp((gConfig.mouseSensitivity - 0.1f) / 1.9f, 0.0f, 1.0f);
+    snprintf(num, sizeof(num), "%d%%", (int)(gConfig.mouseSensitivity * 100.0f + 0.5f));
+    const int f2 = Slider(2, Option(STR_SENSITIVITY, num), rx, y, cw, &sens);
+    if (f2) {
+        gConfig.mouseSensitivity = 0.1f + sens * 1.9f;
+        if (f2 == 2) {
+            snprintf(num, sizeof(num), "%.2f", gConfig.mouseSensitivity);
+            SaveConfigValue("Settings", "MouseSensitivity", num);
+        }
+    }
+    y = H / 6.0f + 24.0f * s;
+    // render distance: 2..25 chunks of 16 m
+    float dist = Clamp((gConfig.renderDistance - 32.0f) / (400.0f - 32.0f), 0.0f, 1.0f);
+    std::string chunks = LangStr(STR_CHUNKS);
+    const size_t at = chunks.find("%s");
+    snprintf(num, sizeof(num), "%d", (int)(gConfig.renderDistance / 16.0f + 0.5f));
+    if (at != std::string::npos)
+        chunks.replace(at, 2, num);
+    const int f3 = Slider(3, Option(STR_RENDER_DISTANCE, chunks), lx, y, cw, &dist);
+    if (f3) {
+        gConfig.renderDistance = 32.0f + std::round(dist * (400.0f - 32.0f) / 16.0f) * 16.0f;
+        if (f3 == 2) {
+            snprintf(num, sizeof(num), "%d", (int)gConfig.renderDistance);
+            SaveConfigValue("Settings", "RenderDistance", num);
+        }
+    }
+    // GUI scale: auto, 1.. as big as the screen allows
+    int maxScale = 1;
+    while (maxScale < 6 && gF.W / (maxScale + 1) >= 320.0f && gF.H / (maxScale + 1) >= 240.0f)
+        maxScale++;
+    snprintf(num, sizeof(num), "%d", gConfig.guiScale);
+    if (Button(Option(STR_GUI_SCALE, gConfig.guiScale == 0 ? LangStr(STR_GUI_AUTO) : num).c_str(), rx, y, cw)) {
+        gConfig.guiScale = gConfig.guiScale >= maxScale ? 0 : gConfig.guiScale + 1;
+        snprintf(num, sizeof(num), "%d", gConfig.guiScale);
+        SaveConfigValue("Settings", "GuiScale", num);
+    }
+    y += 24.0f * s;
+    // the Minecraft sounds' volume
+    float vol = gConfig.soundVolume;
+    snprintf(num, sizeof(num), "%d%%", (int)(vol * 100.0f + 0.5f));
+    const int f4 = Slider(4, std::string(Tr("Minecraft Sounds", "Minecraft Sesleri")) + ": " + (vol <= 0.001f ? LangStr(STR_OFF) : num),
+                          lx, y, cw, &vol);
+    if (f4) {
+        gConfig.soundVolume = std::round(vol * 100.0f) / 100.0f;
+        if (f4 == 2) {
+            snprintf(num, sizeof(num), "%.2f", gConfig.soundVolume);
+            SaveConfigValue("Settings", "SoundVolume", num);
+            PlaySfx(SND_CLICK, nullptr, 0.5f);
+        }
+    }
+    if (Button(Option(STR_VIEW_BOBBING, OnOff(gConfig.viewBobbing)).c_str(), rx, y, cw)) {
+        gConfig.viewBobbing = !gConfig.viewBobbing;
+        SaveConfigValue("Settings", "ViewBobbing", gConfig.viewBobbing ? "1" : "0");
+    }
+    y += 24.0f * s;
+    if (Button(LangStr(STR_LANGUAGE), lx, y, cw))
+        gPage = PAGE_LANGUAGE;
+    const std::string bg = std::string(Tr("Menu Background", "Menü Arka Planı")) + ": " +
+                           (gConfig.gtaMenuBackground ? "GTA" : "Minecraft");
+    if (Button(bg.c_str(), rx, y, cw)) {
+        gConfig.gtaMenuBackground = !gConfig.gtaMenuBackground;
+        SaveConfigValue("Settings", "MenuBackground", gConfig.gtaMenuBackground ? "gta" : "minecraft");
+    }
+    y += 24.0f * s;
+    // GTA's own settings (display, audio, controls) are still GTA's screens
+    if (Button(Tr("GTA Settings...", "GTA Ayarları..."), lx, y, cw))
+        Switch(SCR_OPTIONS);
+    if (Button(LangStr(STR_DONE), cx - 100.0f * s, H / 6.0f + 168.0f * s, 200.0f * s) || KeyPressed(VK_ESCAPE))
         gPage = PAGE_HOME;
 }
 
@@ -383,6 +531,7 @@ void DrawMenu() {
     gF.my = (float)std::clamp(MouseY(), 0, RsGlobal.maximumHeight);
     const bool down = CPad::NewMouseControllerState.lmb != 0;
     gF.click = down && !gMouseWasDown && GetTickCount() - gOpenedAt > 250;
+    gF.down = down;
     gMouseWasDown = down;
 
     ui::Begin();
@@ -390,6 +539,7 @@ void DrawMenu() {
     case PAGE_WORLDS: WorldsPage(); break;
     case PAGE_DELETE: DeletePage(); break;
     case PAGE_LANGUAGE: LanguagePage(); break;
+    case PAGE_OPTIONS: OptionsPage(); break;
     default:
         if (screen == SCR_PAUSE)
             PausePage();

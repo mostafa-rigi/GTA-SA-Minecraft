@@ -1,5 +1,7 @@
 #include "Sound.h"
 
+#include "Config.h"
+
 #include "CCamera.h"
 #include "CMenuManager.h"
 #include "RenderWare.h"
@@ -86,7 +88,7 @@ DWORD Sample(const char* file, bool loop) {
 }
 
 float MasterVolume() {
-    return Clamp((unsigned char)FrontEndMenuManager.m_nPrefsSfxVolume / 64.0f, 0.0f, 1.0f);
+    return Clamp((unsigned char)FrontEndMenuManager.m_nPrefsSfxVolume / 64.0f, 0.0f, 1.0f) * gConfig.soundVolume;
 }
 } // namespace
 

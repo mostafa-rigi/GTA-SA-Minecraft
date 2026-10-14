@@ -1,9 +1,14 @@
-GTA San Andreas - Minecraft Modu (surum 0.54)
+GTA San Andreas - Minecraft Modu (surum 0.55)
 ============================================
 Orijinal Minecraft dokulari, sesleri, modelleri, Turkce isimleri ve tarifleri kullanilir:
 410 blok, 390 esya, 543 tarif.
 
-0.54 SURUMUNDE YENILER
+0.55 SURUMUNDE YENILER
+- MENULER MINECRAFT GIBI: ana menunun arkasinda Minecraft'in panoramasi yavasca donuyor (diger menulerde karartilmis). Ana menu duzeni Minecraft'taki gibi: Tek Oyunculu; altinda yan yana Ayarlar ve Oyundan Cik; solunda dil icin kure simgeli dugme.
+- YENI AYARLAR EKRANI (Minecraft'in Ayarlar'i gibi, kaydiricilarla): Gorus Acisi, Hassasiyet, Gorus Mesafesi (yigin), Arayuz Olcegi, Minecraft Sesleri, Sarsilmayi Goster, Dil, Menu Arka Plani (Minecraft / GTA) ve GTA'nin kendi ayarlari icin "GTA Ayarlari...". Degisiklikler aninda olur ve MinecraftSA.ini'ye kaydedilir.
+- Duraklatma menusu Minecraft duzeninde; Ayarlar artik bu yeni ekrani acar.
+
+0.54 SURUMUNDE GELENLER
 - SOHBET (Minecraft gibi): T ile acilir, / ile dogrudan komut yazilir. Enter gonderir, Esc kapatir, yukari ok onceki yazdiklarini getirir, Tab komutu / esya adini tamamlar (secenekler sohbetin ustunde gorunur). Son satirlar sol altta 10 saniye kalir.
 - KOMUTLAR: /gamemode survival|creative, /time set day|noon|night|midnight|sayi, /time add, /time query, /weather clear|rain|thunder, /give esya [sayi] (orn. /give diamond 64), /clear [esya], /tp x y z (z yukseklik, ~ = bulundugun yer), /kill, /effect give|clear, /xp add sayi [levels], /summon cow|pig|sheep|chicken|creeper|warden [x y z], /setblock x y z blok, /fill x1 y1 z1 x2 y2 z2 blok, /gamerule keepInventory|doMobSpawning|mobGriefing true|false, /say, /help, ve GTA icin /wanted 0-6.
 - YARATICI MODDA ARAMA: sag ustteki yeni "Esya Ara" sekmesi. Yazdikca esyalar adina gore suzulur (secili dilde, Turkce harflerle de; ya da Ingilizce kimligiyle, orn. "oak log"). Delete kutuyu temizler.

@@ -2,6 +2,13 @@
 
 All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is in active development (0.x); Turkish release notes for every version are in [OKUBENI.txt](OKUBENI.txt).
 
+## [0.55] - 2026-10-15
+### Added
+- An **Options** screen like Minecraft's, with sliders for FOV, sensitivity, render distance, GUI scale and the Minecraft sounds. It also toggles view bobbing, the language, the menu background and GTA's own settings.
+### Changed
+- Minecraft's panorama turns behind the title screen; GTA's artwork can be chosen instead.
+- The title screen and the pause menu use Minecraft's layouts. The language button is a globe next to Options.
+
 ## [0.54] - 2026-10-15
 ### Added
 - **Chat:** `T` opens it and `/` starts a command. Enter sends; Up brings back what you sent; Tab completes, with suggestions shown above the line.
