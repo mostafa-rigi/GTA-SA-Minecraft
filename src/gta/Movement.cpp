@@ -19,6 +19,7 @@
 #include "Carve.h"
 #include "Collision.h"
 #include "Config.h"
+#include "PlayerAnim.h"
 #include "Game.h"
 #include "GtaWorld.h"
 #include "Controls.h"
@@ -265,6 +266,8 @@ struct GtaMoveWorld : MoveWorld {
     }
 };
 GtaMoveWorld gMap;
+float gBodyYaw = 0.0f; // Steve's body (a heading)
+bool gBodyYawSet = false;
 
 // moves the player kinematically (creative flight, elytra): the whole body as a box against blocks and the GTA
 // world. Returns true when the feet touched the ground.
@@ -381,7 +384,9 @@ void Controller(float dt, CPlayerPed* ped, bool menuOpen) {
     }
 
     WalkInput in;
-    ReadMoveInput(in.fwd, in.strafe, false); // the stick stays for GTA's walking animation; we snap the position back
+    // CJ: the stick stays for GTA's walking animation (we snap the position back); Steve's legs are ours, and GTA
+    // must not turn him towards where he walks
+    ReadMoveInput(in.fwd, in.strafe, gGta.steve);
     if (menuOpen)
         in.fwd = in.strafe = 0.0f;
     CPad* pad = CPad::GetPad(0);
@@ -420,6 +425,19 @@ void Controller(float dt, CPlayerPed* ped, bool menuOpen) {
             gBody.onGround = true;
             gBody.fallTop = gBody.pos.z;
         }
+    }
+    if (gGta.steve) {
+        // Steve turns as in Minecraft: walking backwards or sideways he keeps facing where he looks
+        const float look = std::atan2(-gGame.lookDir.x, gGame.lookDir.y);
+        if (!gBodyYawSet) {
+            gBodyYaw = ped->m_fHeadingCurrent;
+            gBodyYawSet = true;
+        }
+        gBodyYaw = BodyYawStep(gBodyYaw, look, gBody.vel, gGame.swing >= 0.0f, dt);
+        ped->m_fHeadingCurrent = ped->m_fHeadingGoal = gBodyYaw;
+        ped->SetHeading(gBodyYaw);
+    } else {
+        gBodyYawSet = false;
     }
 
     // what happened on the way: damage, hunger (the sounds were the core's to play)

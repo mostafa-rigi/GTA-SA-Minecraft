@@ -4758,6 +4758,22 @@ static void TestLanguage() {
           "the language codes of the ini, the names of the list");
 }
 
+static void TestBodyYaw() {
+    const float look = 0.0f; // looking north (+y)
+    auto run = [&](Vec3 vel, float body) {
+        for (int i = 0; i < 120; ++i)
+            body = BodyYawStep(body, look, vel, false, 1.0f / 60.0f);
+        return body;
+    };
+    CHECK(std::fabs(run(Vec3(0, -4.3f, 0), 0.0f)) < 0.01f, "walking backwards Steve keeps facing forwards");
+    const float strafe = run(Vec3(4.3f, 0, 0), 0.0f); // east: heading -90 degrees
+    CHECK(strafe < -0.8f && strafe > -0.88f, "sideways the body turns towards it, but only 50 degrees (%.2f)", strafe);
+    CHECK(std::fabs(run(Vec3(0, 4.3f, 0), 1.5f)) < 0.05f, "walking forwards it comes round to the look");
+    const float still = run(Vec3(0, 0, 0), 2.5f);
+    CHECK(std::fabs(still - 0.873f) < 0.01f, "standing, it is dragged within 50 degrees of the head (%.2f)", still);
+    CHECK(std::fabs(BodyYawStep(1.0f, look, Vec3(0, 0, 0), true, 0.5f)) < 0.05f, "a swing turns it to the look");
+}
+
 static void TestSave() {
     const char* kPath = "mc_tests_world.tmp";
     BlockStage();
@@ -5064,6 +5080,7 @@ int main(int argc, char** argv) {
     TestBeds();
     TestWarden();
     TestLanguage();
+    TestBodyYaw();
     TestModels();
     TestPlayerAnim();
     TestRenderers();

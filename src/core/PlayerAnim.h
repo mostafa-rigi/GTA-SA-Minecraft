@@ -21,6 +21,10 @@ void PlayerAnimTick(float dt, const PlayerMotion* m); // nullptr: there is no pl
 float SwimPose();   // 0 upright .. 1 swimming flat
 float ElytraDive(); // how far the elytra are spread while gliding (1 = open)
 int HeldItemTile(uint16_t id); // sprite shown instead of the item's own one, -1 = none
+// LivingEntity.tickHeadTurn: where the body faces (a heading: forward = (-sin, cos)). It turns towards where the
+// player walks, but walking backwards it faces forwards, and it never gets more than 50 degrees from where he looks
+// (the head turns the rest); a swing turns it to the look.
+float BodyYawStep(float body, float look, const Vec3& velocity, bool swinging, float dt);
 // LivingEntityRenderer: dead for `seconds`, the body tips over onto its side
 void DeathTilt(float seconds, Vec3& right, Vec3& up);
 // what DrawPlayerFull needs besides the body's place (right / fwd: its axes): animation, items, armour, hurt flash

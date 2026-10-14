@@ -135,6 +135,25 @@ void PlayerAnimTick(float dt, const PlayerMotion* m) {
     gGame.fovMod += (fovTarget - gGame.fovMod) * Clamp(dt * 10.0f, 0.0f, 1.0f);
 }
 
+float BodyYawStep(float body, float look, const Vec3& velocity, bool swinging, float dt) {
+    auto wrap = [](float a) { return std::remainder(a, 2.0f * kPi); };
+    float target = body;
+    if (velocity.x * velocity.x + velocity.y * velocity.y > 1.0f) { // (Minecraft: more than 0.05 blocks a tick)
+        target = std::atan2(-velocity.x, velocity.y);
+        const float off = std::fabs(wrap(look - target));
+        if (off > 95.0f * kPi / 180.0f)
+            target += kPi; // walking backwards: the body faces forwards
+    }
+    if (swinging)
+        target = look;
+    body += wrap(target - body) * (1.0f - std::pow(0.7f, dt * 20.0f)); // 30% a tick
+    const float limit = 50.0f * kPi / 180.0f;
+    const float d = wrap(look - body);
+    if (std::fabs(d) > limit)
+        body += d - (d > 0.0f ? limit : -limit);
+    return wrap(body);
+}
+
 void DeathTilt(float seconds, Vec3& right, Vec3& up) {
     float f = std::min(1.0f, std::sqrt(std::max(0.0f, seconds) * 1.6f));
     float a = f * (kPi / 2.0f);

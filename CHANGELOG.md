@@ -2,6 +2,10 @@
 
 All notable changes to GTA SA Minecraft. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is in active development (0.x); Turkish release notes for every version are in [OKUBENI.txt](OKUBENI.txt).
 
+## [0.53] - 2026-10-15
+### Changed
+- Steve turns as in Minecraft: walking backwards or sideways he keeps facing where you look. The body follows the walk, at most 50° from the look; the head turns the rest.
+
 ## [0.52] - 2026-10-15
 ### Fixed
 - The camera no longer stops turning after the pause menu or after switching to another window. The mouse is re-created whenever the game comes back.
