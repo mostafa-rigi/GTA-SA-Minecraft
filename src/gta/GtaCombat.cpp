@@ -306,6 +306,24 @@ void GtaPushBeing(int being, const CVector& velocity) {
         p->m_vecMoveSpeed += velocity * (1.0f / 50.0f); // GTA keeps it per 1/50 s
 }
 
+// Host::NearbyBeings: the people on foot near a point, so the core's monsters can go for them too
+void GtaNearbyBeings(const CVector& centre, float radius, std::vector<BeingInfo>& out) {
+    CPlayerPed* self = FindPlayerPed();
+    if (auto* pool = CPools::ms_pPedPool)
+        for (int i = 0; i < pool->m_nSize; ++i) {
+            CPed* p = pool->GetAt(i);
+            if (!p || p == self || p->bInVehicle || p->m_fHealth <= 0.0f)
+                continue;
+            CVector pos = p->GetPosition();
+            if ((pos - centre).Magnitude() > radius)
+                continue;
+            BeingInfo info;
+            info.being = CPools::GetPedRef(p);
+            info.pos = pos;
+            out.push_back(info);
+        }
+}
+
 void GtaHurtVehicle(int vehicle, float halfHearts) {
     CVehicle* v = VehFromRef(vehicle);
     if (v && v->m_fHealth > 0.0f)

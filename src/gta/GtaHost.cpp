@@ -139,6 +139,9 @@ struct GtaHost : Host {
     }
     void HurtBeing(int being, float halfHearts, int how, const ShotOwner* by) override { GtaHurtBeing(being, halfHearts, how, by); }
     void PushBeing(int being, const Vec3& velocity) override { GtaPushBeing(being, velocity); }
+    void NearbyBeings(const Vec3& centre, float radius, std::vector<BeingInfo>& out) override {
+        GtaNearbyBeings(centre, radius, out);
+    }
     void HurtVehicle(int vehicle, float halfHearts) override { GtaHurtVehicle(vehicle, halfHearts); }
     HostHit BeingTrace(const Vec3& origin, const Vec3& dir, float reach) override {
         HostHit h;

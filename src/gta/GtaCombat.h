@@ -15,6 +15,7 @@ HostHit GtaBlowTrace(const CVector& origin, const CVector& dir, float reach);
 HostHit GtaShotTrace(const CVector& from, const CVector& dir, float len, const ShotOwner& by);
 void GtaHurtBeing(int being, float halfHearts, int how, const ShotOwner* by);
 void GtaPushBeing(int being, const CVector& velocity);
+void GtaNearbyBeings(const CVector& centre, float radius, std::vector<BeingInfo>& out);
 void GtaHurtVehicle(int vehicle, float halfHearts);
 void GtaGust(const CVector& centre, float radius, float side, float up, bool playerToo);
 void GtaIgnite(const CVector& at, float seconds, int spread);

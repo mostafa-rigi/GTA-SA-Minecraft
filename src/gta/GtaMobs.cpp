@@ -84,7 +84,10 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     if (gGta.enabled)
         MobsSpawnTick(dt, playerPos);
     CarsHitMobs();
-    MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle);
+    std::vector<BeingInfo> beings; // the people around the player: the monsters may go for them too
+    if (gGta.enabled)
+        TheHost().NearbyBeings(playerPos, 20.0f, beings);
+    MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle, &beings);
 }
 
 void MobsRender(float light) {
