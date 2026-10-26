@@ -36,3 +36,4 @@ jobs:
             name: MinecraftSA-asi
             path: build\Release\MinecraftSA.asi
             if-no-files-found: error
+
