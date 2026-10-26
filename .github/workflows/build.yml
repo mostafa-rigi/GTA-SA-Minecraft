@@ -30,10 +30,10 @@ jobs:
 
       - name: Build the mod
         run: cmake --build build --config Release --target MinecraftSA
-        - name: Upload the built mod
-          uses: actions/upload-artifact@v4
-          with:
-            name: MinecraftSA-asi
-            path: build\Release\MinecraftSA.asi
-            if-no-files-found: error
 
+      - name: Upload the built mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftSA-asi
+          path: build\Release\MinecraftSA.asi
+          if-no-files-found: error
