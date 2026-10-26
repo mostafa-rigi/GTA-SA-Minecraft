@@ -7,6 +7,8 @@
 
 namespace mc {
 
+struct BeingInfo; // Host.h: one of the host's own people near a point
+
 enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_KIND_COUNT };
 
 struct Mob {
@@ -70,7 +72,8 @@ struct MobHit {
 // now and then a small herd appears somewhere around the player (when the game rules and the host allow it)
 void MobsSpawnTick(float dt, const Vec3& playerPos);
 // One frame of every animal. playerHeld: what the player holds out (food they follow), 0 for nothing.
-void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot);
+// beings: the host's own people near the player this frame (nullptr: none known); monsters may go for them too.
+void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot, const std::vector<BeingInfo>* beings = nullptr);
 void MobsClear();
 // kind: MOB_*. Returns the index or -1.
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby = false);

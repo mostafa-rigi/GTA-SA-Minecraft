@@ -36,6 +36,12 @@ struct HostHit {
     Vec3 beingPoint;
 };
 
+// One of the host's own people near a point: his number, and where he is.
+struct BeingInfo {
+    int being = -1; // the host's number for him
+    Vec3 pos;       // where he is (his middle, like the player's position)
+};
+
 // Whose shot it is, in the host's own numbers.
 struct ShotOwner {
     bool hostile = false; // not the player's: it can hit him
@@ -92,6 +98,7 @@ struct Host {
     virtual void PushBeing(int being, const Vec3& velocity) {}               // m/s added to somebody on foot
     virtual HostHit BeingTrace(const Vec3& origin, const Vec3& dir, float reach) { return HostHit(); } // people only
     virtual bool UseOnBeing(int being) { return false; }                     // the use button on him (a villager trades)
+    virtual void NearbyBeings(const Vec3& centre, float radius, std::vector<BeingInfo>& out) {} // its people near a point
     virtual void HurtVehicle(int vehicle, float halfHearts) {}
     // ---- the fishing hook
     virtual HostHit HookTrace(const Vec3& from, const Vec3& dir, float len) { return HostHit(); } // in the way of the flying hook
