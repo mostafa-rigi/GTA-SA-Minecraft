@@ -1972,6 +1972,94 @@ static int CountParticles(uint16_t tile) {
     return n;
 }
 
+// the three new monsters of feature 2: a zombie, a skeleton and a spider, each with its own brain
+static void RunMobsB(float seconds, const Vec3& player, const std::vector<BeingInfo>* beings) {
+    const float dt = 0.05f;
+    for (float t = 0.0f; t < seconds; t += dt)
+        MobsTick(dt, player, 0, true, beings);
+}
+
+static void TestNewMobs() {
+    TestHost host;
+    SetHost(&host);
+    srand(777);
+    const Vec3 player(0.5f, 0.5f, 11.0f); // his middle; his feet stand at z = 10
+
+    // what they are
+    {
+        MobStage();
+        host.dark = true;
+        const int z = SpawnMob(MOB_ZOMBIE, Vec3(3.5f, 0.5f, 10.0f), true);
+        const int s = SpawnMob(MOB_SKELETON, Vec3(-3.5f, 0.5f, 10.0f), true);
+        const int sp = SpawnMob(MOB_SPIDER, Vec3(0.5f, 4.5f, 10.0f), true);
+        CHECK(gMobs[z].health == 20.0f && IsMonster(MOB_ZOMBIE) && Near(MobHeight(gMobs[z]), 1.95f), "a zombie has twenty half hearts");
+        CHECK(gMobs[s].health == 20.0f && IsMonster(MOB_SKELETON), "a skeleton has twenty half hearts");
+        CHECK(gMobs[sp].health == 16.0f && IsMonster(MOB_SPIDER) && Near(MobWidth(gMobs[sp]), 1.4f), "a spider has sixteen half hearts and is 1.4 wide");
+        CHECK(Item(ID_ZOMBIE_SPAWN_EGG).special == SP_EGG_ZOMBIE && Item(ID_SKELETON_SPAWN_EGG).special == SP_EGG_SKELETON &&
+                  Item(ID_SPIDER_SPAWN_EGG).special == SP_EGG_SPIDER,
+              "each of them has its own spawn egg");
+    }
+    // the zombie walks at the player and beats on him
+    {
+        MobStage();
+        host.dark = true;
+        host.playerHurt = 0.0f;
+        SpawnMob(MOB_ZOMBIE, Vec3(6.5f, 0.5f, 10.0f), true);
+        RunMobsB(4.0f, player, nullptr);
+        CHECK(gMobs.size() == 1 && gMobs[0].pos.x < 3.0f, "the zombie walks at the player");
+        RunMobsB(4.0f, player, nullptr);
+        CHECK(host.playerHurt >= 3.0f, "and beats on him, three half hearts a blow");
+    }
+    // and at one of the host's own people, down the same road as step 1
+    {
+        MobStage();
+        host.dark = true;
+        host.people.clear();
+        TestHost::Person p;
+        p.centre = Vec3(-4.5f, 0.5f, 11.0f);
+        host.people.push_back(p);
+        const std::vector<BeingInfo> beings = { BeingInfo{ 0, p.centre } };
+        SpawnMob(MOB_ZOMBIE, Vec3(0.5f, 0.5f, 10.0f), true);
+        RunMobsB(6.0f, Vec3(0.5f, 11.5f, 11.0f), &beings);
+        CHECK(host.people[0].hurt >= 3.0f, "the zombie beats on the host's people too");
+    }
+    // the skeleton keeps its distance and looses real arrows
+    {
+        MobStage();
+        host.dark = true;
+        gProjectiles.clear();
+        SpawnMob(MOB_SKELETON, Vec3(8.5f, 0.5f, 10.0f), true);
+        RunMobsB(3.0f, player, nullptr);
+        bool arrow = false;
+        for (const Projectile& pr : gProjectiles)
+            if (pr.type == PJ_ARROW && pr.hostile)
+                arrow = true;
+        CHECK(arrow, "the skeleton looses real hostile arrows");
+        CHECK(gMobs.size() == 1 && gMobs[0].pos.x > 5.0f, "and keeps its distance instead of charging in");
+    }
+    // the spider runs its prey down and bites
+    {
+        MobStage();
+        host.dark = true;
+        host.playerHurt = 0.0f;
+        SpawnMob(MOB_SPIDER, Vec3(9.5f, 0.5f, 10.0f), true);
+        RunMobsB(3.0f, player, nullptr);
+        CHECK(gMobs.size() == 1 && gMobs[0].pos.x < 4.0f, "the spider closes in fast");
+        RunMobsB(3.0f, player, nullptr);
+        CHECK(host.playerHurt >= 2.0f, "and bites, two half hearts a bite");
+    }
+    // daylight burns a zombie up
+    {
+        MobStage();
+        host.dark = false;
+        host.outdoors = true;
+        SpawnMob(MOB_ZOMBIE, Vec3(3.5f, 0.5f, 10.0f), true);
+        RunMobsB(4.0f, Vec3(30.5f, 0.5f, 11.0f), nullptr); // the player is far away: it just stands there and burns
+        CHECK(gMobs.size() == 1 && gMobs[0].health < 20.0f, "a zombie burns in daylight");
+        CHECK(gMobs[0].burn > 0.0f, "and is on fire while it does");
+    }
+}
+
 static void TestMobs() {
     TestHost host;
     SetHost(&host);
@@ -4405,7 +4493,7 @@ static void TestCreeper() {
             MobsSpawnTick(0.5f, player);
         bool creepers = !gMobs.empty();
         for (const Mob& m : gMobs)
-            creepers = creepers && m.kind == MOB_CREEPER && !m.persistent;
+            creepers = creepers && IsMonster(m.kind) && !m.persistent;
         CHECK(creepers && gMobs.size() == 4, "at night they come out, four at most (%d)", (int)gMobs.size());
         gRules.monsters = false;
         MobsClear();
@@ -5207,6 +5295,7 @@ int main(int argc, char** argv) {
     TestEntities();
     TestInteract();
     TestMobs();
+    TestNewMobs();
     TestCreeper();
     TestCombat();
     TestFishing();

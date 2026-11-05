@@ -798,6 +798,66 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
         McCube(Part(bone, 5.9f, -13, 0, cs * f, 0, 0), -2.9f, 0, -3, 6, 13, 6, 76, 76, st);
         break;
     }
+    case MOB_ZOMBIE: {
+        // ZombieModel (64 x 64): a Steve-shaped corpse, both arms stretched out in front the way zombies hold them;
+        // a blow (a.attack) chops the arms down
+        st.tex = ENT_ZOMBIE;
+        const float chop = std::sin(Clamp(a.attack, 0.0f, 1.0f) * kPi) * 0.55f;
+        const float armRx = -kPi / 2.0f + chop;
+        McCube(Part(base, 0, 8, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
+        McCube(Part(base, 0, 8, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
+        McCube(Part(base, -6, 10, 0, armRx, 0, 0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st);
+        McCube(Part(base, 6, 10, 0, armRx, 0, -0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st, 0.0f, true);
+        McCube(Part(base, -2, 20, 0, legA, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st);
+        McCube(Part(base, 2, 20, 0, legB, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st, 0.0f, true);
+        break;
+    }
+    case MOB_SKELETON: {
+        // SkeletonModel (64 x 64): the same frame as a man's, but the limbs are bare 2 px bone; while it aims and
+        // just after it looses (a.attack) both arms come up with a plain brown bow in the right hand
+        st.tex = ENT_SKELETON;
+        const float aim = Clamp(a.attack * 2.0f, 0.0f, 1.0f);
+        const float armRx = -kPi / 2.0f * aim;
+        McCube(Part(base, 0, 8, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
+        McCube(Part(base, 0, 8, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
+        McCube(Part(base, -5, 10, 0, armRx + legB * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st);
+        McCube(Part(base, 5, 10, 0, armRx + legA * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st, 0.0f, true);
+        McCube(Part(base, -2, 20, 0, legA, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st);
+        McCube(Part(base, 2, 20, 0, legB, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st, 0.0f, true);
+        // the bow: two bent limbs and a string, flat brown and grey (no bow lives on the entity sheet)
+        ModelStyle bow = st;
+        bow.untextured = true;
+        bow.r *= 0.45f; bow.g *= 0.32f; bow.b *= 0.18f;
+        const Pose hand = aim > 0.02f ? Part(base, -5, 10, -12) : Part(base, -5, 21, -1);
+        McCube(hand, -0.5f, -6, 0, 1, 5, 1, 0, 0, bow);
+        McCube(hand, -0.5f, 1, 0, 1, 5, 1, 0, 0, bow);
+        ModelStyle str = st;
+        str.untextured = true;
+        str.r *= 0.8f; str.g *= 0.8f; str.b *= 0.8f;
+        McCube(hand, 0.3f, -5, 0.4f, 0.4f, 10, 0.4f, 0, 0, str);
+        break;
+    }
+    case MOB_SPIDER: {
+        // SpiderModel (64 x 32): a low two-part body on eight long legs that step in turn; the red eyes are in the
+        // texture's face, the way Minecraft's own spider wears them
+        st.tex = ENT_SPIDER;
+        Pose head = Part(base, 0, 7, -5, a.headPitch * 0.5f, a.headYaw * 0.5f, 0);
+        McCube(head, -4, -4, -4, 8, 8, 8, 32, 0, st);
+        McCube(Part(base, 0, 7, 5), -5, -4, -5, 10, 8, 10, 0, 0, st);
+        for (int side = 0; side < 2; side++) {
+            const float s = side == 0 ? 1.0f : -1.0f;
+            for (int i = 0; i < 4; i++) {
+                const float z = -6.0f + (float)i * 4.0f;
+                const float fan = ((float)i - 1.5f) * 0.16f;
+                const float step = std::sin(sw * 0.9f + (float)(i + side * 2) * 1.7f) * 0.3f * am;
+                if (s > 0.0f)
+                    McCube(Part(base, 5, 8, z, 0, fan + step, 0.5f), 0, -1, -1, 16, 2, 2, 0, 20, st);
+                else
+                    McCube(Part(base, -5, 8, z, 0, -fan - step, -0.5f), -16, -1, -1, 16, 2, 2, 0, 20, st);
+            }
+        }
+        break;
+    }
     case MOB_PIG: {
         st.tex = ENT_PIG;
         Pose head = Part(base, 0, 12, -6, a.headPitch, a.headYaw, 0);

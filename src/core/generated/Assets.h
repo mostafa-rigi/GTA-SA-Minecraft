@@ -639,6 +639,9 @@ constexpr GuiRect ENT_XP_ORB = { 448, 160, 64, 64 };
 constexpr GuiRect ENT_TRIDENT = { 0, 224, 32, 32 };
 constexpr GuiRect ENT_CREEPER = { 32, 224, 64, 32 };
 constexpr GuiRect ENT_WARDEN = { 96, 224, 128, 128 };
+constexpr GuiRect ENT_ZOMBIE = { 256, 256, 64, 64 };
+constexpr GuiRect ENT_SKELETON = { 320, 256, 64, 64 };
+constexpr GuiRect ENT_SPIDER = { 384, 256, 64, 32 };
 
 // armour materials: item keys start with these names
 constexpr int NUM_ARMOR_MATS = 7;

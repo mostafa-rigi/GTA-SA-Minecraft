@@ -6,7 +6,7 @@ namespace mc {
 
 constexpr int NUM_BLOCKS = 697; // including air (0)
 constexpr int FIRST_ITEM = 1024;
-constexpr int ITEM_END = 1416;
+constexpr int ITEM_END = 1419;
 
 constexpr uint16_t ID_AIR = 0;
 constexpr uint16_t ID_ACACIA_LEAVES = 1;
@@ -1097,6 +1097,9 @@ constexpr uint16_t ID_YELLOW_DYE = 1412;
 constexpr uint16_t ID_YELLOW_HARNESS = 1413;
 constexpr uint16_t ID_CREEPER_SPAWN_EGG = 1414;
 constexpr uint16_t ID_WARDEN_SPAWN_EGG = 1415;
+constexpr uint16_t ID_ZOMBIE_SPAWN_EGG = 1416;
+constexpr uint16_t ID_SKELETON_SPAWN_EGG = 1417;
+constexpr uint16_t ID_SPIDER_SPAWN_EGG = 1418;
 
 enum SoundEvent : uint16_t {
     SND_DIG_STONE,

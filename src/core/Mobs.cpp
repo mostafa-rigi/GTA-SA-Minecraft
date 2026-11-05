@@ -29,6 +29,10 @@ const MobType kTypes[MOB_KIND_COUNT] = {
       { ID_WHEAT_SEEDS, ID_MELON_SEEDS, ID_PUMPKIN_SEEDS } },
     { 0.6f, 1.7f, 20.0f, 1.2f, 2.6f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
     { 0.9f, 2.9f, 500.0f, 1.6f, 5.0f, SND_WARDEN_AMBIENT, SND_WARDEN_HURT, SND_WARDEN_DEATH, { 0, 0, 0 }, true },
+    // zombie, skeleton, spider: their own voices are not in the generated sound table, so the nearest voices stand in
+    { 0.6f, 1.95f, 20.0f, 1.1f, 2.3f, SND_PILLAGER_SAY, SND_PILLAGER_HURT, SND_PILLAGER_DEATH, { 0, 0, 0 }, true },
+    { 0.6f, 1.9f, 20.0f, 1.25f, 2.5f, SND_VILLAGER_SAY, SND_VILLAGER_HURT, SND_VILLAGER_DEATH, { 0, 0, 0 }, true },
+    { 1.4f, 0.9f, 16.0f, 1.6f, 3.4f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
@@ -126,6 +130,18 @@ void DropLoot(const Mob& m) {
     case MOB_WARDEN:
         drop(ID_SCULK_CATALYST, 1, 1);
         break;
+    case MOB_ZOMBIE:
+        drop(ID_ROTTEN_FLESH, 0, 2);
+        break;
+    case MOB_SKELETON:
+        drop(ID_BONE, 0, 2);
+        drop(ID_ARROW, 0, 2);
+        break;
+    case MOB_SPIDER:
+        drop(ID_STRING, 0, 2);
+        if (Rand01() < 0.33f)
+            drop(ID_SPIDER_EYE, 1, 1);
+        break;
     }
 }
 
@@ -162,8 +178,14 @@ void MoveMob(Mob& m, float dt) {
     if (blocked) {
         np.x = m.pos.x;
         np.y = m.pos.y;
-        m.vel.x *= 0.3f;
-        m.vel.y *= 0.3f;
+        if (m.kind == MOB_SPIDER && m.moving && m.death < 0.0f) {
+            // a spider does not stop at a wall: it climbs it, a few metres a second, until it is over the top
+            m.vel.z = std::max(m.vel.z, 4.2f);
+            m.onGround = false;
+        } else {
+            m.vel.x *= 0.3f;
+            m.vel.y *= 0.3f;
+        }
         if (m.aiTimer > 0.4f)
             m.aiTimer = 0.4f; // think again soon
     }
@@ -439,6 +461,155 @@ bool WardenBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     return true;
 }
 
+// Who a hunting monster goes for this tick: the player (in survival, alive), or the nearest of the host's own
+// people — whichever is nearer, exactly as the creeper's fuse and the warden's brain pick between them. Sets
+// m.huntBeing and hands back the prey's feet and middle (host positions are a man's middle: feet are 1 m lower).
+bool PickPrey(Mob& m, const Vec3& playerPos, const std::vector<BeingInfo>* beings, float range, Vec3* feet, Vec3* mid,
+              float* dist) {
+    bool have = false;
+    float best = range;
+    if (gGame.gameMode == MODE_SURVIVAL && gGame.deathTime < 0.0f) {
+        const Vec3 f = playerPos - Vec3(0, 0, 1.0f);
+        const float d = (f - m.pos).Length();
+        if (d < best) {
+            best = d;
+            *feet = f;
+            *mid = playerPos;
+            m.huntBeing = -1;
+            have = true;
+        }
+    }
+    if (beings)
+        for (const BeingInfo& b : *beings) {
+            const Vec3 f = b.pos - Vec3(0, 0, 1.0f);
+            const float d = (f - m.pos).Length();
+            if (d < best) {
+                best = d;
+                *feet = f;
+                *mid = b.pos;
+                m.huntBeing = b.being;
+                have = true;
+            }
+        }
+    if (have)
+        *dist = best;
+    return have;
+}
+
+// A blow at the prey PickPrey picked: one of the host's people takes it through the bridge, the player directly.
+void StrikePrey(Mob& m, const Vec3& dirFlat, float halfHearts, float push) {
+    Host& host = TheHost();
+    if (m.huntBeing >= 0) {
+        host.HurtBeing(m.huntBeing, halfHearts, HURT_FIST, nullptr);
+        host.PushBeing(m.huntBeing, dirFlat * push + Vec3(0, 0, 2.0f));
+    } else if (host.PlayerVehicle() >= 0)
+        host.HurtVehicle(host.PlayerVehicle(), halfHearts);
+    else
+        host.HurtPlayer(halfHearts);
+}
+
+// Zombie: it shambles straight at whoever is nearest and beats on him with its arms (3 half hearts a blow). It has
+// no fuse and no fear; like Minecraft's it burns up in daylight (that part lives in MobsTick, where the sun is).
+bool ZombieBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
+                 const std::vector<BeingInfo>* beings) {
+    m.attackCooldown -= dt;
+    m.attackAnim = std::max(0.0f, m.attackAnim - dt * 3.0f);
+    Vec3 feet, mid;
+    float dist = 0.0f;
+    if (!PickPrey(m, playerPos, beings, 16.0f, &feet, &mid, &dist))
+        return false;
+    Vec3 to = feet - m.pos;
+    to.z = 0.0f;
+    const float flat = to.Length();
+    const Vec3 dir = flat > 0.01f ? to * (1.0f / flat) : Vec3(0, 1, 0);
+    m.goal = Flat(to);
+    m.aiTimer = 0.5f;
+    *looking = true;
+    *speed = kTypes[m.kind].run;
+    m.moving = flat > 1.5f;
+    if (flat < 1.9f && std::fabs(feet.z - m.pos.z) < 2.2f && m.attackCooldown <= 0.0f) {
+        m.attackCooldown = 0.8f;
+        m.attackAnim = 1.0f;
+        StrikePrey(m, dir, 3.0f, 3.0f);
+        const Vec3 c = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
+        PlaySfx(SND_ATTACK_WEAK, &c, 0.8f);
+    }
+    return true;
+}
+
+// Skeleton: it keeps its distance and shoots. Between about 5 and 14 m it stands off (strafing sideways the way
+// Minecraft's do), inside 5 it backs away, beyond 14 it closes in; every second and a half to two and a half it
+// looses a real arrow from the core's own projectile system, with a clear line of sight.
+bool SkeletonBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
+                   const std::vector<BeingInfo>* beings) {
+    m.shoot -= dt;
+    m.attackAnim = std::max(0.0f, m.attackAnim - dt * 1.5f);
+    Vec3 feet, mid;
+    float dist = 0.0f;
+    if (!PickPrey(m, playerPos, beings, 16.0f, &feet, &mid, &dist))
+        return false;
+    Vec3 to = feet - m.pos;
+    to.z = 0.0f;
+    const float flat = to.Length();
+    const Vec3 dir = flat > 0.01f ? to * (1.0f / flat) : Vec3(0, 1, 0);
+    *looking = true;
+    *speed = kTypes[m.kind].run;
+    m.aiTimer = 0.5f;
+    if (flat > 14.0f) {
+        m.goal = dir;
+        m.moving = true;
+    } else if (flat < 5.0f) {
+        m.goal = dir * -1.0f;
+        m.moving = true;
+    } else {
+        // in its band: drift sideways, changing side every few seconds
+        const Vec3 side(dir.y, -dir.x, 0.0f);
+        m.goal = (m.id % 2 == 0) ? side : side * -1.0f;
+        m.moving = true;
+        *speed = kTypes[m.kind].walk;
+    }
+    if (m.shoot <= 0.0f && flat > 3.0f && flat < 16.0f) {
+        const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+        if (!TheHost().LineBlocked(eye, mid)) {
+            ShootArrowAt(eye, mid, -1, -1); // its own arrows: no host shooter behind them
+            m.attackAnim = 1.0f;
+            m.shoot = 1.5f + Rand01() * 1.0f;
+        } else {
+            m.shoot = 0.4f; // no clear shot: look again in a moment
+        }
+    }
+    return true;
+}
+
+// Spider: the fastest of the three. It runs its prey down and bites (2 half hearts); walls do not stop it —
+// MoveMob lets it climb them. In daylight Minecraft's spiders calm down unless they are already after someone;
+// here they simply hunt less far by day (they notice prey at half the range).
+bool SpiderBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
+                 const std::vector<BeingInfo>* beings) {
+    m.attackCooldown -= dt;
+    m.attackAnim = std::max(0.0f, m.attackAnim - dt * 3.0f);
+    const float range = TheHost().Dark() ? 16.0f : 8.0f;
+    Vec3 feet, mid;
+    float dist = 0.0f;
+    if (!PickPrey(m, playerPos, beings, range, &feet, &mid, &dist))
+        return false;
+    Vec3 to = feet - m.pos;
+    to.z = 0.0f;
+    const float flat = to.Length();
+    const Vec3 dir = flat > 0.01f ? to * (1.0f / flat) : Vec3(0, 1, 0);
+    m.goal = Flat(to);
+    m.aiTimer = 0.5f;
+    *looking = true;
+    *speed = kTypes[m.kind].run;
+    m.moving = flat > 1.3f;
+    if (flat < 1.8f && std::fabs(feet.z - m.pos.z) < 1.8f && m.attackCooldown <= 0.0f) {
+        m.attackCooldown = 0.7f;
+        m.attackAnim = 1.0f;
+        StrikePrey(m, dir, 2.0f, 2.5f);
+    }
+    return true;
+}
+
 void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t playerHeld,
            const std::vector<BeingInfo>* beings) {
     const MobType& t = kTypes[m.kind];
@@ -451,8 +622,16 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
     bool chasing = false;
     if (t.monster) {
         m.panic = 0.0f; // monsters do not run away
-        chasing = m.kind == MOB_WARDEN ? WardenBrain(m, dt, playerPos, &speed, &looking, beings)
-                                       : CreeperFuse(m, dt, playerPos, toPlayer, &speed, &looking, beings);
+        if (m.kind == MOB_WARDEN)
+            chasing = WardenBrain(m, dt, playerPos, &speed, &looking, beings);
+        else if (m.kind == MOB_ZOMBIE)
+            chasing = ZombieBrain(m, dt, playerPos, &speed, &looking, beings);
+        else if (m.kind == MOB_SKELETON)
+            chasing = SkeletonBrain(m, dt, playerPos, &speed, &looking, beings);
+        else if (m.kind == MOB_SPIDER)
+            chasing = SpiderBrain(m, dt, playerPos, &speed, &looking, beings);
+        else
+            chasing = CreeperFuse(m, dt, playerPos, toPlayer, &speed, &looking, beings);
     }
 
     if (chasing) {
@@ -535,15 +714,21 @@ bool SpawnSpot(const Vec3& playerPos, Vec3* ground) {
 void TrySpawn(const Vec3& playerPos) {
     if (!TheHost().Outdoors())
         return;
-    // at night creepers come out, one at a time
+    // at night the monsters come out, one at a time: creepers, zombies, skeletons and spiders
     if (gRules.monsters && TheHost().Dark()) {
         int monsters = 0;
         for (auto& m : gMobs)
             monsters += kTypes[m.kind].monster;
         Vec3 ground;
         if (monsters < gRules.maxMonsters && Rand01() < 0.5f) {
-            if (SpawnSpot(playerPos, &ground))
-                SpawnMob(MOB_CREEPER, ground, false);
+            if (SpawnSpot(playerPos, &ground)) {
+                const float r = Rand01();
+                const int kind = r < 0.4f    ? MOB_CREEPER
+                                 : r < 0.65f ? MOB_ZOMBIE
+                                 : r < 0.85f ? MOB_SKELETON
+                                             : MOB_SPIDER;
+                SpawnMob(kind, ground, false);
+            }
             return;
         }
     }
@@ -831,6 +1016,11 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
                 remove = true;
             }
         } else {
+            // zombies and skeletons burn in the sun, the way Minecraft's do: out in the open in daylight the fire
+            // is kept alight (the burn code in MoveMob hurts them once a second while the timer runs down)
+            if ((m.kind == MOB_ZOMBIE || m.kind == MOB_SKELETON) && !TheHost().Dark() && TheHost().Outdoors() &&
+                m.burn < 0.5f)
+                m.burn = 2.5f;
             if (m.id != 0 && m.id == gGame.ridingMob) {
                 Vec3 want = m.rideVel;
                 float k = Clamp(dt * (m.onGround ? 8.0f : 1.0f), 0.0f, 1.0f);

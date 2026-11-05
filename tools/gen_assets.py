@@ -708,8 +708,10 @@ SPECIAL = {"bow": 1, "arrow": 2, "spectral_arrow": 2, "flint_and_steel": 3, "fir
            "trident": 25, "water_bucket": 26, "lava_bucket": 27, "crossbow": 28, "bone_meal": 29,
            "elytra": 5, "snowball": 6, "egg": 7, "ender_pearl": 8, "debug_stick": 9, "cow_spawn_egg": 10,
            "pig_spawn_egg": 11, "sheep_spawn_egg": 12, "chicken_spawn_egg": 13, "fishing_rod": 14, "shears": 15,
-           "bucket": 16, "creeper_spawn_egg": 30, "warden_spawn_egg": 31}
-KEEP_SPAWN_EGGS = ("cow_spawn_egg", "pig_spawn_egg", "sheep_spawn_egg", "chicken_spawn_egg", "creeper_spawn_egg", "warden_spawn_egg")
+           "bucket": 16, "creeper_spawn_egg": 30, "warden_spawn_egg": 31, "zombie_spawn_egg": 32,
+           "skeleton_spawn_egg": 33, "spider_spawn_egg": 34}
+KEEP_SPAWN_EGGS = ("cow_spawn_egg", "pig_spawn_egg", "sheep_spawn_egg", "chicken_spawn_egg", "creeper_spawn_egg", "warden_spawn_egg",
+                   "zombie_spawn_egg", "skeleton_spawn_egg", "spider_spawn_egg")
 EXCLUDE_ITEMS = ("spawn_egg", "knowledge_book", "structure_void", "air", "barrier", "light",
                  "bundle", "filled_map", "command_block_minecart", "jigsaw", "test_")
 NAME_OVERRIDE = {"debug_stick": "B\u00fcy\u00fcl\u00fc Sopa"}
@@ -1426,6 +1428,9 @@ ent_add("XP_ORB", gimg("entity/experience/experience_orb"))
 ent_add("TRIDENT", gimg("entity/trident/trident"))
 ent_add("CREEPER", gimg("entity/creeper/creeper"))
 ent_add("WARDEN", gimg("entity/warden/warden"))
+ent_add("ZOMBIE", gimg("entity/zombie/zombie"))
+ent_add("SKELETON", gimg("entity/skeleton/skeleton"))
+ent_add("SPIDER", gimg("entity/spider/spider"))
 ent.save(os.path.join(OUT, "entity.png"))
 
 # ======================================================================= sounds

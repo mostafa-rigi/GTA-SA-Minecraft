@@ -191,6 +191,9 @@ int MobKindForEgg(int special) {
     case SP_EGG_CHICKEN: return MOB_CHICKEN;
     case SP_EGG_CREEPER: return MOB_CREEPER;
     case SP_EGG_WARDEN: return MOB_WARDEN;
+    case SP_EGG_ZOMBIE: return MOB_ZOMBIE;
+    case SP_EGG_SKELETON: return MOB_SKELETON;
+    case SP_EGG_SPIDER: return MOB_SPIDER;
     default: return -1;
     }
 }
@@ -630,7 +633,10 @@ bool UseHeldItem() {
     case SP_EGG_SHEEP:
     case SP_EGG_CHICKEN:
     case SP_EGG_CREEPER:
-    case SP_EGG_WARDEN: {
+    case SP_EGG_WARDEN:
+    case SP_EGG_ZOMBIE:
+    case SP_EGG_SKELETON:
+    case SP_EGG_SPIDER: {
         if (!targetValid || inVehicle)
             return false;
         Vec3 at = hitPoint + hitNormal * (hitNormal.z > 0.5f ? 0.02f : 0.6f);

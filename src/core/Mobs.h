@@ -9,7 +9,7 @@ namespace mc {
 
 struct BeingInfo; // Host.h: one of the host's own people near a point
 
-enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_KIND_COUNT };
+enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_ZOMBIE, MOB_SKELETON, MOB_SPIDER, MOB_KIND_COUNT };
 
 struct Mob {
     int kind = 0;
@@ -55,6 +55,8 @@ struct Mob {
     float boomCooldown = 0.0f;
     float calm = 0.0f;         // seconds without any anger (a minute: it digs back down)
     float heart = 1.0f, pulse = 0.0f; // until the next heartbeat; 1..0 after one
+    float shoot = 0.0f;        // skeleton: seconds until it may loose the next arrow
+    int huntBeing = -1;        // the host's number of the being it is after (-1: the player, or nobody)
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

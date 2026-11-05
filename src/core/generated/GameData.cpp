@@ -703,7 +703,7 @@ const BlockDef kBlockDefs[NUM_BLOCKS] = {
     { "yellow_bed_head", { "Yellow Bed", "Sar\xC4\xB1 Yatak" }, { 574, 575, 32, 574, 576, 31 }, 65535, SHAPE_BED_HEAD, RENDER_CUTOUT, 1.00f, 0, 0, false, 0, 1, 1, false, 1, { { 695, 1, 1, 1.0000f, 0 } } },
 };
 
-const ItemDef kItemDefs[392] = {
+const ItemDef kItemDefs[395] = {
     { "abandoned_camp_map", { "Abandoned Camp Map", "Terkedilmi\xC5\x9F Kamp Haritas\xC4\xB1" }, 1124, 64, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 0, 4, 0 },
     { "acacia_boat", { "Acacia Boat", "Akasya Tekne" }, 1125, 1, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 21, 4, 0 },
     { "acacia_chest_boat", { "Acacia Boat with Chest", "Sand\xC4\xB1kl\xC4\xB1 Akasya Tekne" }, 1126, 1, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 21, 4, 0 },
@@ -1096,6 +1096,9 @@ const ItemDef kItemDefs[392] = {
     { "yellow_harness", { "Yellow Harness", "Sar\xC4\xB1 Dizgin" }, 1513, 64, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 0, 4, 0 },
     { "creeper_spawn_egg", { "Creeper Spawn Egg", "Creeper \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1222, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 30, 9, 0 },
     { "warden_spawn_egg", { "Warden Spawn Egg", "Muhaf\xC4\xB1z \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1489, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 31, 9, 0 },
+    { "zombie_spawn_egg", { "Zombie Spawn Egg", "Zombi \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 32, 9, 0 },
+    { "skeleton_spawn_egg", { "Skeleton Spawn Egg", "\xC4\xB0skelet \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 33, 9, 0 },
+    { "spider_spawn_egg", { "Spider Spawn Egg", "\xC3\x96r\xC3\xBCmcek \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 34, 9, 0 },
 };
 
 const ItemDisplay kDisplays[11] = {
