@@ -2123,6 +2123,32 @@ static void TestNewMobs() {
         CHECK(zombies >= 2, "and its call brought at least one more zombie (%d zombies in all)", zombies);
         host.herdGround = false;
     }
+    // a chasing zombie really covers ground at its (raised) run speed once it is up to speed: over the last
+    // half second of a settled chase it must gain more than the old 2.3 m/s could ever give (1.15 m)
+    {
+        WideStage();
+        host.dark = true;
+        SpawnMob(MOB_ZOMBIE, Vec3(20.5f, 0.5f, 10.0f), true);
+        RunMobsB(2.0f, player, nullptr);
+        const float x1 = gMobs[0].pos.x;
+        RunMobsB(0.5f, player, nullptr);
+        CHECK(gMobs.size() == 1 && x1 - gMobs[0].pos.x > 1.3f,
+              "a settled zombie chase runs faster than Minecraft's dry 2.3 m/s (gained %.2f m in half a second)", x1 - gMobs[0].pos.x);
+    }
+    // the skeleton faces its prey while it strafes: body (and so the bow) on the player, feet sideways,
+    // distance kept - look, aim and arrow on one line, the way Minecraft's skeletons fight
+    {
+        MobStage();
+        host.dark = true;
+        SpawnMob(MOB_SKELETON, Vec3(8.5f, 0.5f, 10.0f), true);
+        RunMobsB(1.5f, player, nullptr);
+        const Mob& s = gMobs[0];
+        const Vec3 fwd(-std::sin(s.yaw), std::cos(s.yaw), 0.0f);
+        const float dot = fwd.x * -1.0f + fwd.y * 0.0f; // the player stands straight down -x from where it spawned
+        CHECK(gMobs.size() == 1 && dot > 0.85f, "the strafing skeleton's body faces its prey (dot %.2f)", dot);
+        CHECK(std::fabs(s.pos.y - 0.5f) > 0.5f, "while its feet really drift sideways (y %.2f)", s.pos.y);
+        CHECK(s.pos.x > 6.0f, "and it keeps its distance instead of charging in (x %.2f)", s.pos.x);
+    }
 }
 
 static void TestMobs() {

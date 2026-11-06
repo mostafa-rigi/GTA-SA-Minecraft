@@ -31,10 +31,15 @@ const MobType kTypes[MOB_KIND_COUNT] = {
       { ID_WHEAT_SEEDS, ID_MELON_SEEDS, ID_PUMPKIN_SEEDS } },
     { 0.6f, 1.7f, 20.0f, 1.2f, 2.6f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
     { 0.9f, 2.9f, 500.0f, 1.6f, 5.0f, SND_WARDEN_AMBIENT, SND_WARDEN_HURT, SND_WARDEN_DEATH, { 0, 0, 0 }, true },
-    // zombie, skeleton, spider: each with its own real voice from the sound table
-    { 0.6f, 1.95f, 40.0f, 1.1f, 2.3f, SND_ZOMBIE_SAY, SND_ZOMBIE_HURT, SND_ZOMBIE_DEATH, { 0, 0, 0 }, true },
-    { 0.6f, 1.9f, 40.0f, 1.25f, 2.5f, SND_SKELETON_SAY, SND_SKELETON_HURT, SND_SKELETON_DEATH, { 0, 0, 0 }, true },
-    { 1.4f, 0.9f, 32.0f, 1.6f, 3.4f, SND_SPIDER_SAY, SND_SPIDER_HURT, SND_SPIDER_DEATH, { 0, 0, 0 }, true },
+    // zombie, skeleton, spider: each with its own real voice from the sound table. Their speeds started as
+    // Minecraft's own dry numbers (run 2.3 / 2.5 / 3.4, skeleton walk 1.25), but in this host those read slow:
+    // San Andreas streets are wider and its people faster than Minecraft's, so next to the player the three
+    // felt sluggish on the user's own screen. By his standing rule for this mod - exactly like the game, but
+    // better where the dry number feels weak here - the run speeds are a quarter up (2.9 / 3.1 / 4.3) and the
+    // skeleton's sideways drift while it aims is brisker (walk 1.7). Still under the player's own sprint.
+    { 0.6f, 1.95f, 40.0f, 1.1f, 2.9f, SND_ZOMBIE_SAY, SND_ZOMBIE_HURT, SND_ZOMBIE_DEATH, { 0, 0, 0 }, true },
+    { 0.6f, 1.9f, 40.0f, 1.7f, 3.1f, SND_SKELETON_SAY, SND_SKELETON_HURT, SND_SKELETON_DEATH, { 0, 0, 0 }, true },
+    { 1.4f, 0.9f, 32.0f, 1.6f, 4.3f, SND_SPIDER_SAY, SND_SPIDER_HURT, SND_SPIDER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
@@ -670,10 +675,14 @@ bool SkeletonBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* 
         m.moving = true;
         *speed = kTypes[m.kind].walk;
     }
+    if (flat > 3.0f && flat < 16.0f)
+        m.attackAnim = std::max(m.attackAnim, 0.7f); // the bow stays up while prey is in range, the way Minecraft's aim
     if (m.shoot <= 0.0f && flat > 3.0f && flat < 16.0f) {
         const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
         if (!TheHost().LineBlocked(eye, mid)) {
-            ShootArrowAt(eye, mid, -1, -1); // its own arrows: no host shooter behind them
+            // the arrow leaves from the bow, half a metre in front of it on the very line it faces,
+            // not out of the middle of its head
+            ShootArrowAt(eye + dir * 0.5f, mid, -1, -1); // its own arrows: no host shooter behind them
             m.attackAnim = 1.0f;
             m.shoot = 1.5f + Rand01() * 1.0f;
         } else {
@@ -769,27 +778,65 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
     if (m.baby > 0.0f)
         speed *= 1.1f;
 
-    // turn the body towards where it walks
-    if (m.moving) {
+    // where the prey this hunter is after actually stands: the player, or one of the host's people it picked.
+    // A hunter's eyes belong on its prey; until now the head always turned to the player, whoever it was after.
+    Vec3 preyPos = playerPos;
+    bool hasPrey = false;
+    if (chasing && m.huntValid) {
+        hasPrey = m.huntBeing < 0;
+        if (m.huntBeing >= 0 && beings)
+            for (const BeingInfo& b : *beings)
+                if (b.being == m.huntBeing) {
+                    preyPos = b.pos;
+                    hasPrey = true;
+                    break;
+                }
+    }
+    // A skeleton fights the way Minecraft's do: the whole body faces its prey while it sidesteps, backs off
+    // or closes in. Its bow is drawn in the body's frame (McModel) and its head rides on the body, so facing
+    // the prey is what puts the look, the aim and the arrow on one line. Before this, the body faced where it
+    // walked (sideways, while strafing), the head looked at the player, and the arrow flew at the prey: three
+    // different ways at once, which is exactly what the user saw.
+    const bool aiming = hasPrey && m.kind == MOB_SKELETON;
+
+    // turn the body towards where it walks (a skeleton with prey: towards the prey, fast, the way it aims)
+    if (aiming) {
+        Vec3 to = preyPos - m.pos;
+        to.z = 0.0f;
+        if (to.Length() > 0.05f) {
+            float want = std::atan2(-to.x, to.y);
+            float d = WrapAngle(want - m.yaw);
+            float maxTurn = 12.0f * dt;
+            m.yaw = WrapAngle(m.yaw + Clamp(d, -maxTurn, maxTurn));
+        }
+    } else if (m.moving) {
         float want = std::atan2(-m.goal.x, m.goal.y);
         float d = WrapAngle(want - m.yaw);
-        float maxTurn = 7.0f * dt;
+        float maxTurn = (chasing && t.monster ? 10.0f : 7.0f) * dt; // a hunter turns sharper than a grazer
         m.yaw = WrapAngle(m.yaw + Clamp(d, -maxTurn, maxTurn));
     }
     Vec3 fwd(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
-    Vec3 target = m.moving ? fwd * speed : Vec3(0, 0, 0);
-    float k = Clamp(dt * (m.onGround ? 9.0f : 1.2f), 0.0f, 1.0f);
+    // A hunting skeleton walks where its brain says (sideways, back, in) while its body keeps facing the
+    // prey: its feet follow the goal, not the nose. Everyone else walks where he faces, as before.
+    Vec3 target = Vec3(0, 0, 0);
+    if (m.moving)
+        target = aiming ? m.goal * speed : fwd * speed;
+    // a hunter also answers quicker: the shared soft start (9 a second) made the chase feel like wading
+    float k = Clamp(dt * (m.onGround ? (chasing && t.monster ? 14.0f : 9.0f) : 1.2f), 0.0f, 1.0f);
     m.vel.x += (target.x - m.vel.x) * k;
     m.vel.y += (target.y - m.vel.y) * k;
 
-    // head: look at the player now and then
+    // head: look at the player now and then (a hunter: at its prey, so the eyes agree with the body)
     float wantYaw = 0.0f, wantPitch = 0.0f;
-    if (looking && playerDist > 0.3f) {
-        Vec3 dir = toPlayer * (1.0f / playerDist);
+    Vec3 toLook = hasPrey ? preyPos - m.pos : toPlayer;
+    toLook.z = 0.0f;
+    const float lookDist = toLook.Length();
+    if (looking && lookDist > 0.3f) {
+        Vec3 dir = toLook * (1.0f / lookDist);
         Vec3 right(fwd.y, -fwd.x, 0.0f);
         wantYaw = Clamp(std::atan2(dir.x * right.x + dir.y * right.y, dir.x * fwd.x + dir.y * fwd.y), -1.1f, 1.1f);
-        float dz = (playerPos.z + 0.6f) - (m.pos.z + MobHeight(m) * 0.9f);
-        wantPitch = Clamp(-std::atan2(dz, playerDist), -0.6f, 0.6f);
+        float dz = ((hasPrey ? preyPos.z : playerPos.z) + 0.6f) - (m.pos.z + MobHeight(m) * 0.9f);
+        wantPitch = Clamp(-std::atan2(dz, lookDist), -0.6f, 0.6f);
     }
     float hk = Clamp(dt * 6.0f, 0.0f, 1.0f);
     m.headYaw += (wantYaw - m.headYaw) * hk;
