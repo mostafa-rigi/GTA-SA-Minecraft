@@ -1098,9 +1098,9 @@ const ItemDef kItemDefs[395] = {
     { "yellow_harness", { "Yellow Harness", "Sar\xC4\xB1 Dizgin" }, 1513, 64, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 0, 4, 0 },
     { "creeper_spawn_egg", { "Creeper Spawn Egg", "Creeper \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1222, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 30, 9, 0 },
     { "warden_spawn_egg", { "Warden Spawn Egg", "Muhaf\xC4\xB1z \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1489, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 31, 9, 0 },
-    { "zombie_spawn_egg", { "Zombie Spawn Egg", "Zombi \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 32, 9, 0 },
-    { "skeleton_spawn_egg", { "Skeleton Spawn Egg", "\xC4\xB0skelet \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 33, 9, 0 },
-    { "spider_spawn_egg", { "Spider Spawn Egg", "\xC3\x96r\xC3\xBCmcek \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1221, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 34, 9, 0 },
+    { "zombie_spawn_egg", { "Zombie Spawn Egg", "Zombi \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1562, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 32, 9, 0 },
+    { "skeleton_spawn_egg", { "Skeleton Spawn Egg", "\xC4\xB0skelet \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1563, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 33, 9, 0 },
+    { "spider_spawn_egg", { "Spider Spawn Egg", "\xC3\x96r\xC3\xBCmcek \xC3\x87" "a\xC4\x9F\xC4\xB1rma Yumurtas\xC4\xB1" }, 1564, 16, 0, 0, 1.00f, 0, 0, 0.00f, 0, 1.00f, 4.00f, 0, 0, 34, 9, 0 },
 };
 
 const ItemDisplay kDisplays[11] = {
@@ -2586,7 +2586,7 @@ const CookingRecipe kCooking[102] = {
 const int kNumShaped = 583, kNumShapeless = 214, kNumCooking = 102;
 const int kNumIngredientSets = 510;
 
-const SoundFile kSoundFiles[475] = {
+const SoundFile kSoundFiles[498] = {
     { "dig_stone1.ogg", 1.00f, 1.00f },
     { "dig_stone2.ogg", 1.00f, 1.00f },
     { "dig_stone3.ogg", 1.00f, 1.00f },
@@ -3062,6 +3062,29 @@ const SoundFile kSoundFiles[475] = {
     { "block_wooden_door_close1.ogg", 0.90f, 1.00f },
     { "block_wooden_door_close2.ogg", 0.90f, 1.00f },
     { "block_wooden_door_close3.ogg", 0.90f, 1.00f },
+    { "mob_zombie_say1.ogg", 1.00f, 1.00f },
+    { "mob_zombie_say2.ogg", 1.00f, 1.00f },
+    { "mob_zombie_say3.ogg", 1.00f, 1.00f },
+    { "mob_zombie_hurt1.ogg", 1.00f, 1.00f },
+    { "mob_zombie_hurt2.ogg", 1.00f, 1.00f },
+    { "mob_zombie_death.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_say1.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_say2.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_say3.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_hurt1.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_hurt2.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_hurt3.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_hurt4.ogg", 1.00f, 1.00f },
+    { "mob_skeleton_death.ogg", 1.00f, 1.00f },
+    { "mob_spider_say1.ogg", 1.00f, 1.00f },
+    { "mob_spider_say2.ogg", 1.00f, 1.00f },
+    { "mob_spider_say3.ogg", 1.00f, 1.00f },
+    { "mob_spider_say4.ogg", 1.00f, 1.00f },
+    { "mob_spider_say1.ogg", 1.00f, 1.00f },
+    { "mob_spider_say2.ogg", 1.00f, 1.00f },
+    { "mob_spider_say3.ogg", 1.00f, 1.00f },
+    { "mob_spider_say4.ogg", 1.00f, 1.00f },
+    { "mob_spider_death.ogg", 1.00f, 1.00f },
 };
 const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 0, 4 }, // DIG_STONE
@@ -3208,6 +3231,15 @@ const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 469, 1 }, // WARDEN_DIG
     { 470, 2 }, // DOOR_OPEN
     { 472, 3 }, // DOOR_CLOSE
+    { 475, 3 }, // ZOMBIE_SAY
+    { 478, 2 }, // ZOMBIE_HURT
+    { 480, 1 }, // ZOMBIE_DEATH
+    { 481, 3 }, // SKELETON_SAY
+    { 484, 4 }, // SKELETON_HURT
+    { 488, 1 }, // SKELETON_DEATH
+    { 489, 4 }, // SPIDER_SAY
+    { 493, 4 }, // SPIDER_HURT
+    { 497, 1 }, // SPIDER_DEATH
 };
 
 } // namespace mc

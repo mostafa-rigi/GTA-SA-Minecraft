@@ -810,6 +810,9 @@ def build_items():
             tile = tex_tile(tx["layer0"])
         except FileNotFoundError:
             continue
+        if key in ("zombie_spawn_egg", "skeleton_spawn_egg", "spider_spawn_egg"):
+            # these eggs carry their own finished art as item/<key>; never the shared placeholder tile
+            tile = tex_tile("item/" + key)
         it = dict(key=key, name=NAME_OVERRIDE.get(key, tr_name("item", key)), name_en=en_name("item", key), tile=tile)
         it.update(item_props(key))
         it["glint"] = 1 if key in GLINT else 0
@@ -1515,6 +1518,9 @@ SOUND_EVENTS = OrderedDict([
     ("WARDEN_DIG", "entity.warden.dig"),
     ("DOOR_OPEN", "block.wooden_door.open"),
     ("DOOR_CLOSE", "block.wooden_door.close"),
+    ("ZOMBIE_SAY", "entity.zombie.ambient"), ("ZOMBIE_HURT", "entity.zombie.hurt"), ("ZOMBIE_DEATH", "entity.zombie.death"),
+    ("SKELETON_SAY", "entity.skeleton.ambient"), ("SKELETON_HURT", "entity.skeleton.hurt"), ("SKELETON_DEATH", "entity.skeleton.death"),
+    ("SPIDER_SAY", "entity.spider.ambient"), ("SPIDER_HURT", "entity.spider.hurt"), ("SPIDER_DEATH", "entity.spider.death"),
 ])
 
 

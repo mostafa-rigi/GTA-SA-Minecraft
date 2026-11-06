@@ -31,10 +31,10 @@ const MobType kTypes[MOB_KIND_COUNT] = {
       { ID_WHEAT_SEEDS, ID_MELON_SEEDS, ID_PUMPKIN_SEEDS } },
     { 0.6f, 1.7f, 20.0f, 1.2f, 2.6f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
     { 0.9f, 2.9f, 500.0f, 1.6f, 5.0f, SND_WARDEN_AMBIENT, SND_WARDEN_HURT, SND_WARDEN_DEATH, { 0, 0, 0 }, true },
-    // zombie, skeleton, spider: their own voices are not in the generated sound table, so the nearest voices stand in
-    { 0.6f, 1.95f, 40.0f, 1.1f, 2.3f, SND_PILLAGER_SAY, SND_PILLAGER_HURT, SND_PILLAGER_DEATH, { 0, 0, 0 }, true },
-    { 0.6f, 1.9f, 40.0f, 1.25f, 2.5f, SND_VILLAGER_SAY, SND_VILLAGER_HURT, SND_VILLAGER_DEATH, { 0, 0, 0 }, true },
-    { 1.4f, 0.9f, 32.0f, 1.6f, 3.4f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
+    // zombie, skeleton, spider: each with its own real voice from the sound table
+    { 0.6f, 1.95f, 40.0f, 1.1f, 2.3f, SND_ZOMBIE_SAY, SND_ZOMBIE_HURT, SND_ZOMBIE_DEATH, { 0, 0, 0 }, true },
+    { 0.6f, 1.9f, 40.0f, 1.25f, 2.5f, SND_SKELETON_SAY, SND_SKELETON_HURT, SND_SKELETON_DEATH, { 0, 0, 0 }, true },
+    { 1.4f, 0.9f, 32.0f, 1.6f, 3.4f, SND_SPIDER_SAY, SND_SPIDER_HURT, SND_SPIDER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
