@@ -6,6 +6,7 @@
 
 #include "SoldierModel.h"
 
+#include <array>
 #include <cstring>
 
 #include "McModel.h" // ModelSink, ModelColor, MT_SOLDIER
@@ -52,6 +53,13 @@ std::vector<Seq> gSeqs;
 std::vector<float> gAnimPos;
 std::vector<short> gAnimQuat;
 size_t gFrameStride = 0; // bones per frame across all sequences laid end to end
+// version 2 extras: the gaits' measured strides and the rifle's two anchor points.
+// The defaults are the same measurements, so a version 1 file still walks true; it
+// just cannot say where its muzzle is.
+float gStrideWalk = 1.553f, gStrideRun = 2.970f;
+bool gHasGun = false;
+int gGunBone[2] = { -1, -1 }; // 0 muzzle, 1 butt
+Vec3 gGunLocal[2];
 
 struct Mat {
     float a[3][3];
@@ -114,8 +122,16 @@ const Seq* FindSeq(int category, int variant) {
     return found;
 }
 
-// Poses every bone of one sequence at `time` seconds into world (model-space) matrices.
-bool PoseBones(const Seq& s, float time, std::vector<Mat>& out) {
+// One bone's local transform at a moment: a position and a unit quaternion.
+struct Local {
+    Vec3 pos;
+    std::array<float, 4> q{ 0, 0, 0, 1 }; // x, y, z, w
+};
+
+// Samples every bone's local of one sequence at `time` seconds, interpolated
+// between the baked 30 fps frames (positions lerped, quaternions nlerped the
+// short way round) - the same smoothing the GoldSrc engine draws with.
+bool PoseLocals(const Seq& s, float time, std::vector<Local>& out) {
     if (gBones <= 0 || s.frames <= 0)
         return false;
     float ft = s.duration > 0.0f ? time / s.duration * (float)s.frames : 0.0f;
@@ -162,11 +178,87 @@ bool PoseBones(const Seq& s, float time, std::vector<Mat>& out) {
                 len = 1;
             }
         }
-        Vec3 pos(pa[0] + (pb[0] - pa[0]) * frac, pa[1] + (pb[1] - pa[1]) * frac, pa[2] + (pb[2] - pa[2]) * frac);
-        Mat local = QuatMat(x / len, y / len, z / len, w / len, pos);
-        out[b] = gParents[b] >= 0 ? Mul(out[gParents[b]], local) : local;
+        out[b].pos = Vec3(pa[0] + (pb[0] - pa[0]) * frac, pa[1] + (pb[1] - pa[1]) * frac, pa[2] + (pb[2] - pa[2]) * frac);
+        out[b].q = { x / len, y / len, z / len, w / len };
     }
     return true;
+}
+
+// Composes bone locals down the hierarchy into model-space matrices.
+void ComposeLocals(const std::vector<Local>& locals, std::vector<Mat>& out) {
+    out.resize(gBones);
+    for (int b = 0; b < gBones; ++b) {
+        const Local& l = locals[b];
+        Mat local = QuatMat(l.q[0], l.q[1], l.q[2], l.q[3], l.pos);
+        out[b] = gParents[b] >= 0 ? Mul(out[gParents[b]], local) : local;
+    }
+}
+
+// Poses every bone of one sequence at `time` seconds into model-space matrices.
+bool PoseBones(const Seq& s, float time, std::vector<Mat>& out) {
+    std::vector<Local> locals;
+    if (!PoseLocals(s, time, locals))
+        return false;
+    ComposeLocals(locals, out);
+    return true;
+}
+
+// The sequence time a draw state means: the gaits do not run on the clock, they
+// run on the ground he has covered - one cycle per stride length, so his feet
+// neither skate nor moon-walk at any speed the brain walks him.
+float StateSeqTime(const Seq& s, int category, int variant, float time, float gait) {
+    // the gaits - and the shoot pose's moving variants, whose legs ARE a gait -
+    // are timed by the ground he has covered, not by a clock: that is what keeps
+    // a planted foot planted. Everything else runs on its own seconds.
+    if (category == SP_WALK || category == SP_RUN || (category == SP_SHOOT && variant > 0)) {
+        float phase = gait - std::floor(gait);
+        return phase * s.duration;
+    }
+    return time;
+}
+
+bool PoseState(int category, int variant, float time, float gait, std::vector<Mat>& out) {
+    const Seq* s = FindSeq(category, variant);
+    if (!s)
+        return false;
+    std::vector<Local> cur;
+    if (!PoseLocals(*s, StateSeqTime(*s, category, variant, time, gait), cur))
+        return false;
+    ComposeLocals(cur, out);
+    return true;
+}
+
+// The man's stand in the world, recovered from the EntityPose DrawMob built him.
+// EntityPose stores its axes NEGATED times the mob scale (Minecraft's convention:
+// model x is the left, y is down, z is back), so every axis is un-negated here -
+// all three of them. (The first version of this code un-negated only two and read
+// base.X as "right" when it is in fact -right: the drawn man came out mirrored,
+// his rifle riding on the wrong shoulder.)
+struct Stand {
+    Vec3 feet, right, fwd, up;
+    bool ok = false;
+};
+
+Stand RecoverStand(const Pose& base) {
+    Stand st;
+    const float sc = base.Z.Length();
+    if (sc < 1e-6f)
+        return st;
+    st.right = base.X * (-1.0f / sc);
+    st.up = base.Y * (-1.0f / sc);
+    st.fwd = base.Z * (-1.0f / sc);
+    st.feet = base.o + base.Y * 1.501f; // the origin rides 1.501 m over his feet
+    st.ok = true;
+    return st;
+}
+
+// Animation space: +X is his forward, +Y is his left, +Z is up. His world frame:
+// x right, y forward, z up.
+Vec3 Place(const Stand& st, const Vec3& a) {
+    return st.feet + st.right * (-a.y) + st.fwd * a.x + st.up * a.z;
+}
+Vec3 PlaceDir(const Stand& st, const Vec3& a) {
+    return st.right * (-a.y) + st.fwd * a.x + st.up * a.z;
 }
 
 } // namespace
@@ -180,7 +272,7 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     Reader rd{ data, size };
     char magic[4];
     uint32_t version = 0, bones = 0, verts = 0, tris = 0, ntex = 0, nseq = 0;
-    if (!rd.Get(magic) || std::memcmp(magic, "CSM1", 4) != 0 || !rd.Get(version) || version != 1 ||
+    if (!rd.Get(magic) || std::memcmp(magic, "CSM1", 4) != 0 || !rd.Get(version) || (version != 1 && version != 2) ||
         !rd.Get(bones) || !rd.Get(verts) || !rd.Get(tris) || !rd.Get(ntex) ||
         bones == 0 || bones > 256 || verts == 0 || verts % 3 != 0 || tris != verts / 3 || ntex == 0 || ntex > 8) {
         Log("cs_soldier.bin: bad header - the Counter-Strike soldier cannot appear");
@@ -220,6 +312,23 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     if (!rd.Get(infoScale) || !rd.Get(infoLift)) {
         Log("cs_soldier.bin: truncated - the Counter-Strike soldier cannot appear");
         return false;
+    }
+    float strideWalk = 0, strideRun = 0;
+    int gunBone[2] = { -1, -1 };
+    Vec3 gunLocal[2];
+    bool hasGun = false;
+    if (version == 2) {
+        float mx, my, mz, bx, by, bz;
+        if (!rd.Get(strideWalk) || !rd.Get(strideRun) || strideWalk <= 0.1f || strideRun <= 0.1f ||
+            !rd.Get(gunBone[0]) || !rd.Get(mx) || !rd.Get(my) || !rd.Get(mz) ||
+            !rd.Get(gunBone[1]) || !rd.Get(bx) || !rd.Get(by) || !rd.Get(bz) ||
+            gunBone[0] < 0 || gunBone[0] >= (int)bones || gunBone[1] < 0 || gunBone[1] >= (int)bones) {
+            Log("cs_soldier.bin: bad stride/gun table - the Counter-Strike soldier cannot appear");
+            return false;
+        }
+        gunLocal[0] = Vec3(mx, my, mz);
+        gunLocal[1] = Vec3(bx, by, bz);
+        hasGun = true;
     }
     std::vector<int> parents(bones);
     for (uint32_t i = 0; i < bones; ++i) {
@@ -285,9 +394,18 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     gAnimPos = std::move(animPos);
     gAnimQuat = std::move(animQuat);
     gFrameStride = frameCursor;
+    if (version == 2) {
+        gStrideWalk = strideWalk;
+        gStrideRun = strideRun;
+        gHasGun = hasGun;
+        gGunBone[0] = gunBone[0];
+        gGunBone[1] = gunBone[1];
+        gGunLocal[0] = gunLocal[0];
+        gGunLocal[1] = gunLocal[1];
+    }
     gReady = true;
-    Log("cs_soldier.bin loaded: %d bones, %d triangles, %d sequences (scale %.4f m/unit, lifted %.3f m)",
-        gBones, (int)gTriTex.size(), (int)gSeqs.size(), infoScale, infoLift * infoScale);
+    Log("cs_soldier.bin loaded: %d bones, %d triangles, %d sequences (scale %.4f m/unit, lifted %.3f m, strides %.2f/%.2f m)",
+        gBones, (int)gTriTex.size(), (int)gSeqs.size(), infoScale, infoLift * infoScale, gStrideWalk, gStrideRun);
     return true;
 }
 
@@ -301,9 +419,21 @@ void UnloadSoldierModel() {
     gAnimPos.clear();
     gAnimQuat.clear();
     gFrameStride = 0;
+    gHasGun = false;
+    gGunBone[0] = gGunBone[1] = -1;
+    gStrideWalk = 1.553f;
+    gStrideRun = 2.970f;
 }
 
 bool SoldierModelReady() { return gReady; }
+
+float SoldierStride(int category) {
+    if (category == SP_WALK)
+        return gStrideWalk;
+    if (category == SP_RUN)
+        return gStrideRun;
+    return 0.0f;
+}
 
 bool SoldierPoseSpan(int category, int variant, float time, float* loZ, float* hiZ) {
     if (!gReady)
@@ -325,32 +455,63 @@ bool SoldierPoseSpan(int category, int variant, float time, float* loZ, float* h
     return true;
 }
 
-void DrawSoldierModel(const Pose& base, int category, int variant, float time, float light, float r, float g, float b) {
+bool SoldierGunPose(const Pose& base, int category, int variant, float time, Vec3* muzzle, Vec3* butt) {
+    if (!gReady || !gHasGun)
+        return false;
+    const Stand st = RecoverStand(base);
+    if (!st.ok)
+        return false;
+    std::vector<Mat> mats;
+    if (!PoseState(category, variant, time, 0.0f, mats))
+        return false;
+    if (muzzle)
+        *muzzle = Place(st, Apply(mats[gGunBone[0]], gGunLocal[0]));
+    if (butt)
+        *butt = Place(st, Apply(mats[gGunBone[1]], gGunLocal[1]));
+    return true;
+}
+
+void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light, float r, float g, float b) {
     if (!gReady)
         return;
-    const Seq* s = FindSeq(category, variant);
-    if (!s)
+    const Seq* seq = FindSeq(st.category, st.variant);
+    if (!seq)
         return;
+    std::vector<Local> locals;
+    if (!PoseLocals(*seq, StateSeqTime(*seq, st.category, st.variant, st.time, st.gait), locals))
+        return;
+    // Cross-fade out of the previous pose: blend the two poses' bone locals (the
+    // GoldSrc engine blends its players the same way) and compose once, so the
+    // figure eases between sequences instead of snapping. His gait phase is kept
+    // continuous by the brain, so a walk that becomes a run mid-stride blends two
+    // poses of the same stride moment.
+    if (st.prevCategory >= 0 && st.fade < 1.0f && st.prevCategory != st.category) {
+        const Seq* prev = FindSeq(st.prevCategory, st.prevVariant);
+        std::vector<Local> from;
+        if (prev && PoseLocals(*prev, StateSeqTime(*prev, st.prevCategory, st.prevVariant, st.prevTime, st.prevGait), from) &&
+            from.size() == locals.size()) {
+            const float w = Clamp(st.fade, 0.0f, 1.0f);
+            const float s = w * w * (3.0f - 2.0f * w); // smoothstep: soft at both ends
+            for (size_t i = 0; i < locals.size(); ++i) {
+                Local& a = from[i];
+                Local& c = locals[i];
+                float dot = a.q[0] * c.q[0] + a.q[1] * c.q[1] + a.q[2] * c.q[2] + a.q[3] * c.q[3];
+                float sg = dot < 0.0f ? -1.0f : 1.0f;
+                float x = a.q[0] + (c.q[0] * sg - a.q[0]) * s, y = a.q[1] + (c.q[1] * sg - a.q[1]) * s,
+                      z = a.q[2] + (c.q[2] * sg - a.q[2]) * s, wq = a.q[3] + (c.q[3] * sg - a.q[3]) * s;
+                float len = std::sqrt(x * x + y * y + z * z + wq * wq);
+                if (len > 1e-6f) {
+                    c.q = { x / len, y / len, z / len, wq / len };
+                }
+                c.pos = a.pos + (c.pos - a.pos) * s;
+            }
+        }
+    }
     std::vector<Mat> mats;
-    if (!PoseBones(*s, time, mats))
+    ComposeLocals(locals, mats);
+    const Stand stand = RecoverStand(base);
+    if (!stand.ok)
         return;
-    // Recover his stand from the EntityPose: its axes are right / -up / -forward times
-    // the mob scale, and its origin rides 1.501 m over his feet (see EntityPose).
-    const float sc = base.Z.Length();
-    if (sc < 1e-6f)
-        return;
-    const Vec3 rightv = base.X * (1.0f / sc);
-    const Vec3 upv = base.Y * (-1.0f / sc);
-    const Vec3 fwdv = base.Z * (-1.0f / sc);
-    const Vec3 feet = base.o + base.Y * 1.501f;
-    // Animation space: +X is his forward, +Y is his left, +Z is up. His own frame:
-    // x right, y forward, z up.
-    auto place = [&](const Vec3& a) {
-        return feet + rightv * (-a.y) + fwdv * a.x + upv * a.z;
-    };
-    auto placeDir = [&](const Vec3& a) {
-        return rightv * (-a.y) + fwdv * a.x + upv * a.z;
-    };
     int curTex = -1;
     const size_t tris = gTriTex.size();
     for (size_t ti = 0; ti < tris; ++ti) {
@@ -365,8 +526,8 @@ void DrawSoldierModel(const Pose& base, int category, int variant, float time, f
         for (int k = 0; k < 3; ++k) {
             const Vert& vt = gVerts[ti * 3 + k];
             const Mat& m = mats[vt.bone];
-            p[k] = place(Apply(m, vt.pos));
-            Vec3 n = placeDir(ApplyDir(m, vt.normal));
+            p[k] = Place(stand, Apply(m, vt.pos));
+            Vec3 n = PlaceDir(stand, ApplyDir(m, vt.normal));
             float nl = n.Length();
             float up = nl > 1e-6f ? Clamp(n.z / nl, 0.0f, 1.0f) : 0.0f;
             // Flat-shaded like every model the core draws: the top of a man catches

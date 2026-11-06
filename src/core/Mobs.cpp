@@ -55,6 +55,7 @@ std::vector<Vec3> gReinforceCalls; // where hurt zombies have called for help (a
 } // namespace
 
 std::vector<Mob> gMobs;
+std::vector<ShotFx> gShotFx;
 
 bool IsMonster(int kind) { return kind >= 0 && kind < MOB_KIND_COUNT && kTypes[kind].monster; }
 
@@ -208,8 +209,37 @@ void MoveMob(Mob& m, float dt) {
     const bool movedFlat = np.x != m.pos.x || np.y != m.pos.y;
     if (movedFlat || !m.onGround || --m.groundTick <= 0) {
         m.groundTick = 12;
-        float gz;
-        if (GroundBelow(Vec3(np.x, np.y, np.z + 0.7f), 120.0f, &gz)) {
+        float gz = -1000.0f;
+        const bool sampled = GroundBelow(Vec3(np.x, np.y, np.z + 0.7f), 120.0f, &gz);
+        // The soldier walks a real city on the host's collision, and that collision
+        // has gaps: a vertical probe can slip past the street face he is visibly
+        // standing on and land on a floor far below (an underpass, an interior), or
+        // find nothing at all - and the old code handed him that depth as his
+        // ground, so he sank through the street and was gone. A man standing on
+        // known ground does not believe ONE sample that drops the world more than
+        // a step from under him: he holds his last good ground and re-probes on
+        // the next tick. Only when the deep (or missing) sample repeats three
+        // times running does he accept that the edge is real - and then he steps
+        // off and FALLS to it under gravity, like a man, never teleporting down.
+        const bool soldierHold = m.kind == MOB_SOLDIER && m.onGround && m.groundZ > -900.0f &&
+                                 (!sampled || gz < m.pos.z - 0.6f);
+        if (soldierHold) {
+            if (m.groundBad == 0)
+                Log("soldier ground: a sample %s under his feet at (%.1f, %.1f) - holding his ground at %.2f",
+                    sampled ? "dropped far" : "found nothing", np.x, np.y, m.groundZ);
+            ++m.groundBad;
+            m.groundTick = 1; // ask again next tick, not in twelve
+            if (m.groundBad >= 3) {
+                // the edge is real: believe it, and let the fall below be a fall
+                m.groundBad = 0;
+                m.groundZ = sampled ? gz : -1000.0f;
+                m.onGround = false;
+                m.fallFrom = np.z;
+                Log("soldier ground: the drop under his feet at (%.1f, %.1f) is real - stepping off (ground %.2f)",
+                    np.x, np.y, m.groundZ);
+            }
+        } else if (sampled) {
+            m.groundBad = 0;
             if (m.onGround && gz > m.pos.z + 0.7f) {
                 // a step that is too high: do not walk through it
                 np.x = m.pos.x;
@@ -220,6 +250,7 @@ void MoveMob(Mob& m, float dt) {
                 m.groundZ = gz;
             }
         } else {
+            m.groundBad = 0;
             m.groundZ = -1000.0f;
         }
     }
@@ -823,7 +854,29 @@ void SoldierShoot(Mob& m, const Vec3& playerFeet, const Vec3& playerMid, float d
         }
     }
     m.attackAnim = 1.0f;
+    m.shootShow = 0.18f; // the shoot pose holds a breath past the shot, so a burst reads as firing
     PlaySfx(SND_M4A1_SHOOT, &from, 3.0f, 0.95f + Rand01() * 0.1f);
+    // the shot is SEEN, not only heard: a flash at the rifle's own muzzle (the model's
+    // anchor, through the same stand the draw uses) and a tracer along the bullet's
+    // line - to the man it hit, or past the aim point when it missed. A model file
+    // without anchors (version 1) falls back to the brain's own muzzle point.
+    if (len > 0.1f) {
+        Vec3 muzzle = from, butt;
+        const Vec3 mfwd(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
+        const Vec3 mright(mfwd.y, -mfwd.x, 0.0f);
+        const Pose stand = EntityPose(m.pos, mright, Vec3(0, 0, 1), mfwd, MobScale(m));
+        SoldierGunPose(stand, SP_SHOOT, 0, m.soldierPoseTime, &muzzle, &butt); // the flash sits at the model's muzzle
+        Vec3 end;
+        if (hit) {
+            const float t = Clamp((playerMid - muzzle).Dot(dir), 0.0f, len);
+            end = muzzle + dir * t;
+        } else {
+            end = muzzle + dir * (dist + 2.0f);
+        }
+        gShotFx.push_back(ShotFx{ muzzle, end, 0.0f });
+        if (gShotFx.size() > 64)
+            gShotFx.erase(gShotFx.begin(), gShotFx.begin() + (ptrdiff_t)(gShotFx.size() - 64));
+    }
     if (hit) {
         float dmg = kSoldier.damage;
         if (dist > 10.0f) {
@@ -872,6 +925,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                   const std::vector<BeingInfo>* beings) {
     (void)beings; // the street is not his war
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 2.5f);
+    m.shootShow = std::max(0.0f, m.shootShow - dt);
     const bool wasAlerted = m.alerted;
     const Vec3 playerFeet = playerPos - Vec3(0, 0, 1.0f);
     Vec3 to = playerFeet - m.pos;
@@ -1043,27 +1097,90 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // game itself layers it (SoldierModel.h). Firing plants his feet for the burst;
     // a moving man walks or runs under the same aim layer; a still man with his
     // rifle up stands in the aim pose; the rest is the patrolman's idle.
+    // the gait his pace asks for: the run at a fighting pace, the walk below it -
+    // and a man drifting SIDEWAYS across his aim keeps the walk gait whatever his
+    // speed: his legs step where he drifts, they do not run in place sideways.
+    // (The model has no strafe gait of its own - urban.mdl carries none - so the
+    // walk cycle is the honest cloth.) The shoot pose borrows this gait for its
+    // moving variants, the way the game's lower body runs independently.
+    int movePose = SP_IDLE;
+    if (m.moving) {
+        const Vec3 face = see ? dir : m.goal;
+        const float along = std::fabs(m.goal.x * face.x + m.goal.y * face.y);
+        movePose = (*speed > 2.6f && along >= 0.45f) ? SP_RUN : SP_WALK;
+    }
     int pose = SP_IDLE;
+    int variant = 0;
     if (m.reloadT > 0.0f)
         pose = SP_RELOAD;
-    else if (m.burstShots > 0)
+    else if (m.burstShots > 0 || m.shootShow > 0.0f) {
         pose = SP_SHOOT;
-    else if (m.moving)
-        pose = *speed > 4.0f ? SP_RUN : SP_WALK;
+        variant = movePose == SP_RUN ? 2 : movePose == SP_WALK ? 1 : 0; // firing keeps his gait under him
+    } else if (m.moving)
+        pose = movePose;
     else if (see || m.attackAnim > 0.3f)
         pose = SP_AIM;
-    if (pose != m.soldierPose) {
+    if (pose != m.soldierPose || variant != m.soldierVariant) {
+        // the pose he leaves becomes the cross-fade's source (SoldierModel blends
+        // the two); his gait phase carries over, so a stride is never restarted
+        m.soldierPrevPose = m.soldierPose;
+        m.soldierPrevVariant = m.soldierVariant;
+        m.soldierPrevTime = m.soldierPoseTime;
+        m.soldierPrevGait = m.soldierGait;
+        m.soldierFade = 0.0f;
         m.soldierPose = pose;
+        m.soldierVariant = variant;
         m.soldierPoseTime = 0.0f;
     } else {
         m.soldierPoseTime += dt;
     }
+    if (m.soldierFade < 1.0f) {
+        m.soldierFade = std::min(1.0f, m.soldierFade + dt / kSoldierFadeSeconds);
+        m.soldierPrevTime += dt; // the pose he is leaving keeps playing while it fades
+    }
 
-    // ---- his steps, on his stride, the game's own footstep sounds
+    // ---- his gait phase: advanced by the ground he actually covers, at the
+    // model's own stride length, so a foot planted on the ground stays planted.
+    // Towards or away from what he faces the phase is signed (a man falling back
+    // runs his cycle backwards, the way the game plays it); drifting sideways it
+    // advances with the distance, unsigned.
+    auto gaitPoseOf = [](int p, int v) -> int {
+        if (p == SP_WALK || p == SP_RUN)
+            return p;
+        if (p == SP_SHOOT && v == 1)
+            return SP_WALK;
+        if (p == SP_SHOOT && v == 2)
+            return SP_RUN;
+        return -1;
+    };
+    const int gaitPose = gaitPoseOf(pose, variant);
+    if (gaitPose >= 0) {
+        const Vec3 fwdv(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
+        const float alongV = m.vel.x * fwdv.x + m.vel.y * fwdv.y;
+        const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+        const float sideV = std::sqrt(std::max(0.0f, hv * hv - alongV * alongV));
+        const float adv = std::fabs(alongV) >= sideV ? alongV : hv;
+        const float stride = SoldierStride(gaitPose);
+        if (stride > 0.01f)
+            m.soldierGait += adv * dt / stride;
+        if (m.soldierFade < 1.0f) {
+            const int prevGaitPose = gaitPoseOf(m.soldierPrevPose, m.soldierPrevVariant);
+            if (prevGaitPose >= 0) {
+                const float prevStride = SoldierStride(prevGaitPose);
+                if (prevStride > 0.01f)
+                    m.soldierPrevGait += adv * dt / prevStride;
+            }
+        }
+    }
+
+    // ---- his steps, on his stride, the game's own footstep sounds: one step is
+    // half a gait cycle, so the sound lands when a foot does
     if (m.moving && m.onGround) {
         const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+        const float stride = gaitPose >= 0 ? SoldierStride(gaitPose) : 0.0f;
+        const float stepLen = stride > 0.01f ? stride * 0.5f : 2.6f;
         m.stepAcc += hv * dt;
-        if (m.stepAcc > 2.6f) {
+        if (m.stepAcc > stepLen) {
             m.stepAcc = 0.0f;
             PlaySfx(SND_SOLDIER_STEP, &m.pos, 1.3f, 0.95f + Rand01() * 0.1f);
         }
@@ -1536,6 +1653,15 @@ void MobsSpawnTick(float dt, const Vec3& playerPos) {
 
 void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot,
               const std::vector<BeingInfo>* beings) {
+    // a shot's flash and tracer live for a blink and no longer; they age out here
+    for (size_t i = 0; i < gShotFx.size();) {
+        gShotFx[i].age += dt;
+        if (gShotFx[i].age >= kShotFxSeconds)
+            gShotFx.erase(gShotFx.begin() + (ptrdiff_t)i);
+        else
+            ++i;
+    }
+
     // zombie reinforcements called for since the last tick are answered here, before any Mob& is held: one new
     // zombie on real ground 10 to 20 m from the one that called, through the same SpawnMob as every other spawn.
     // The ceiling is sane: never more monsters than twice the night-spawn limit (and SpawnMob's own cap besides).

@@ -514,6 +514,27 @@ struct TestHost : Host {
             *ground = Vec3(from.x, from.y, 10.0f);
         return herdGround;
     }
+    // a scripted floor of the host's own (the bridge's collision ground, in the
+    // real game): off by default, so every existing test sees the host it always
+    // saw. With it on, the ground is groundZVal everywhere except a strip of x,
+    // where it is groundStripZ - or nothing at all, when stripFound is false (a
+    // probe that slips through a gap in the collision).
+    int groundMode = 0;
+    float groundZVal = 10.0f, groundStripZ = -30.0f;
+    float stripX0 = 1e9f, stripX1 = -1e9f;
+    bool stripFound = true;
+    bool GroundBelow(const Vec3& from, float, float* z) override {
+        if (groundMode == 0)
+            return false;
+        if (from.x >= stripX0 && from.x <= stripX1) {
+            if (!stripFound)
+                return false;
+            *z = groundStripZ;
+        } else {
+            *z = groundZVal;
+        }
+        return true;
+    }
     bool WaterLevel(const Vec3&, float* level) override {
         if (sea > -900.0f)
             *level = sea;
@@ -5577,22 +5598,39 @@ static void TestSoldierModel() {
         CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the model loads back from the repo file");
     }
 
-    // the poses are the game's own numbers, measured off the converted file
+    // the poses are the game's own numbers, measured off the converted file.
+    // (The first bake read the aim/shoot sequences' corner blend cell, which
+    // twisted the rifle up over his head: the old expectations here - a 1.78 m
+    // aim, a shoot pose taller than 1.85 m - were measurements of that defect.
+    // With the centre blend the rifle sits level on his shoulder and the top of
+    // the pose is his head, the way the game shows it.)
     {
         float lo = 0, hi = 0;
-        CHECK(SoldierPoseSpan(SP_AIM, 0, 0.0f, &lo, &hi) && lo > -0.02f && lo < 0.02f && hi > 1.70f && hi < 1.85f,
+        CHECK(SoldierPoseSpan(SP_AIM, 0, 0.0f, &lo, &hi) && lo > -0.02f && lo < 0.02f && hi > 1.50f && hi < 1.72f,
               "aim stance: feet on the ground, %.2f m tall (lowest %.3f)", hi, lo);
         CHECK(SoldierPoseSpan(SP_IDLE, 0, 0.0f, &lo, &hi) && hi > 1.5f && hi < 1.7f, "his idle stands %.2f m", hi);
-        float lo2 = 0, hi2 = 0;
-        SoldierPoseSpan(SP_WALK, 0, 0.0f, &lo, &hi);
-        SoldierPoseSpan(SP_WALK, 0, 0.55f, &lo2, &hi2);
-        CHECK(std::fabs(hi - hi2) > 0.02f || std::fabs(lo - lo2) > 0.02f,
-              "the walk cycle really moves (%.3f/%.3f -> %.3f/%.3f)", lo, hi, lo2, hi2);
+        float loMin = 1e9f, loMax = -1e9f, hiMin = 1e9f, hiMax = -1e9f;
+        for (int ph = 0; ph < 6; ++ph) {
+            float l2 = 0, h2 = 0;
+            SoldierPoseSpan(SP_WALK, 0, 1.1f * ph / 6.0f, &l2, &h2);
+            loMin = std::min(loMin, l2); loMax = std::max(loMax, l2);
+            hiMin = std::min(hiMin, h2); hiMax = std::max(hiMax, h2);
+        }
+        CHECK(hiMax - hiMin > 0.02f || loMax - loMin > 0.02f,
+              "the walk cycle really moves (span travels %.3f/%.3f m over the cycle)", loMax - loMin, hiMax - hiMin);
         for (int v = 0; v < 3; ++v)
             CHECK(SoldierPoseSpan(SP_DEATH, v, 99.0f, &lo, &hi) && hi < 0.7f && lo > -0.25f,
                   "death %d ends lying on the ground (%.2f m tall, lowest %.3f)", v, hi, lo);
-        CHECK(SoldierPoseSpan(SP_SHOOT, 0, 0.1f, &lo, &hi) && hi > 1.85f,
-              "the shoot pose kicks his rifle up - the game's own recoil data (%.2f m at the muzzle)", hi);
+        // firing is the aim with the game's recoil in it: the rifle's muzzle sits
+        // somewhere else than it does at rest - that difference is the kick
+        Vec3 aimMz, aimBt, shootMz, shootBt;
+        CHECK(SoldierGunPose(EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
+                             SP_AIM, 0, 0.0f, &aimMz, &aimBt) &&
+                  SoldierGunPose(EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
+                                 SP_SHOOT, 0, 0.1f, &shootMz, &shootBt),
+              "the model answers for its rifle in aim and in shoot");
+        const float kick = (shootMz - aimMz).Length();
+        CHECK(kick > 0.02f, "the shoot pose kicks his rifle - the game's own recoil data (%.3f m from the aim)", kick);
     }
 
     // his wall probe: a wall across the patrol road bends his path around it; no wall, no bend
@@ -5625,6 +5663,154 @@ static void TestSoldierModel() {
         else
             CHECK(maxDev < 0.5f, "no wall: he walks his post straight (deviation %.2f m)", maxDev);
         host.wall = false;
+    }
+}
+
+// The fix round's own proofs: the model's aim IS the brain's facing, a burst is
+// seen as well as heard, the gait keeps the ground, and a bad ground sample
+// cannot swallow the soldier.
+struct GunBoundsSink : ModelSink {
+    Vec3 lo{ 1e9f, 1e9f, 1e9f }, hi{ -1e9f, -1e9f, -1e9f };
+    int tex = -1, tris = 0;
+    void Texture(int t) override { tex = t; }
+    void Quad(const Vec3* p, const float*, const float*, uint32_t) override {
+        if (tex != MT_SOLDIER + 2)
+            return;
+        ++tris;
+        for (int k = 0; k < 4; ++k) {
+            lo = Vec3(std::min(lo.x, p[k].x), std::min(lo.y, p[k].y), std::min(lo.z, p[k].z));
+            hi = Vec3(std::max(hi.x, p[k].x), std::max(hi.y, p[k].y), std::max(hi.z, p[k].z));
+        }
+    }
+    bool Opaque(int, int, int) override { return true; }
+};
+
+static void TestSoldierAimFix() {
+    TestHost host;
+    SetHost(&host);
+    srand(4242);
+    const std::vector<BeingInfo> none;
+    CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the model loads for the fix-round proofs");
+
+    // ---- A: his rifle points where his brain faces, at every quarter turn.
+    // The stand is built exactly as the bridge builds it, and the gun line is
+    // measured through the model's own evaluated pose.
+    for (int qi = 0; qi < 4; ++qi) {
+        const float yaw = qi * kPi * 0.5f;
+        const Vec3 fwd(-std::sin(yaw), std::cos(yaw), 0.0f);
+        const Vec3 right(fwd.y, -fwd.x, 0.0f);
+        const Pose stand = EntityPose(Vec3(0, 0, 0), right, Vec3(0, 0, 1), fwd, 1.0f);
+        Vec3 muzzle, butt;
+        CHECK(SoldierGunPose(stand, SP_AIM, 0, 0.0f, &muzzle, &butt), "yaw %d: the model answers for its rifle", qi * 90);
+        Vec3 d = muzzle - butt;
+        d.z = 0.0f;
+        const float dl = d.Length();
+        const float dot = dl > 0.01f ? Clamp((d.x * fwd.x + d.y * fwd.y) / dl, -1.0f, 1.0f) : 0.0f;
+        const float ang = std::acos(dot) * 180.0f / kPi;
+        CHECK(dl > 0.5f && ang < 6.0f, "yaw %d: the gun line is %.2f deg off his facing (rifle %.2f m)", qi * 90, ang, dl);
+        const float side = muzzle.x * right.x + muzzle.y * right.y;
+        CHECK(side > 0.03f, "yaw %d: the muzzle rides on his right side (%.3f m), not mirrored", qi * 90, side);
+        // and the DRAWN model agrees: the rifle's own triangles sit ahead of him
+        GunBoundsSink gs;
+        SetModelSink(&gs);
+        MobAnim anim;
+        anim.soldierPose = SP_AIM;
+        DrawMob(MOB_SOLDIER, stand, anim, 1.0f, 1.0f, 1.0f, 1.0f);
+        SetModelSink(nullptr);
+        const Vec3 gc = (gs.lo + gs.hi) * 0.5f;
+        const float gFwd = gc.x * fwd.x + gc.y * fwd.y;
+        const float gSide = gc.x * right.x + gc.y * right.y;
+        CHECK(gs.tris > 20 && gFwd > 0.45f && std::fabs(gSide) < gFwd * 0.5f,
+              "yaw %d: the drawn rifle sits ahead of him (%.2f m fwd, %.2f m side)", qi * 90, gFwd, gSide);
+    }
+
+    // ---- E: the file's own strides, and a pose change cross-fades instead of snapping
+    CHECK(Near(SoldierStride(SP_WALK), 1.553f, 0.06f), "the walk stride is measured off the cycle (%.3f m)", SoldierStride(SP_WALK));
+    CHECK(Near(SoldierStride(SP_RUN), 2.970f, 0.10f), "the run stride is measured off the cycle (%.3f m)", SoldierStride(SP_RUN));
+    {
+        RecordSink sink;
+        SetModelSink(&sink);
+        MobAnim anim;
+        anim.soldierPose = SP_WALK;
+        anim.soldierPrevPose = SP_IDLE;
+        anim.soldierFade = 0.5f;
+        sink.Reset();
+        DrawMob(MOB_SOLDIER, EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
+                anim, 1.0f, 1.0f, 1.0f, 1.0f);
+        CHECK(sink.quads[0] == 1010, "mid-fade he is still ONE figure of 1010 quads, not two (%d)", sink.quads[0]);
+        SetModelSink(nullptr);
+    }
+
+    // ---- B: a burst is SEEN: the shoot pose holds across it and every shot
+    // leaves a flash/tracer in the core's list for the bridge to draw
+    {
+        WideStage();
+        gShotFx.clear();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = kPi * 0.5f; // facing the man in the street
+        int shootTicks = 0, holdRun = 0, bestHold = 0;
+        bool fxSeen = false;
+        for (int i = 0; i < 60; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 0.5f, 11.0f), 0, true, &none);
+            if (!gShotFx.empty())
+                fxSeen = true;
+            if (gMobs[s].soldierPose == SP_SHOOT) {
+                ++shootTicks;
+                bestHold = std::max(bestHold, ++holdRun);
+            } else {
+                holdRun = 0;
+            }
+        }
+        CHECK(fxSeen, "his shots leave a visible flash and tracer, not only a sound");
+        CHECK(shootTicks >= 4 && bestHold >= 4,
+              "the shoot pose holds through a burst (%d shoot ticks, longest hold %d)", shootTicks, bestHold);
+    }
+
+    // ---- E: gait and ground agree - over a run at the brain's own speed, the
+    // distance his feet travel and the distance his body travels are the same
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = -kPi * 0.5f; // facing the man down the street
+        Vec3 prev = gMobs[s].pos;
+        float travelled = 0.0f;
+        for (int i = 0; i < 32; ++i) {
+            MobsTick(0.05f, Vec3(43.5f, 0.5f, 11.0f), 0, true, &none);
+            const Vec3 p = gMobs[s].pos;
+            travelled += std::sqrt((p.x - prev.x) * (p.x - prev.x) + (p.y - prev.y) * (p.y - prev.y));
+            prev = p;
+        }
+        const float byGait = gMobs[s].soldierGait * SoldierStride(SP_RUN);
+        CHECK(travelled > 5.0f && std::fabs(travelled - byGait) / travelled < 0.08f,
+              "gait and ground agree: body %.2f m, feet %.2f m (drift %.1f%%)", travelled, byGait,
+              travelled > 0.01f ? std::fabs(travelled - byGait) / travelled * 100.0f : 0.0f);
+    }
+
+    // ---- D: a strip of street whose ground sample falls away (or vanishes)
+    // cannot swallow him: he holds his ground over a blink, and even where the
+    // bad ground persists he only ever FALLS a little before it comes back
+    for (int mode = 0; mode < 2; ++mode) {
+        WideStage();
+        for (int x = 8; x <= 9; ++x)
+            for (int y = -3; y <= 3; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_AIR)); // the strip has no floor of ours either
+        host.groundMode = 1;
+        host.stripX0 = 8.0f;
+        host.stripX1 = 9.2f;
+        host.stripFound = mode == 0; // mode 0: the sample lands 40 m down; mode 1: it finds nothing
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = -kPi * 0.5f;
+        float minZ = 1e9f;
+        for (int i = 0; i < 70; ++i) {
+            MobsTick(0.05f, Vec3(43.5f, 0.5f, 11.0f), 0, true, &none);
+            if (i > 5)
+                minZ = std::min(minZ, gMobs[s].pos.z);
+        }
+        CHECK(minZ > 9.0f, "mode %d: the bad strip never swallows him (lowest %.2f m)", mode, minZ);
+        CHECK(gMobs[s].pos.x > 10.0f && Near(gMobs[s].pos.z, 10.0f, 0.05f),
+              "mode %d: he crosses the strip and stands on the street again (x %.1f, z %.2f)", mode, gMobs[s].pos.x, gMobs[s].pos.z);
+        host.groundMode = 0;
+        host.stripFound = true;
     }
 }
 
@@ -5789,6 +5975,7 @@ int main(int argc, char** argv) {
     TestDebugScreen();
     TestModels();
     TestSoldierModel();
+    TestSoldierAimFix();
     TestPlayerAnim();
     TestRenderers();
     TestSave();

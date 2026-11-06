@@ -134,6 +134,25 @@ void MobsRender(float light) {
         a.soldierPose = m.death >= 0.0f ? SP_DEATH : m.soldierPose;
         a.soldierPoseTime = m.death >= 0.0f ? m.death : m.soldierPoseTime;
         a.soldierDeath = m.soldierDeath;
+        a.soldierGait = m.soldierGait;
+        a.soldierVariant = m.soldierVariant;
+        if (m.death >= 0.0f) {
+            // dying is a pose change too: he cross-fades out of whatever he was
+            // doing into the fall, over the same breath as every other change
+            a.soldierPrevPose = m.soldierPose;
+            a.soldierPrevDeath = m.soldierDeath;
+            a.soldierPrevVariant = m.soldierVariant;
+            a.soldierPrevTime = m.soldierPoseTime + m.death;
+            a.soldierPrevGait = m.soldierGait;
+            a.soldierFade = Clamp(m.death / kSoldierFadeSeconds, 0.0f, 1.0f);
+        } else {
+            a.soldierPrevPose = m.soldierPrevPose;
+            a.soldierPrevDeath = m.soldierDeath;
+            a.soldierPrevVariant = m.soldierPrevVariant;
+            a.soldierPrevTime = m.soldierPrevTime;
+            a.soldierPrevGait = m.soldierPrevGait;
+            a.soldierFade = m.soldierFade;
+        }
         DrawMob(m.kind, base, a, light, r, g, b);
         if (m.groundZ > -900.0f)
             AddShadow(CVector(m.pos.x, m.pos.y, m.groundZ), MobWidth(m) * 0.75f,

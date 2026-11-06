@@ -209,13 +209,22 @@ class MDL:
             frame -= total
             off += 2 + valid * 2
 
-    def bone_pose(self, seq, frame):
+    def bone_pose(self, seq, frame, blend=0):
         """(pos, quat) per bone at a frame of a sequence, locals relative to the parent.
         quat is (x, y, z, w). Bone controllers are not driven (they steer mouths and
-        eyes on these models; their channels rest at the base value)."""
+        eyes on these models; their channels rest at the base value).
+
+        `blend` picks one of the sequence's blend grids (mstudioseqdesc numblends).
+        This matters more than it looks: the player models' weapon-layer sequences
+        (ref_aim_*, ref_shoot_*) are 3x3 aim grids - yaw x pitch - and blend 0 is the
+        corner where the man aims hard to his own left and up. The game blends the
+        grid by the player's aim; the neutral cell (aim straight ahead) of a 9-grid
+        is index 4. Reading blend 0 as "the aim pose" twists the whole upper body
+        about 80 degrees away from where the man faces - measured on urban.mdl:
+        blend 0 gun yaw +82.9 degrees, blend 4 gun yaw -2.9 degrees."""
         d = self.data
         out = []
-        anim_base = seq.anim_off
+        anim_base = seq.anim_off + blend * seq.numbones * 12
         for bi, bone in enumerate(self.bones):
             aoff = anim_base + bi * 12  # mstudioanim_t: 6 unsigned-short offsets
             offsets = struct.unpack_from("<6H", d, aoff)
@@ -228,9 +237,9 @@ class MDL:
             out.append((pos, _angle_quaternion(vals[3], vals[4], vals[5])))
         return out
 
-    def bone_matrices(self, seq, frame):
+    def bone_matrices(self, seq, frame, blend=0):
         """World matrix per bone (4x4, row-major, column-vector use: v' = M v)."""
-        locals_ = self.bone_pose(seq, frame)
+        locals_ = self.bone_pose(seq, frame, blend)
         mats = []
         for bi, bone in enumerate(self.bones):
             pos, q = locals_[bi]

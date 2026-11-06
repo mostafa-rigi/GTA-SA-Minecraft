@@ -301,6 +301,70 @@ void RenderDropsAndParticles(float light) {
     d3::Flush();
 }
 
+// The soldier's shots, drawn the moment after they are fired (the core owns the
+// list; see ShotFx in Mobs.h): a bright flash at the rifle's muzzle - a billboard
+// and two tapered spikes along the barrel, all untextured additive quads, so no
+// asset had to be invented for them - and a thin tracer ribbon from the muzzle to
+// where the bullet's line ended, fading over its blink of a life. Together they
+// are what makes a burst READ as firing; the sound alone never did.
+void RenderShotFx() {
+    if (gShotFx.empty())
+        return;
+    const CVector cam = TheCamera.GetPosition();
+    const CMatrix& cm = TheCamera.m_mCameraMatrix;
+    const CVector camRight = cm.right * -1.0f; // GTA keeps the camera's left vector in "right"
+    const CVector camUp = cm.at;
+    void *src, *dst, *zw, *fog;
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &src);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &dst);
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &zw);
+    RwRenderStateGet(rwRENDERSTATEFOGENABLE, &fog);
+    d3::SetRaster(nullptr);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE); // additive: light on light
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE, (void*)FALSE);
+    const float zeroUv[4] = { 0, 0, 0, 0 };
+    for (const ShotFx& fx : gShotFx) {
+        const CVector from(fx.from.x, fx.from.y, fx.from.z), to(fx.to.x, fx.to.y, fx.to.z);
+        CVector dirv = to - from;
+        const float len = dirv.Magnitude();
+        if (len < 0.05f)
+            continue;
+        const CVector dir = dirv * (1.0f / len);
+        // the tracer: a ribbon facing the camera, thick at the muzzle, thin at the end
+        {
+            const float fade = 1.0f - fx.age / kShotFxSeconds;
+            const CVector view = from - cam;
+            CVector side(dir.y * view.z - dir.z * view.y, dir.z * view.x - dir.x * view.z,
+                         dir.x * view.y - dir.y * view.x);
+            const float sl = side.Magnitude();
+            side = sl > 0.001f ? side * (0.016f / sl) : camRight * 0.016f;
+            const CVector q[4] = { from - side, from + side, to + side * 0.3f, to - side * 0.3f };
+            d3::QuadUV(q, zeroUv, zeroUv, d3::Argb(255, 190, 90, (int)(150.0f * fade)));
+        }
+        // the flash: only the first instants of the shot's life
+        if (fx.age < kShotFlashSeconds) {
+            const float ff = 1.0f - fx.age / kShotFlashSeconds;
+            const float half = 0.15f + 0.10f * (fx.age / kShotFlashSeconds);
+            const CVector q[4] = { from - camRight * half - camUp * half, from + camRight * half - camUp * half,
+                                   from + camRight * half + camUp * half, from - camRight * half + camUp * half };
+            d3::QuadUV(q, zeroUv, zeroUv, d3::Argb(255, 238, 196, (int)(220.0f * ff)));
+            const CVector tip = from + dir * (0.55f * (0.7f + 0.3f * ff));
+            const CVector axes[2] = { camRight, camUp };
+            for (const CVector& ax : axes) {
+                const CVector s[4] = { from - ax * 0.055f, tip - ax * 0.006f, tip + ax * 0.006f, from + ax * 0.055f };
+                d3::QuadUV(s, zeroUv, zeroUv, d3::Argb(255, 200, 110, (int)(170.0f * ff)));
+            }
+        }
+    }
+    d3::Flush();
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, src);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, dst);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, zw);
+    RwRenderStateSet(rwRENDERSTATEFOGENABLE, fog);
+}
+
 // experience orbs facing the camera
 void RenderXpOrbs() {
     if (gXpOrbs.empty() || !gEntityTex.tex)
@@ -421,6 +485,7 @@ void Render3D() {
     RenderXpOrbs();
     RenderPlayerModel(light);
     MobsRender(light);
+    RenderShotFx();
     PedSkinsRender(light);
     RenderProjectiles(light);
     FishingRender(light);

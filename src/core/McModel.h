@@ -140,6 +140,14 @@ struct MobAnim {
     int soldierPose = 0;        // soldier: the SoldierPose category his brain chose
     float soldierPoseTime = 0;  // soldier: seconds into that pose (his death time when dead)
     int soldierDeath = 0;       // soldier: which of the death sequences is his
+    float soldierGait = 0;      // soldier: gait cycles travelled (his walk/run phase rides on it)
+    int soldierVariant = 0;     // soldier: his pose's variant (the shoot pose: 0 standing, 1 walking, 2 running)
+    int soldierPrevPose = -1;   // soldier: the pose he is cross-fading out of, < 0: none
+    int soldierPrevDeath = 0;   // soldier: the previous pose's variant
+    int soldierPrevVariant = 0; // soldier: the previous pose's variant, when it is not a death
+    float soldierPrevTime = 0;  // soldier: the previous pose's own clock, still running
+    float soldierPrevGait = 0;  // soldier: the previous pose's gait cycles
+    float soldierFade = 1.0f;   // soldier: 0..1, how far the cross-fade has run
 };
 void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r, float g, float b);
 

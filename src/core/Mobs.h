@@ -93,11 +93,31 @@ struct Mob {
     int soldierPose = 0;       // soldier: the SoldierPose category he is showing (SoldierModel.h)
     float soldierPoseTime = 0; // soldier: seconds he has been in that pose
     int soldierDeath = 0;      // soldier: which of the game's death sequences is his (set as he falls)
+    float soldierGait = 0.0f;  // soldier: gait cycles he has travelled (his walk/run phase rides on it, so his feet keep the ground)
+    int soldierVariant = 0;    // soldier: variant of his pose (the shoot pose: 0 standing, 1 walking, 2 running)
+    int soldierPrevPose = -1;  // soldier: the pose he is cross-fading out of, < 0: no fade running
+    int soldierPrevVariant = 0; // soldier: the fading pose's variant
+    float soldierPrevTime = 0; // soldier: the fading pose's own clock, still running while it fades
+    float soldierPrevGait = 0; // soldier: the fading pose's gait cycles
+    float soldierFade = 1.0f;  // soldier: 0..1, how far the cross-fade out of the previous pose has run
+    float shootShow = 0.0f;    // soldier: seconds the shoot pose still holds after a shot (a burst must read as firing)
+    int groundBad = 0;         // soldier: consecutive ground samples his feet refused (see MoveMob)
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
+
+// One visible shot of the soldier's rifle: the core decides it (SoldierShoot), the
+// host draws it (a muzzle flash at `from`, a tracer line to `to`) and it is gone in
+// a blink. The flash shows for kShotFlashSeconds, the tracer for kShotFxSeconds.
+struct ShotFx {
+    Vec3 from, to;   // muzzle -> where the bullet's line ended
+    float age = 0.0f; // seconds since the shot
+};
+inline constexpr float kShotFlashSeconds = 0.05f;
+inline constexpr float kShotFxSeconds = 0.09f;
+extern std::vector<ShotFx> gShotFx;
 
 float MobScale(const Mob& m);  // babies are half the size
 float MobWidth(const Mob& m);
