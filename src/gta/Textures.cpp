@@ -26,8 +26,7 @@ bool AtlasPixelOpaque(int tile, int px, int py) {
     return gAtlasAlpha[(size_t)y * ATLAS_SIZE + x] > 100;
 }
 
-static bool LoadPng(const char* file, Tex& out, std::vector<uint8_t>* alphaOut = nullptr) {
-    std::string path = ModPath(file);
+static bool LoadPngAt(const std::string& path, const char* label, Tex& out, std::vector<uint8_t>* alphaOut = nullptr) {
     plugin::Image* img = nullptr;
     if (!plugin::CreateImageFromFile(path, img) || !img) {
         Log("ERROR: could not load %s", path.c_str());
@@ -35,7 +34,7 @@ static bool LoadPng(const char* file, Tex& out, std::vector<uint8_t>* alphaOut =
     }
     RwRaster* raster = RwRasterCreate(img->width, img->height, 0, rwRASTERTYPETEXTURE | rwRASTERFORMAT8888);
     if (!raster) {
-        Log("ERROR: RwRasterCreate failed for %s", file);
+        Log("ERROR: RwRasterCreate failed for %s", label);
         img->Release();
         return false;
     }
@@ -67,8 +66,30 @@ static bool LoadPng(const char* file, Tex& out, std::vector<uint8_t>* alphaOut =
     out.w = img->width;
     out.h = img->height;
     img->Release();
-    Log("Loaded %s (%dx%d)", file, out.w, out.h);
+    Log("Loaded %s (%dx%d)", label, out.w, out.h);
     return out.tex != nullptr;
+}
+
+static bool LoadPng(const char* file, Tex& out, std::vector<uint8_t>* alphaOut = nullptr) {
+    return LoadPngAt(ModPath(file), file, out, alphaOut);
+}
+
+// Where one of the soldier's own files actually sits. The converter ships his
+// files in their own cs-soldier folder and the boss install copied that folder
+// into MinecraftSA as-is; the first real-model build kept the files loose in
+// the MinecraftSA folder itself. Both layouts are honoured - the folder first,
+// the loose file as the fallback - so neither install silently loses him.
+// (This was a real refusal once: the bridge asked MinecraftSA\cs_soldier.bin,
+// the shipped install had put the file in MinecraftSA\cs-soldier\, the open
+// failed, and /summon soldier was refused with "cs_soldier.bin is not loaded".)
+static std::string SoldierFilePath(const char* file) {
+    const std::string inFolder = ModPath((std::string("cs-soldier\\") + file).c_str());
+    FILE* probe = std::fopen(inFolder.c_str(), "rb");
+    if (probe) {
+        std::fclose(probe);
+        return inFolder;
+    }
+    return ModPath(file);
 }
 
 // The Counter-Strike soldier's model file, read whole and handed to the core (the
@@ -78,9 +99,9 @@ static void LoadSoldierFiles() {
     char name[32];
     for (int i = 0; i < 3; ++i) {
         std::snprintf(name, sizeof(name), "cs_soldier_tex%d.png", i);
-        LoadPng(name, gSoldierTex[i]);
+        LoadPngAt(SoldierFilePath(name), name, gSoldierTex[i]);
     }
-    const std::string path = ModPath("cs_soldier.bin");
+    const std::string path = SoldierFilePath("cs_soldier.bin");
     FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) {
         Log("ERROR: could not load %s - the Counter-Strike soldier cannot appear without his model file", path.c_str());
@@ -100,7 +121,7 @@ static void LoadSoldierFiles() {
     // his map of the city, the same road in: read whole, handed to the core. A
     // missing file only costs him the map (he falls back to probe steering and
     // the core's loader says so) - never the mod.
-    const std::string navPath = ModPath("nav_graph.bin");
+    const std::string navPath = SoldierFilePath("nav_graph.bin");
     FILE* nf = std::fopen(navPath.c_str(), "rb");
     if (!nf) {
         Log("nav_graph.bin not found in the MinecraftSA folder - the soldier will steer by probes only");

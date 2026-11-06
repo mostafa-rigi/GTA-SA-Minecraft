@@ -494,6 +494,7 @@ void UnloadSoldierModel() {
 
 bool SoldierModelReady() { return gReady; }
 int SoldierBoneCount() { return gBones; }
+int SoldierSequenceCount() { return (int)gSeqs.size(); }
 
 float SoldierStride(int category) {
     if (category == SP_WALK)

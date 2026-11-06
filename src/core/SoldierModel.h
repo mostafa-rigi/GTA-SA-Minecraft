@@ -88,6 +88,7 @@ bool LoadSoldierModel(const unsigned char* data, size_t size);
 void UnloadSoldierModel();
 bool SoldierModelReady();
 int SoldierBoneCount();
+int SoldierSequenceCount(); // test support: how many layered sequences the loaded file carries
 
 // Composes the draw state's bone locals (layers merged, no twist - the twist is a
 // world-space step at composition time). False when a needed sequence is missing.

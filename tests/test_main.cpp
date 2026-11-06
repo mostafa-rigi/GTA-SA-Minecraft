@@ -5612,6 +5612,27 @@ static bool LoadSoldierBinFromRepo() {
     return ok && LoadSoldierModel(bytes.data(), bytes.size());
 }
 
+// regression pin for the shipped seam: the converter's REAL output file in the
+// repo (cs-soldier/cs_soldier.bin - never a synthetic bin) must load whole in
+// the shipped core loader, with the exact skeleton and sequence counts the
+// converter baked. The boss install's first eye test was refused in-game with
+// "cs_soldier.bin is not loaded" because the bridge looked for the file loose
+// in the MinecraftSA folder while the install had copied the converter's
+// cs-soldier folder as-is; the bridge now resolves both layouts
+// (SoldierFilePath in src/gta/Textures.cpp). This test pins the other half of
+// that seam - converter file vs core loader - so the two can never drift
+// apart silently again: if a rebake changes these counts on purpose, update
+// the pins here with it.
+static void TestSoldierRealAsset() {
+    TestHost host;
+    SetHost(&host);
+    UnloadSoldierModel();
+    CHECK(LoadSoldierBinFromRepo(), "the real shipped cs_soldier.bin loads in the core loader");
+    CHECK(SoldierModelReady(), "and the model reports itself ready");
+    CHECK(SoldierBoneCount() == 55, "the shipped file carries the SEAL's 55 bones (got %d)", SoldierBoneCount());
+    CHECK(SoldierSequenceCount() == 28, "the shipped file carries 28 layered sequences (got %d)", SoldierSequenceCount());
+}
+
 // the real-model round of the CS project: the file, the no-fake gate, the poses of
 // Counter-Strike's own sequences, and the wall probe in his brain
 static void TestSoldierModel() {
@@ -6605,6 +6626,7 @@ int main(int argc, char** argv) {
     TestChat();
     TestDebugScreen();
     TestModels();
+    TestSoldierRealAsset();
     TestSoldierModel();
     TestSoldierAimFix();
     TestBoss();
