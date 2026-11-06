@@ -1,5 +1,7 @@
 #include "GtaMobs.h"
 
+#include <chrono>
+
 #include "CCamera.h"
 #include "CColPoint.h"
 #include "CPad.h"
@@ -13,6 +15,7 @@
 #include "CWorld.h"
 #include "ePedType.h"
 
+#include "BossTest.h"
 #include "Draw3D.h"
 #include "Game.h"
 #include "GtaWorld.h"
@@ -120,6 +123,16 @@ void BossProxyKill() {
 }
 
 void BossProxySync(float dt, CPlayerPed* player) {
+    if (gBossTest.proxyOff) {
+        // /bosstest proxy: the bisect removes his perception body entirely -
+        // the street has nothing of his to aim at and he takes no relayed
+        // fire, for as long as the toggle stays off this session
+        if (gBossProxy.ped) {
+            BossProxyKill();
+            Log("BOSS TEST: proxy removed - he has no perception body while the toggle is off");
+        }
+        return;
+    }
     int bi = -1;
     for (size_t j = 0; j < gMobs.size(); ++j)
         if (gMobs[j].kind == MOB_SOLDIER && gMobs[j].death < 0.0f) {
@@ -280,7 +293,10 @@ void MobsUpdate(float dt, CPlayerPed* player) {
         TheHost().NearbyBeings(playerPos, 20.0f, beings);
     MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle, &beings);
     if (gGta.enabled) {
+        const auto proxyT0 = std::chrono::steady_clock::now();
         BossProxySync(dt, player);
+        BossTestNoteProxyMs(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - proxyT0).count());
         // a horn at him is a loud fact in his ears, like a shout in traffic
         if (player->bInVehicle) {
             CPad* pad = CPad::GetPad(0);

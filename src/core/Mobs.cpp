@@ -1,9 +1,11 @@
 #include "Mobs.h"
 #include "NavGraph.h"
 
+#include <chrono>
 #include <cstdlib>
 
 #include "Audio.h"
+#include "BossTest.h"
 #include "BlockRules.h"
 #include "Combat.h"
 #include "Doors.h"
@@ -61,6 +63,14 @@ std::vector<Vec3> gReinforceCalls; // where hurt zombies have called for help (a
 
 std::vector<Mob> gMobs;
 std::vector<ShotFx> gShotFx;
+
+// ---- boss diagnostics (the diagnostic build): the phase timings of the tick
+// in flight, read by the long-frame logger at the bottom of MobsTick. The
+// soldier brain's own share is timed around its call in Think; the voice
+// count is lines actually spoken (BossSay), the one voice number the core
+// can count honestly - the host's playback cost is its own.
+static float sBrainMs = 0.0f;
+static int sVoiceLines = 0;
 
 bool IsMonster(int kind) { return kind >= 0 && kind < MOB_KIND_COUNT && kTypes[kind].monster; }
 
@@ -936,6 +946,7 @@ void BossSay(Mob& m, int state, float cooldown) {
         return;
     m.lastVoiceEv = v.ev[pick];
     m.voiceCd = cooldown;
+    ++sVoiceLines; // diag: a line actually spoken this tick (long-frame logger)
     const Vec3 c = m.pos + Vec3(0, 0, 1.5f);
     PlaySfx((SoundEvent)v.ev[pick], &c, 1.6f);
 }
@@ -1072,9 +1083,11 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         } else {
             end = muzzle + dir * (dist + 2.0f);
         }
-        gShotFx.push_back(ShotFx{ muzzle, end, 0.0f });
-        if (gShotFx.size() > 64)
-            gShotFx.erase(gShotFx.begin(), gShotFx.begin() + (ptrdiff_t)(gShotFx.size() - 64));
+        if (!gBossTest.fxOff) { // bisect (/bosstest fx): the shot still happens, its flash and tracer do not
+            gShotFx.push_back(ShotFx{ muzzle, end, 0.0f });
+            if (gShotFx.size() > 64)
+                gShotFx.erase(gShotFx.begin(), gShotFx.begin() + (ptrdiff_t)(gShotFx.size() - 64));
+        }
     }
     float dmg = pistol ? kBoss.pistolDamage : kSoldier.damage;
     if (dist > 10.0f) {
@@ -1267,6 +1280,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.dodgeT = std::max(0.0f, m.dodgeT - dt);
     m.coverT = std::max(0.0f, m.coverT - dt);
     m.heardT = std::max(0.0f, m.heardT - dt);
+    m.nadeShowT = std::max(0.0f, m.nadeShowT - dt);
     m.loudT = std::min(99.0f, m.loudT + dt);
     m.moveSpeed = 0.0f;
     if (!m.onGround)
@@ -1284,7 +1298,14 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // whole 45 s hunt (a train of hitches on the respawn on a 2 GB Core 2 Duo),
     // until the distance sweep erased him at 320 m anyway and the "posted
     // boss" was simply gone when the player walked back.
-    if (m.sawPlayerAlive && !playerAlive && m.bossState >= BS_COMMAND) {
+    const bool wasAlive = m.sawPlayerAlive;
+    if (wasAlive && !playerAlive)
+        // diag marker: the death moment itself, so the session log can be
+        // lined up with the hitch the eye reports at exactly this edge
+        Log("boss diag: player death edge (boss in state %d)", m.bossState);
+    if (!wasAlive && playerAlive)
+        Log("boss diag: player respawn edge - alive again; the boss is on post, primed");
+    if (wasAlive && !playerAlive && m.bossState >= BS_COMMAND) {
         m.bossState = BS_SUSPICIOUS;
         m.fightStarted = false;
         m.detect = 0.45f;  // primed, not blind: the compliance stand-down's own level
@@ -1745,6 +1766,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 n.vel = Vec3(d.x / T, d.y / T, (d.z + 16.0f * T * T) / T);
                 n.fuse = kBoss.nadeFuse;
                 gBossNades.push_back(n);
+                m.nadeShowT = 0.6f; // diag: the pose log's weapon field reads HE while this runs
                 --m.nades;
                 m.nadeCd = 7.0f;
                 m.coverHeldT = 0.0f;
@@ -2069,6 +2091,35 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     d.fullCategory = -1;
     if (d.fade < 1.0f)
         d.fade = std::min(1.0f, d.fade + dt / kSoldierFadeSeconds);
+    // ---- the pose ring log (diagnostic build): every pose-state change and
+    // at least every 100 ms, the pose he is being drawn in, so the session
+    // log can be laid next to what the eye saw, window by window. When the
+    // vertex watchdog stays silent through visible garbage, this log plus
+    // that silence is the proof the mesh itself is clean.
+    {
+        m.poseLogT += dt;
+        const bool poseChanged = legCat != m.poseLogLeg || legVar != m.poseLogLegVar || upCat != m.poseLogUp ||
+                                 upVar != m.poseLogUpVar;
+        if (poseChanged || m.poseLogT >= 0.1f) {
+            const char* weap = m.nadeShowT > 0.0f ? "HE" : m.pistolOut ? "USP" : "M4";
+            const float twist = WrapAngle(m.aimYaw - m.legYaw);
+            if (poseChanged && m.poseLogLeg >= 0)
+                Log("boss pose: leg %d/%d up %d/%d (from leg %d/%d up %d/%d) fade %.2f twist %.2f row %d "
+                    "crouch %d weap %s pos (%.1f %.1f %.1f) pdist %.1f",
+                    legCat, legVar, upCat, upVar, m.poseLogLeg, m.poseLogLegVar, m.poseLogUp, m.poseLogUpVar,
+                    d.fade, twist, m.pitchIdx, m.crouch ? 1 : 0, weap, m.pos.x, m.pos.y, m.pos.z, distPlayer);
+            else
+                Log("boss pose: leg %d/%d up %d/%d fade %.2f twist %.2f row %d crouch %d weap %s "
+                    "pos (%.1f %.1f %.1f) pdist %.1f",
+                    legCat, legVar, upCat, upVar, d.fade, twist, m.pitchIdx, m.crouch ? 1 : 0, weap, m.pos.x,
+                    m.pos.y, m.pos.z, distPlayer);
+            m.poseLogLeg = legCat;
+            m.poseLogLegVar = legVar;
+            m.poseLogUp = upCat;
+            m.poseLogUpVar = upVar;
+            m.poseLogT = 0.0f;
+        }
+    }
     // gait phase from the ground he actually covers, at the current gait's own
     // stride; in a step-turn the cycle advances as if shuffling on the spot
     if (legCat == SP_WALK || legCat == SP_RUN) {
@@ -2122,8 +2173,11 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
             chasing = SkeletonBrain(m, dt, playerPos, &speed, &looking, beings);
         else if (m.kind == MOB_SPIDER)
             chasing = SpiderBrain(m, dt, playerPos, &speed, &looking, beings);
-        else if (m.kind == MOB_SOLDIER)
+        else if (m.kind == MOB_SOLDIER) {
+            const auto brainT0 = std::chrono::steady_clock::now();
             chasing = SoldierBrain(m, dt, playerPos, &speed, &looking, beings);
+            sBrainMs += std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - brainT0).count();
+        }
         else
             chasing = CreeperFuse(m, dt, playerPos, toPlayer, &speed, &looking, beings);
     }
@@ -2246,6 +2300,9 @@ void Kill(Mob& m) {
             m.draw.hasPrev = m.draw.prevBones > 0;
             m.draw.fade = 0.0f;
         }
+        // diag: the death is a pose-state change too - the ring log names it
+        Log("boss pose: DEATH var %d (fading from leg %d/%d up %d/%d)", m.soldierDeath, m.draw.legCategory,
+            m.draw.legVariant, m.draw.upCategory, m.draw.upVariant);
         m.draw.fullCategory = SP_DEATH;
         m.draw.fullVariant = m.soldierDeath;
         m.draw.fullTime = 0.0f;
@@ -2799,6 +2856,22 @@ void MobsSpawnTick(float dt, const Vec3& playerPos) {
 
 void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot,
               const std::vector<BeingInfo>* beings) {
+    // ---- the long-frame logger (diagnostic build): while a boss is active,
+    // any frame stretched past 50 ms - by the game's own dt or by this tick's
+    // measured cost - is named with the phase timings that could be measured
+    // cheaply, so the hitch at the player's death stops being a rumour and
+    // becomes a line with numbers. The bridge's two phases (proxy sync, mob
+    // render) are reported back through BossTest and describe the frame that
+    // just rendered; the core's own phases are this tick's.
+    const auto diagT0 = std::chrono::steady_clock::now();
+    sBrainMs = 0.0f;
+    sVoiceLines = 0;
+    bool bossActive = false;
+    for (const Mob& m : gMobs)
+        if (m.kind == MOB_SOLDIER && m.death < 0.0f) {
+            bossActive = true;
+            break;
+        }
     // the boss's world ticks: loud facts age out, his thrown grenades fly
     for (size_t i = 0; i < gStimuli.size();) {
         gStimuli[i].ttl -= dt;
@@ -2981,6 +3054,14 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
         } else {
             ++i;
         }
+    }
+    if (bossActive) {
+        const float tickMs =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - diagT0).count();
+        if (dt * 1000.0f > 50.0f || tickMs > 50.0f)
+            Log("LONG FRAME: game dt %.1f ms | core mobs %.1f ms (soldier brain %.1f ms, voice lines %d) | "
+                "bridge last frame: proxy %.1f ms, mobs render %.1f ms",
+                dt * 1000.0f, tickMs, sBrainMs, sVoiceLines, BossTestProxyMs(), BossTestRenderMs());
     }
 }
 

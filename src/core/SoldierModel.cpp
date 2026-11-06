@@ -16,7 +16,8 @@
 #include <array>
 #include <cstring>
 
-#include "McModel.h" // ModelSink, ModelColor, MT_SOLDIER
+#include "BossTest.h" // the diagnostic build's bisect toggles (layers / blend)
+#include "McModel.h"  // ModelSink, ModelColor, MT_SOLDIER
 
 namespace mc {
 namespace {
@@ -280,6 +281,19 @@ float StateTwist(const SoldierDrawState& st) {
     return Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
 }
 
+// The twist the RENDERER applies - one rule for every path that composes a
+// state. A whole-body pose (a death) is one piece: the converter bakes it
+// whole, the Python evaluator composes it whole, and the measurement helpers
+// below have always read it whole. The first renderer instead folded the
+// aim-vs-legs twist into deaths too (DrawSoldierModel and SoldierGunPose
+// passed StateTwist unconditionally), so a falling man could be drawn with
+// his spine wound up to +-110 degrees past anything that was ever measured -
+// a crooked fall, found by the diagnostic round's re-audit and fixed here:
+// layered poses twist, whole-body poses never do.
+float RenderTwist(const SoldierDrawState& st) {
+    return st.fullCategory >= 0 ? 0.0f : StateTwist(st);
+}
+
 } // namespace
 
 bool SoldierComposeLocals(const SoldierDrawState& st, SoldierLocal* out, int maxBones) {
@@ -298,6 +312,17 @@ bool SoldierComposeLocals(const SoldierDrawState& st, SoldierLocal* out, int max
         std::vector<SoldierLocal> ll, uu;
         if (!PoseLocals(*leg, LegSeqTime(st, *leg), ll) || !PoseLocals(*up, st.upTime, uu))
             return false;
+        if (gBossTest.layersOff) {
+            // bisect (/bosstest layers): ONE layer - the whole body out of
+            // the gait sequence. Every baked track holds its sequence's full
+            // pose for all 55 bones (bake() in the converter); the split is a
+            // runtime choice, so this draws the gait's own whole man and a
+            // fault in the layer merge itself has nowhere to hide.
+            locals = ll;
+            for (int b = 0; b < gBones; ++b)
+                out[b] = locals[b];
+            return true;
+        }
         locals.resize(gBones);
         for (int b = 0; b < gBones; ++b)
             locals[b] = (b < (int)gBoneLayer.size() && gBoneLayer[b] == 0) ? ll[b] : uu[b];
@@ -550,7 +575,7 @@ bool SoldierGunPose(const Pose& base, const SoldierDrawState& st, Vec3* muzzle, 
         return false;
     std::vector<SoldierLocal> lv(locals, locals + gBones);
     std::vector<Mat> mats;
-    ComposeWorldMats(lv, StateTwist(st), mats);
+    ComposeWorldMats(lv, RenderTwist(st), mats);
     if (muzzle)
         *muzzle = Place(stand, Apply(mats[gGunBone[0]], gGunLocal[0]));
     if (butt)
@@ -611,17 +636,21 @@ bool SoldierLegDir(const Pose& base, const SoldierDrawState& st, Vec3* dir) {
     return true;
 }
 
-void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light, float r, float g, float b) {
-    if (!gReady)
-        return;
+// The locals the RENDERER draws for one state: the layer compose plus the
+// cross-fade out of the previous composed pose (the brain snapshots the
+// composed locals whenever the pose changes; positions lerped, quaternions
+// nlerped the short way, so no transition - layer change, crouch, flinch,
+// death - ever snaps). This is factored out because the render path was the
+// ONLY composition no offline measurement ever reproduced: the pose-bounds
+// sweep reads SoldierComposeLocals, which has no fade in it. The watchdog
+// below and the transition fuzz measure THIS function, fade and all.
+bool ComposeRenderLocals(const SoldierDrawState& st, std::vector<SoldierLocal>& locals) {
     SoldierLocal buf[64];
     if (!SoldierComposeLocals(st, buf, 64))
-        return;
-    std::vector<SoldierLocal> locals(buf, buf + gBones);
-    // Cross-fade out of the previous composed pose: the brain snapshots the
-    // composed locals whenever the pose changes; blend toward the new compose
-    // (positions lerped, quaternions nlerped the short way) so no transition -
-    // layer change, crouch, flinch, death - ever snaps.
+        return false;
+    locals.assign(buf, buf + gBones);
+    if (gBossTest.blendOff) // bisect (/bosstest blend): hard cuts, the fade never blends
+        return true;
     if (st.hasPrev && st.fade < 1.0f && st.prevBones == gBones) {
         const float w = Clamp(st.fade, 0.0f, 1.0f);
         const float s = w * w * (3.0f - 2.0f * w); // smoothstep: soft at both ends
@@ -632,17 +661,100 @@ void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light,
             float sg = dot < 0.0f ? -1.0f : 1.0f;
             float x = a.q[0] + (c.q[0] * sg - a.q[0]) * s, y = a.q[1] + (c.q[1] * sg - a.q[1]) * s,
                   z = a.q[2] + (c.q[2] * sg - a.q[2]) * s, wq = a.q[3] + (c.q[3] * sg - a.q[3]) * s;
-            float len = std::sqrt(x * x + y * y + z * z + w * wq);
+            // THE root cause of the deformed soldier (found by the transition
+            // fuzz, diagnostic round): this length once read w * wq - the
+            // fade weight times the quaternion's w - instead of wq * wq. The
+            // blend's output quaternion was divided by a wrong length on
+            // every faded frame: near fade 0 the wq term vanished outright,
+            // a near-identity quaternion (x,y,z ~ 0, w ~ 1) divided by ~0 and
+            // came out scaled by hundreds, and the error compounded down the
+            // bone chain into vertices 1e8 m out - finite garbage triangles
+            // streaking off the body, worst at the start of every fade, on
+            // every pose change, in a fight several times a second. Static
+            // poses were never wrong, which is why every offline audit -
+            // none of which ever composed a faded pose - cleared the mesh.
+            float len = std::sqrt(x * x + y * y + z * z + wq * wq);
             if (len > 1e-6f)
                 c.q = { x / len, y / len, z / len, wq / len };
             c.pos = a.pos + (c.pos - a.pos) * s;
         }
     }
+    return true;
+}
+
+// Skins every vertex once, in model space, and measures the figure: the
+// farthest vertex from the model's vertical axis, the lowest and highest
+// vertex, and whether every coordinate stayed finite. DrawSoldierModel emits
+// exactly these points (placed into the world), so an explosion measured
+// here is an explosion on screen - and a clean measure here clears the mesh
+// itself of whatever the eye blames on it.
+void SkinAllVerts(const std::vector<Mat>& mats, std::vector<Vec3>& pos, std::vector<Vec3>& nrm,
+                  float* maxRadial, float* loZ, float* hiZ, bool* finite) {
+    pos.resize(gVerts.size());
+    nrm.resize(gVerts.size());
+    float mr = 0.0f, lo = 1e9f, hi = -1e9f;
+    bool fin = true;
+    for (size_t i = 0; i < gVerts.size(); ++i) {
+        const Mat& m = mats[gVerts[i].bone];
+        const Vec3 p = Apply(m, gVerts[i].pos);
+        pos[i] = p;
+        nrm[i] = ApplyDir(m, gVerts[i].normal);
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+            fin = false;
+        const float r = std::sqrt(p.x * p.x + p.y * p.y);
+        if (r > mr)
+            mr = r;
+        lo = std::min(lo, p.z);
+        hi = std::max(hi, p.z);
+    }
+    *maxRadial = mr;
+    *loZ = lo;
+    *hiZ = hi;
+    *finite = fin;
+}
+
+// The watchdog's verdict over one skinned figure (see SoldierModel.h).
+bool WatchdogTrips(float maxRadial, float loZ, float hiZ, bool finite) {
+    return !finite || maxRadial > kSoldierWatchdogRadius || loZ < kSoldierWatchdogLoZ ||
+           hiZ > kSoldierWatchdogHiZ;
+}
+
+void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light, float r, float g, float b) {
+    if (!gReady)
+        return;
+    std::vector<SoldierLocal> locals;
+    if (!ComposeRenderLocals(st, locals))
+        return;
     std::vector<Mat> mats;
-    ComposeWorldMats(locals, StateTwist(st), mats);
+    ComposeWorldMats(locals, RenderTwist(st), mats);
     const Stand stand = RecoverStand(base);
     if (!stand.ok)
         return;
+    // ---- the runtime vertex watchdog: measure the exact buffer the sink is
+    // about to consume. An exploded composition is not drawn (the tester sees
+    // him blink out for that frame instead of garbage - itself a signal) and
+    // the full pose state goes to the log, throttled so a stuck explosion
+    // cannot flood it; a clean frame rearms the log at once.
+    std::vector<Vec3> pos, nrm;
+    float maxRadial = 0.0f, loZ = 0.0f, hiZ = 0.0f;
+    bool finite = true;
+    SkinAllVerts(mats, pos, nrm, &maxRadial, &loZ, &hiZ, &finite);
+    static int watchdogQuiet = 0;
+    if (WatchdogTrips(maxRadial, loZ, hiZ, finite)) {
+        if (watchdogQuiet <= 0) {
+            Log("POSE EXPLOSION: radial %.2f m, z [%.2f, %.2f], finite %d | leg %d/%d t %.2f gait %.2f | "
+                "up %d/%d t %.2f | full %d/%d t %.2f | fade %.2f prev %d | twist %.2f aim %.2f legs %.2f | "
+                "frame NOT drawn",
+                maxRadial, loZ, hiZ, finite ? 1 : 0, st.legCategory, st.legVariant, st.legTime, st.gait,
+                st.upCategory, st.upVariant, st.upTime, st.fullCategory, st.fullVariant, st.fullTime, st.fade,
+                st.hasPrev ? 1 : 0, RenderTwist(st), st.aimYaw, st.legYaw);
+            watchdogQuiet = 30;
+        } else {
+            --watchdogQuiet;
+        }
+        return;
+    }
+    watchdogQuiet = 0;
     int curTex = -1;
     const size_t tris = gTriTex.size();
     for (size_t ti = 0; ti < tris; ++ti) {
@@ -655,10 +767,10 @@ void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light,
         float u[4], v[4];
         uint32_t col = 0;
         for (int k = 0; k < 3; ++k) {
-            const Vert& vt = gVerts[ti * 3 + k];
-            const Mat& m = mats[vt.bone];
-            p[k] = Place(stand, Apply(m, vt.pos));
-            Vec3 n = PlaceDir(stand, ApplyDir(m, vt.normal));
+            const size_t vi = ti * 3 + k;
+            const Vert& vt = gVerts[vi];
+            p[k] = Place(stand, pos[vi]);
+            Vec3 n = PlaceDir(stand, nrm[vi]);
             float nl = n.Length();
             float up = nl > 1e-6f ? Clamp(n.z / nl, 0.0f, 1.0f) : 0.0f;
             // Flat-shaded like every model the core draws: the top of a man catches
@@ -679,6 +791,35 @@ void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light,
     }
 }
 
+bool SoldierRenderExtents(const SoldierDrawState& st, float* maxRadial, float* loZ, float* hiZ) {
+    if (!gReady || !maxRadial || !loZ || !hiZ)
+        return false;
+    std::vector<SoldierLocal> locals;
+    if (!ComposeRenderLocals(st, locals))
+        return false;
+    std::vector<Mat> mats;
+    ComposeWorldMats(locals, RenderTwist(st), mats);
+    std::vector<Vec3> pos, nrm;
+    bool finite = true;
+    SkinAllVerts(mats, pos, nrm, maxRadial, loZ, hiZ, &finite);
+    return finite;
+}
+
+bool SoldierPoseExplodes(const SoldierDrawState& st) {
+    if (!gReady)
+        return false;
+    std::vector<SoldierLocal> locals;
+    if (!ComposeRenderLocals(st, locals))
+        return false;
+    std::vector<Mat> mats;
+    ComposeWorldMats(locals, RenderTwist(st), mats);
+    std::vector<Vec3> pos, nrm;
+    float maxRadial = 0.0f, loZ = 0.0f, hiZ = 0.0f;
+    bool finite = true;
+    SkinAllVerts(mats, pos, nrm, &maxRadial, &loZ, &hiZ, &finite);
+    return WatchdogTrips(maxRadial, loZ, hiZ, finite);
+}
+
 const int* SoldierBoneParents() { return gParents.empty() ? nullptr : gParents.data(); }
 
 bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi) {
@@ -689,8 +830,7 @@ bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi) {
         return false;
     std::vector<SoldierLocal> lv(locals, locals + gBones);
     std::vector<Mat> mats;
-    const float twist = Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
-    ComposeWorldMats(lv, st.fullCategory >= 0 ? 0.0f : twist, mats);
+    ComposeWorldMats(lv, RenderTwist(st), mats);
     *lo = 1e9f;
     *hi = -1e9f;
     for (int b = 0; b < gBones; ++b) {
@@ -714,8 +854,7 @@ bool SoldierSkinnedExtents(const SoldierDrawState& st, float* maxRadial, float* 
         return false;
     std::vector<SoldierLocal> lv(locals, locals + gBones);
     std::vector<Mat> mats;
-    const float twist = Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
-    ComposeWorldMats(lv, st.fullCategory >= 0 ? 0.0f : twist, mats);
+    ComposeWorldMats(lv, RenderTwist(st), mats);
     float mr = 0.0f, lo = 1e9f, hi = -1e9f;
     for (const Vert& v : gVerts) {
         const Vec3 p = Apply(mats[v.bone], v.pos);

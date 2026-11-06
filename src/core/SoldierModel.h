@@ -132,4 +132,25 @@ bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi);
 // state the brain can select through this and refuses an exploded pose.
 bool SoldierSkinnedExtents(const SoldierDrawState& st, float* maxRadial, float* loZ, float* hiZ);
 
+// ---- the render watchdog (diagnostic round)
+// A standing man is ~1.9 m of figure with a rifle; no honest pose of his puts
+// a vertex outside these bounds. DrawSoldierModel measures the exact vertex
+// buffer it is about to emit against them every frame: past them, the frame
+// is NOT drawn and a POSE EXPLOSION line with the full pose state goes to the
+// log instead - so garbage on screen with no such line in the log clears the
+// mesh itself and points at everything downstream of it.
+inline constexpr float kSoldierWatchdogRadius = 4.0f;
+inline constexpr float kSoldierWatchdogLoZ = -1.0f;
+inline constexpr float kSoldierWatchdogHiZ = 3.5f;
+
+// The figure's extents composed EXACTLY as the renderer composes them - the
+// cross-fade blend and the render twist rule (whole-body poses never twist)
+// included, unlike SoldierSkinnedExtents above, which reads the unfaded
+// layers. False when the state cannot be composed or a vertex is not finite
+// (the extents are still written when the compose itself succeeded).
+bool SoldierRenderExtents(const SoldierDrawState& st, float* maxRadial, float* loZ, float* hiZ);
+// The watchdog's own verdict for one draw state: true when the frame would
+// be suppressed (non-finite vertex, or extents past the watchdog bounds).
+bool SoldierPoseExplodes(const SoldierDrawState& st);
+
 } // namespace mc

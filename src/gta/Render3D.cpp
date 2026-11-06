@@ -1,5 +1,6 @@
 #include "Render3D.h"
 
+#include <chrono>
 #include <d3d9.h>
 
 #include "CCamera.h"
@@ -11,6 +12,7 @@
 
 #include "BlockMesh.h"
 #include "BlockRules.h"
+#include "BossTest.h"
 #include "Carve.h"
 #include "GtaCombat.h"
 #include "Config.h"
@@ -484,7 +486,12 @@ void Render3D() {
     RenderDropsAndParticles(light);
     RenderXpOrbs();
     RenderPlayerModel(light);
-    MobsRender(light);
+    {
+        const auto renderT0 = std::chrono::steady_clock::now();
+        MobsRender(light);
+        BossTestNoteRenderMs(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - renderT0).count());
+    }
     RenderShotFx();
     PedSkinsRender(light);
     RenderProjectiles(light);

@@ -161,6 +161,12 @@ struct Mob {
     Vec3 aimGoal{ 0, 0, 0 };   // boss: the point his eyes go to (states leave their wish here)
     float aimRate = 4.0f;      // boss: how fast the aim turns toward aimGoal
     int groundBad = 0;         // soldier: consecutive ground samples his feet refused (see MoveMob)
+    float poseLogT = 0.0f;     // boss diag: seconds since his last pose ring-log line
+    int poseLogLeg = -1;       // boss diag: the leg category/variant the last ring-log line carried
+    int poseLogLegVar = 0;
+    int poseLogUp = -1;        // boss diag: the upper category/variant the last ring-log line carried
+    int poseLogUpVar = 0;
+    float nadeShowT = 0.0f;    // boss: seconds a thrown grenade still shows as his diag weapon
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
     float steerSide = 0.0f;    // soldier: the side (+1/-1) his current obstacle is being rounded on; 0 = none

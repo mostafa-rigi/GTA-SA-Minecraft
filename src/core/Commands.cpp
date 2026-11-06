@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "BossTest.h"
 #include "Chat.h"
 #include "GameState.h"
 #include "Host.h"
@@ -378,6 +379,41 @@ void CmdSay(const Args& a) {
     ChatPrint("[" + Player() + "] " + msg);
 }
 
+// The diagnostic build's bisect switches for the boss (BossTest.h): each call
+// flips one switch and says so in the chat and the log, so a test session can
+// remove one suspect at a time - his perception body, his shot effects, the
+// cross-fade, the two-layer compose - and watch what the eye still reports.
+void CmdBossTest(const Args& a) {
+    if (a.size() < 2)
+        return Fail("/bosstest <proxy|fx|blend|layers>");
+    const std::string k = Lower(a[1]);
+    bool* flag = nullptr;
+    const char* name = "";
+    const char* what = "";
+    if (k == "proxy") {
+        flag = &gBossTest.proxyOff;
+        name = "proxy";
+        what = "his perception body is gone: the street has nothing of his to shoot at";
+    } else if (k == "fx") {
+        flag = &gBossTest.fxOff;
+        name = "fx";
+        what = "his shots make no muzzle flash and no tracer";
+    } else if (k == "blend") {
+        flag = &gBossTest.blendOff;
+        name = "blend";
+        what = "pose changes cut hard: the cross-fade never blends";
+    } else if (k == "layers") {
+        flag = &gBossTest.layersOff;
+        name = "layers";
+        what = "one layer: his whole body comes from the gait sequence";
+    }
+    if (!flag)
+        return Fail("/bosstest <proxy|fx|blend|layers>");
+    *flag = !*flag;
+    Log("BOSS TEST: %s %s - %s", name, *flag ? "OFF" : "ON", what);
+    Ok(Fmt("bosstest: %s %s", name, *flag ? "OFF" : "ON"));
+}
+
 void CmdWanted(const Args& a) {
     int level = 0;
     if (a.size() < 2 || !ParseInt(a[1], &level) || level < 0 || level > 6)
@@ -394,6 +430,7 @@ struct Command {
     void (*run)(const Args&);
 };
 const Command kCommands[] = {
+    { "bosstest", "/bosstest <proxy|fx|blend|layers>", CmdBossTest },
     { "clear", "/clear [item]", CmdClear },
     { "effect", "/effect <give|clear> <effect> [seconds] [amplifier]", CmdEffect },
     { "fill", "/fill <x1> <y1> <z1> <x2> <y2> <z2> <block>", CmdFill },

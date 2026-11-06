@@ -5,6 +5,7 @@
 
 #include "Audio.h"
 #include "BlockRules.h"
+#include "BossTest.h"
 #include "Controls.h"
 #include "Entities.h"
 #include "GameState.h"
@@ -6045,6 +6046,205 @@ static void TestSoldierPoseBounds() {
     CHECK(crouchLo <= 0.05f, "crouched, his soles touch the street (lowest vertex %.3f m - the bake once hovered at +0.47)", crouchLo);
 }
 
+// The transition fuzz (diagnostic round): the bounds sweep above measures
+// STATIC composed states through SoldierSkinnedExtents - no cross-fade, and
+// (until this round) a twist rule the renderer did not share for whole-body
+// poses. The user's second eye test still saw the figure deform, in motion.
+// This drives the RENDER composition itself (SoldierRenderExtents /
+// SoldierPoseExplodes: layer merge, waist twist, cross-fade snapshot and
+// all) through the transitions the brain can actually chain - every pose-key
+// pair at least once, deaths in and out, then a seeded random walk over the
+// full variant space - asserting the vertex watchdog's bounds on every
+// composed frame, under each bisect toggle that changes the compose.
+static void TestSoldierTransitionFuzz() {
+    TestHost host;
+    SetHost(&host);
+    CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the transition fuzz meets the real shipped model");
+
+    struct Lcg {
+        uint32_t s = 987654321u;
+        float next() {
+            s = s * 1664525u + 1013904223u;
+            return (float)(s >> 8) * (1.0f / 16777216.0f);
+        }
+        int pick(int n) { return (int)(next() * (float)n) % n; }
+    };
+    const int legKeys[][2] = { { SP_IDLE, 0 }, { SP_WALK, 0 }, { SP_RUN, 0 }, { SP_RUN, 1 },
+                               { SP_RUN, 2 },  { SP_RUN, 3 },  { SP_CROUCH, 0 }, { SP_JUMP, 0 } };
+    const int upKeys[][2] = { { SP_IDLE, 0 },
+                              { SP_AIM, 0 }, { SP_AIM, 1 }, { SP_AIM, 2 }, { SP_AIM, 3 }, { SP_AIM, 4 }, { SP_AIM, 5 },
+                              { SP_SHOOT, 0 }, { SP_SHOOT, 1 }, { SP_SHOOT, 2 }, { SP_SHOOT, 3 }, { SP_SHOOT, 4 }, { SP_SHOOT, 5 },
+                              { SP_RELOAD, 0 }, { SP_RELOAD, 1 }, { SP_FLINCH, 0 }, { SP_FLINCH, 1 } };
+    const int upReps[][2] = { { SP_IDLE, 0 }, { SP_AIM, 0 }, { SP_AIM, 3 }, { SP_SHOOT, 0 },
+                              { SP_SHOOT, 3 }, { SP_RELOAD, 0 }, { SP_FLINCH, 0 } };
+
+    auto makeState = [](const int* leg, const int* up, Lcg& rng, int deathVar) {
+        SoldierDrawState st;
+        if (deathVar >= 0) {
+            st.fullCategory = SP_DEATH;
+            st.fullVariant = deathVar;
+            st.fullTime = rng.next() * 3.0f;
+        } else {
+            st.legCategory = leg[0];
+            st.legVariant = leg[1];
+            st.upCategory = up[0];
+            st.upVariant = up[1];
+            st.legTime = rng.next() * 3.0f;
+            st.gait = rng.next() * 4.0f;
+            st.upTime = rng.next() * 3.0f;
+        }
+        st.legYaw = rng.next() * 6.2831853f - 3.14159265f;
+        st.aimYaw = st.legYaw + (rng.next() * 2.0f - 1.0f) * 3.4f; // past the spine's clamp too
+        st.fade = 1.0f;
+        return st;
+    };
+
+    int evals = 0, bad = 0;
+    float worstR = 0.0f, worstLo = 1e9f, worstHi = -1e9f;
+    auto drive = [&](const SoldierDrawState& from, const SoldierDrawState& target, Lcg& rng, float fadeStep) {
+        SoldierDrawState nxt = target;
+        // the brain's own snapshot step: the pose being left is composed and
+        // carried into the new state for the fade (Mobs.cpp does exactly this)
+        SoldierLocal prev[64];
+        if (SoldierComposeLocals(from, prev, 64)) {
+            for (int i = 0; i < 64; ++i)
+                nxt.prevLocals[i] = prev[i];
+            nxt.prevBones = SoldierBoneCount();
+            nxt.hasPrev = nxt.prevBones > 0;
+        }
+        for (float f = 0.0f; f <= 1.001f; f += fadeStep) {
+            nxt.fade = f;
+            nxt.legTime = target.legTime + f * 0.16f; // his clocks keep running through the fade
+            nxt.upTime = target.upTime + f * 0.16f;
+            nxt.fullTime = target.fullTime + f * 0.16f;
+            nxt.gait = target.gait + f * 0.1f;
+            float mr = 0, lo = 0, hi = 0;
+            ++evals;
+            const bool finite = SoldierRenderExtents(nxt, &mr, &lo, &hi);
+            if (!finite || SoldierPoseExplodes(nxt) || mr > kSoldierWatchdogRadius || lo < kSoldierWatchdogLoZ ||
+                hi > kSoldierWatchdogHiZ) {
+                ++bad;
+                if (bad <= 5)
+                    printf("fuzz: EXPLODES leg %d/%d up %d/%d full %d/%d fade %.2f twist %.2f -> finite %d "
+                           "r %.2f z [%.2f, %.2f]\n",
+                           nxt.legCategory, nxt.legVariant, nxt.upCategory, nxt.upVariant, nxt.fullCategory,
+                           nxt.fullVariant, nxt.fade, nxt.aimYaw - nxt.legYaw, finite ? 1 : 0, mr, lo, hi);
+            }
+            worstR = std::max(worstR, mr);
+            worstLo = std::min(worstLo, lo);
+            worstHi = std::max(worstHi, hi);
+        }
+    };
+
+    // the twist rule, pinned: a whole-body death pose must not change by one
+    // bit when the aim yaw moves against the legs (the renderer once twisted
+    // deaths; every measurement of them never did)
+    {
+        SoldierDrawState a;
+        a.fullCategory = SP_DEATH;
+        a.fullVariant = 1;
+        a.fullTime = 0.7f;
+        a.legYaw = 0.3f;
+        a.aimYaw = 0.3f;
+        SoldierDrawState b = a;
+        b.aimYaw = 0.3f + 1.92f;
+        float r1 = 0, l1 = 0, h1 = 0, r2 = 0, l2 = 0, h2 = 0;
+        CHECK(SoldierRenderExtents(a, &r1, &l1, &h1) && SoldierRenderExtents(b, &r2, &l2, &h2) && r1 == r2 &&
+                  l1 == l2 && h1 == h2,
+              "a whole-body death pose never twists: the yaw difference changes nothing (r %.3f vs %.3f)", r1, r2);
+    }
+
+    // The fade's own pin - the root cause this round's fuzz caught: at fade 0
+    // the drawn pose IS the previous pose, so its extents must match the
+    // previous state's own extents (a tolerance for the renormalisation's
+    // last ulp). The blend once normalised its quaternion by a length with
+    // the fade weight multiplied into the w term (w * wq for wq * wq): fade 0
+    // divided near-identity quaternions by ~0 and threw vertices 1e8 m out,
+    // mid-fade merely bent the man - and no static audit could ever see it,
+    // because no static audit composes a faded pose.
+    {
+        SoldierDrawState from;
+        from.legCategory = SP_IDLE;
+        from.upCategory = SP_IDLE;
+        from.legTime = 0.7f;
+        from.upTime = 0.7f;
+        SoldierDrawState nxt;
+        nxt.legCategory = SP_IDLE;
+        nxt.upCategory = SP_AIM;
+        nxt.upVariant = 0;
+        nxt.legTime = 0.7f;
+        nxt.upTime = 0.0f;
+        SoldierLocal prev[64];
+        CHECK(SoldierComposeLocals(from, prev, 64), "the fade pin composes its previous pose");
+        for (int i = 0; i < 64; ++i)
+            nxt.prevLocals[i] = prev[i];
+        nxt.prevBones = SoldierBoneCount();
+        nxt.hasPrev = true;
+        float ra = 0, la = 0, ha = 0, rb = 0, lb = 0, hb = 0;
+        CHECK(SoldierRenderExtents(from, &ra, &la, &ha), "the fade pin measures the previous pose");
+        nxt.fade = 0.0f;
+        CHECK(SoldierRenderExtents(nxt, &rb, &lb, &hb) && std::fabs(rb - ra) < 0.01f && std::fabs(lb - la) < 0.01f &&
+                  std::fabs(hb - ha) < 0.01f,
+              "fade 0 draws the previous pose itself (r %.3f vs %.3f, z [%.3f, %.3f] vs [%.3f, %.3f])", rb, ra, lb,
+              hb, la, ha);
+        nxt.fade = 0.5f;
+        CHECK(SoldierRenderExtents(nxt, &rb, &lb, &hb) && rb <= kSoldierWatchdogRadius && lb >= kSoldierWatchdogLoZ &&
+                  hb <= kSoldierWatchdogHiZ,
+              "mid-fade stays a man's size (r %.3f, z [%.3f, %.3f])", rb, lb, hb);
+    }
+
+    Lcg rng;
+    // every ordered pair of representative pose keys, and deaths in and out
+    std::vector<SoldierDrawState> states;
+    for (const auto& lk : legKeys)
+        for (const auto& uk : upReps)
+            states.push_back(makeState(lk, uk, rng, -1));
+    for (size_t i = 0; i < states.size(); ++i)
+        for (size_t j = 0; j < states.size(); ++j)
+            if (i != j)
+                drive(states[i], states[j], rng, 0.5f);
+    for (const SoldierDrawState& s : states) {
+        const SoldierDrawState d = makeState(legKeys[0], upKeys[0], rng, (int)(rng.next() * 2.99f));
+        drive(s, d, rng, 0.5f);
+        drive(d, s, rng, 0.5f);
+    }
+    // the random walk over the full variant space, chained like a real fight
+    {
+        SoldierDrawState cur = states[0];
+        for (int step = 0; step < 1200; ++step) {
+            const int* lk = legKeys[rng.pick(8)];
+            const int* uk = upKeys[rng.pick(17)];
+            const int dv = rng.next() < 0.06f ? (int)(rng.next() * 2.99f) : -1;
+            const SoldierDrawState target = makeState(lk, uk, rng, dv);
+            drive(cur, target, rng, 0.2f);
+            cur = target;
+            cur.fade = 1.0f;
+            cur.hasPrev = false;
+        }
+    }
+    // the same walk under the compose-changing bisect toggles
+    for (int mode = 0; mode < 2; ++mode) {
+        gBossTest.blendOff = mode == 0;
+        gBossTest.layersOff = mode == 1;
+        SoldierDrawState cur = states[1];
+        for (int step = 0; step < 250; ++step) {
+            const int* lk = legKeys[rng.pick(8)];
+            const int* uk = upKeys[rng.pick(17)];
+            const SoldierDrawState target = makeState(lk, uk, rng, -1);
+            drive(cur, target, rng, 0.5f);
+            cur = target;
+            cur.fade = 1.0f;
+            cur.hasPrev = false;
+        }
+    }
+    gBossTest.blendOff = false;
+    gBossTest.layersOff = false;
+    CHECK(bad == 0,
+          "the render composition survives %d transition frames inside the watchdog bounds (worst radial %.2f m, "
+          "z [%.2f, %.2f])",
+          evals, worstR, worstLo, worstHi);
+}
+
 // Death resets only the current pressure (repair round, defect B): the moment
 // the player dies, a hunt in progress stands down - no cross-city route is
 // replanned to the respawn, and the posted boss is not swept away by the
@@ -6761,6 +6961,7 @@ int main(int argc, char** argv) {
     TestSoldierAimFix();
     TestBoss();
     TestSoldierPoseBounds();
+    TestSoldierTransitionFuzz();
     TestBossDeathReset();
     TestPlayerAnim();
     TestRenderers();
