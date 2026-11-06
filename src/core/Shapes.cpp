@@ -1,5 +1,6 @@
 #include "Shapes.h"
 
+#include "Doors.h"
 #include "Items.h"
 #include "World.h"
 
@@ -87,6 +88,24 @@ int InventoryBoxes(int block, ShapeBox out[kMaxShapeBoxes], int tileBlock[kMaxSh
     int n = BlockShapeBoxes(block, *meta, out, connect);
     for (int i = 0; i < n; ++i)
         tileBlock[i] = block;
+    if (s == SHAPE_DOOR) {
+        // a door: the upper half on top of the lower one, both made small enough to fit the slot
+        const int upper = DoorOtherBlock(block);
+        ShapeBox ub[kMaxShapeBoxes];
+        const int nu = BlockShapeBoxes(upper, *meta, ub);
+        for (int i = 0; i < nu && n < kMaxShapeBoxes; ++i, ++n) {
+            out[n] = ub[i];
+            out[n].z0 += 1.0f;
+            out[n].z1 += 1.0f;
+            tileBlock[n] = upper;
+        }
+        for (int i = 0; i < n; ++i) {
+            ShapeBox& b = out[i];
+            b = { (b.x0 - 0.5f) * 0.9f + 0.5f, (b.y0 - 0.5f) * 0.9f + 0.5f, b.z0 * 0.45f,
+                  (b.x1 - 0.5f) * 0.9f + 0.5f, (b.y1 - 0.5f) * 0.9f + 0.5f, b.z1 * 0.45f, b.tileFace };
+        }
+        return n;
+    }
     if (s != SHAPE_BED)
         return n;
     // a bed: the foot and the head behind it (north), made small enough to fit
@@ -179,6 +198,12 @@ int BlockShapeBoxes(int block, int meta, ShapeBox out[kMaxShapeBoxes], int conne
                 out[n++] = Arm(d, 5 * px, 11 * px, 12 * px, 0, forCollision ? 1.5f : 14 * px);
         return n;
     }
+    case SHAPE_DOOR:
+    case SHAPE_DOOR_UPPER:
+        // one panel per half, open or shut; Doors.cpp works out where it stands in the cell.
+        // The same box is drawn and bumped into, so what you see is what stops you.
+        out[n++] = DoorPanelBox((uint8_t)meta);
+        return n;
     case SHAPE_BED:
     case SHAPE_BED_HEAD: {
         if (forCollision) {

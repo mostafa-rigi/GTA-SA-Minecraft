@@ -1,5 +1,7 @@
 #include "World.h"
 
+#include "Doors.h"
+
 namespace mc {
 
 World gWorld;
@@ -18,7 +20,13 @@ Voxel World::Get(int x, int y, int z) const {
 }
 
 bool World::IsSolid(int x, int y, int z) const {
-    return IsSolidBlock(GetBlock(x, y, z));
+    const Voxel v = Get(x, y, z);
+    // a door is the one shaped block whose solidity lives in its meta: shut it stops feet,
+    // arrows and dropped things; open it lets them all through. (The player's own body is
+    // stopped by the panel box in Shapes.cpp, which says the same thing in more detail.)
+    if (IsDoorBlock(VoxBlock(v)))
+        return !DoorIsOpen(VoxMeta(v));
+    return IsSolidBlock(VoxBlock(v));
 }
 
 void World::MarkMeshDirty(int x, int y, int z) {

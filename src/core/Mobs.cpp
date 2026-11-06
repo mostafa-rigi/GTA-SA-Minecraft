@@ -5,9 +5,11 @@
 #include "Audio.h"
 #include "BlockRules.h"
 #include "Combat.h"
+#include "Doors.h"
 #include "Entities.h"
 #include "GameState.h"
 #include "Host.h"
+#include "Interact.h"
 #include "Inventory.h"
 #include "Items.h"
 #include "Particles.h"
@@ -574,8 +576,11 @@ bool ZombieBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 3.0f);
     Vec3 feet, mid;
     float dist = 0.0f;
-    if (!PickPrey(m, dt, playerPos, beings, 35.0f, &feet, &mid, &dist))
+    if (!PickPrey(m, dt, playerPos, beings, 35.0f, &feet, &mid, &dist)) {
+        m.doorCell = Int3{ 0, 0, -1 }; // nobody to chase: any door count starts over
+        m.doorHitTime = 0.0f;
         return false;
+    }
     Vec3 to = feet - m.pos;
     to.z = 0.0f;
     const float flat = to.Length();
@@ -585,6 +590,45 @@ bool ZombieBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     *looking = true;
     *speed = kTypes[m.kind].run;
     m.moving = flat > 1.5f;
+    // a closed wooden door between it and its prey: it stops and beats on the wood. About five
+    // seconds of steady hitting breaks the door through the normal break path, so both halves
+    // go and the door drops as an item. Only zombies do this, and only to wooden doors. The
+    // door's four meta bits are all spoken for (Doors.h), so there are no crack stages - the
+    // warning is the noise and the flying chips.
+    {
+        const float reach = MobWidth(m) * 0.5f + 0.45f; // just past its own front, where its hands land
+        Int3 doorAt{ 0, 0, -1 };
+        for (int i = 0; i < 2 && doorAt.z < 0; ++i) {
+            const Vec3 probe = m.pos + dir * reach + Vec3(0, 0, i == 0 ? 0.3f : 1.3f);
+            const Int3 c{ FloorI(probe.x), FloorI(probe.y), FloorI(probe.z) };
+            const int b = gWorld.GetBlock(c.x, c.y, c.z);
+            if (IsDoorBlock(b) && !DoorIsOpen(VoxMeta(gWorld.Get(c.x, c.y, c.z))))
+                doorAt = IsDoorUpper(b) ? Int3{ c.x, c.y, c.z - 1 } : c;
+        }
+        if (doorAt.z >= 0) {
+            if (m.doorCell.x != doorAt.x || m.doorCell.y != doorAt.y || m.doorCell.z != doorAt.z) {
+                m.doorCell = doorAt; // a different door: the count starts over
+                m.doorHitTime = 0.0f;
+            }
+            m.doorHitTime += dt;
+            m.moving = false;
+            if (m.attackCooldown <= 0.0f) {
+                m.attackCooldown = 0.85f;
+                m.attackAnim = 1.0f;
+                const Vec3 c((float)doorAt.x + 0.5f, (float)doorAt.y + 0.5f, (float)doorAt.z + 0.9f);
+                PlaySfx(SND_HIT_WOOD, &c);
+                Puff(c, BlockFaceTile(ID_OAK_DOOR, FACE_SOUTH, VoxMeta(gWorld.Get(doorAt.x, doorAt.y, doorAt.z))), 3, 0.7f);
+            }
+            if (m.doorHitTime >= 5.0f) {
+                BreakVoxel(doorAt, true); // both halves go, and the door drops as an item
+                m.doorCell = Int3{ 0, 0, -1 };
+                m.doorHitTime = 0.0f;
+            }
+            return true;
+        }
+        m.doorCell = Int3{ 0, 0, -1 }; // no closed door in front of it now: the count starts over
+        m.doorHitTime = 0.0f;
+    }
     if (flat < 1.9f && std::fabs(feet.z - m.pos.z) < 2.2f && m.attackCooldown <= 0.0f) {
         m.attackCooldown = 1.0f; // about a blow a second, the way Minecraft's zombies hit
         m.attackAnim = 1.0f;

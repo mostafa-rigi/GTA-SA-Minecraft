@@ -5,6 +5,7 @@
 #include "BlockRules.h"
 #include "Controls.h"
 #include "Beds.h"
+#include "Doors.h"
 #include "Entities.h"
 #include "GameState.h"
 #include "Host.h"
@@ -60,6 +61,20 @@ int PlacementMeta(int block) {
         // the head goes the way the player looks
         const Vec3& dir = gGame.lookDir;
         return std::fabs(dir.x) > std::fabs(dir.y) ? (dir.x > 0 ? FACE_EAST : FACE_WEST) : (dir.y > 0 ? FACE_NORTH : FACE_SOUTH);
+    }
+    if (d.shape == SHAPE_DOOR) {
+        // the front faces the player who places it: the opposite of the way he looks
+        const Vec3& dir = gGame.lookDir;
+        const int f = std::fabs(dir.x) > std::fabs(dir.y) ? (dir.x > 0 ? FACE_WEST : FACE_EAST)
+                                                         : (dir.y > 0 ? FACE_SOUTH : FACE_NORTH);
+        // the hinge goes on the side of the doorway he clicked, read from the front
+        // (Minecraft also pairs up the door next to it; the click is what this core asks)
+        const int rx = -FACE_DIR[f].y, ry = FACE_DIR[f].x; // the front viewer's right hand
+        const float along = rx != 0 ? (rx > 0 ? gTarget.point.x - std::floor(gTarget.point.x)
+                                              : 1.0f - (gTarget.point.x - std::floor(gTarget.point.x)))
+                                    : (ry > 0 ? gTarget.point.y - std::floor(gTarget.point.y)
+                                              : 1.0f - (gTarget.point.y - std::floor(gTarget.point.y)));
+        return f | (along > 0.5f ? DOOR_HINGE : 0);
     }
     if (d.shape == SHAPE_STAIRS || d.shape == SHAPE_SLAB) {
         // the upper half: put under a block, or against the upper half of a side
@@ -191,6 +206,12 @@ void BreakVoxel(const Int3& p, bool withDrops) {
         if (gWorld.GetBlock(o.x, o.y, o.z) == BedOtherBlock(block))
             gWorld.Set(o.x, o.y, o.z, MakeVox(ID_AIR));
     }
+    if (IsDoorBlock(block)) {
+        // the other half goes with it (and drops nothing: the half that was hit dropped the door)
+        const Int3 o = DoorOtherCell(p, block);
+        if (gWorld.GetBlock(o.x, o.y, o.z) == DoorOtherBlock(block))
+            gWorld.Set(o.x, o.y, o.z, MakeVox(ID_AIR));
+    }
 }
 
 void InteractTick(float dt) {
@@ -301,6 +322,8 @@ void PickBlock() {
     int b = gTarget.voxel ? gWorld.GetBlock(gTarget.pos.x, gTarget.pos.y, gTarget.pos.z) : gTarget.virtualBlock;
     if (Block(b).shape == SHAPE_BED_HEAD)
         b = BedOtherBlock(b); // (the bed)
+    if (Block(b).shape == SHAPE_DOOR_UPPER)
+        b = DoorOtherBlock(b); // (the door: the upper half is not an item)
     if (b != ID_AIR) {
         gInv.Held().id = (uint16_t)b;
         gInv.Held().count = 1;
@@ -318,13 +341,15 @@ bool TargetHasUse() {
     if (!gTarget.valid || !gTarget.voxel)
         return false;
     const int b = gWorld.GetBlock(gTarget.pos.x, gTarget.pos.y, gTarget.pos.z);
-    return IsContainer(b) || IsBedBlock(b);
+    return IsContainer(b) || IsBedBlock(b) || IsDoorBlock(b);
 }
 
 void UseTargetBlock() {
     const Int3& p = gTarget.pos;
     int b = gWorld.GetBlock(p.x, p.y, p.z);
-    if (IsBedBlock(b))
+    if (IsDoorBlock(b))
+        ToggleDoor(p); // a wooden door swings by hand, either half of it
+    else if (IsBedBlock(b))
         UseBed(p);
     else if (b == ID_CRAFTING_TABLE)
         OpenScreen(SCREEN_CRAFTING, p);
@@ -481,6 +506,13 @@ void PlaceHeldBlock() {
         if (gWorld.GetBlock(head.x, head.y, head.z) != ID_AIR || !CanPlaceAt(head))
             return;
         gWorld.Set(head.x, head.y, head.z, MakeVox(BedOtherBlock(block), meta));
+    }
+    if (Block(block).shape == SHAPE_DOOR) {
+        // its upper half needs the cell above, exactly as a bed's head needs the cell beyond
+        const Int3 upper = DoorOtherCell(p, block);
+        if (gWorld.GetBlock(upper.x, upper.y, upper.z) != ID_AIR || !CanPlaceAt(upper))
+            return;
+        gWorld.Set(upper.x, upper.y, upper.z, MakeVox(DoorOtherBlock(block), meta));
     }
     gWorld.Set(p.x, p.y, p.z, MakeVox(block, meta));
     if (block == ID_FURNACE || block == ID_BLAST_FURNACE || block == ID_SMOKER)

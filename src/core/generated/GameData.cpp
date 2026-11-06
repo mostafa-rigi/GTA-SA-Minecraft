@@ -701,6 +701,8 @@ const BlockDef kBlockDefs[NUM_BLOCKS] = {
     { "white_bed_head", { "White Bed", "Beyaz Yatak" }, { 560, 561, 32, 560, 562, 31 }, 65535, SHAPE_BED_HEAD, RENDER_CUTOUT, 1.00f, 0, 0, false, 0, 1, 1, false, 1, { { 693, 1, 1, 1.0000f, 0 } } },
     { "yellow_bed", { "Yellow Bed", "Sar\xC4\xB1 Yatak" }, { 570, 571, 32, 572, 573, 31 }, 65535, SHAPE_BED, RENDER_CUTOUT, 1.00f, 0, 0, false, 0, 1, 1, false, 1, { { 695, 1, 1, 1.0000f, 0 } } },
     { "yellow_bed_head", { "Yellow Bed", "Sar\xC4\xB1 Yatak" }, { 574, 575, 32, 574, 576, 31 }, 65535, SHAPE_BED_HEAD, RENDER_CUTOUT, 1.00f, 0, 0, false, 0, 1, 1, false, 1, { { 695, 1, 1, 1.0000f, 0 } } },
+    { "oak_door", { "Oak Door", "Me\xC5\x9F" "e Kap\xC4\xB1" }, { 1565, 1565, 1565, 1565, 1565, 1565 }, 65535, SHAPE_DOOR, RENDER_OPAQUE, 2.00f, 2, 0, false, 43, 1, 0, false, 1, { { 697, 1, 1, 1.0000f, 0 } } },
+    { "oak_door_upper", { "Oak Door", "Me\xC5\x9F" "e Kap\xC4\xB1" }, { 1566, 1566, 1566, 1566, 1566, 1566 }, 65535, SHAPE_DOOR_UPPER, RENDER_OPAQUE, 2.00f, 2, 0, false, 43, 1, 0, false, 1, { { 697, 1, 1, 1.0000f, 0 } } },
 };
 
 const ItemDef kItemDefs[395] = {
@@ -2584,7 +2586,7 @@ const CookingRecipe kCooking[102] = {
 const int kNumShaped = 583, kNumShapeless = 214, kNumCooking = 102;
 const int kNumIngredientSets = 510;
 
-const SoundFile kSoundFiles[470] = {
+const SoundFile kSoundFiles[475] = {
     { "dig_stone1.ogg", 1.00f, 1.00f },
     { "dig_stone2.ogg", 1.00f, 1.00f },
     { "dig_stone3.ogg", 1.00f, 1.00f },
@@ -3055,6 +3057,11 @@ const SoundFile kSoundFiles[470] = {
     { "mob_warden_sniff_3.ogg", 0.75f, 1.00f },
     { "mob_warden_sniff_4.ogg", 0.75f, 1.00f },
     { "mob_warden_dig.ogg", 1.00f, 1.00f },
+    { "block_wooden_door_open1.ogg", 0.90f, 1.00f },
+    { "block_wooden_door_open2.ogg", 0.90f, 1.00f },
+    { "block_wooden_door_close1.ogg", 0.90f, 1.00f },
+    { "block_wooden_door_close2.ogg", 0.90f, 1.00f },
+    { "block_wooden_door_close3.ogg", 0.90f, 1.00f },
 };
 const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 0, 4 }, // DIG_STONE
@@ -3199,6 +3206,8 @@ const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 460, 5 }, // WARDEN_LISTENING_ANGRY
     { 465, 4 }, // WARDEN_SNIFF
     { 469, 1 }, // WARDEN_DIG
+    { 470, 2 }, // DOOR_OPEN
+    { 472, 3 }, // DOOR_CLOSE
 };
 
 } // namespace mc

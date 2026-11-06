@@ -59,6 +59,8 @@ struct Mob {
     int huntBeing = -1;        // the host's number of the being it is after (-1: the player, or nobody)
     bool huntValid = false;    // it is after someone (huntBeing says whom; -1 = the player)
     float huntMemory = 0.0f;   // seconds a held prey is still remembered once it slips out of reach
+    float doorHitTime = 0.0f;  // zombie: seconds of steady hitting on the door in doorCell
+    Int3 doorCell{ 0, 0, -1 }; // zombie: the lower cell of the door it is hitting (z < 0: none)
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

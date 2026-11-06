@@ -134,7 +134,8 @@ const std::vector<uint16_t>& CreativeItems(int category) {
         for (int n = 0; n < kCreativeOrderCount; ++n) {
             const uint16_t id = kCreativeOrder[n];
             if (id < NUM_BLOCKS) {
-                if (Block(id).shape != SHAPE_FLUID && Block(id).shape != SHAPE_FIRE && Block(id).shape != SHAPE_BED_HEAD)
+                if (Block(id).shape != SHAPE_FLUID && Block(id).shape != SHAPE_FIRE && Block(id).shape != SHAPE_BED_HEAD &&
+                    Block(id).shape != SHAPE_DOOR_UPPER)
                     lists[std::min<int>(Block(id).category, CAT_COUNT - 1)].push_back(id);
             } else if (IsValidItem(id)) {
                 lists[std::min<int>(Item(id).category, CAT_COUNT - 1)].push_back(id);

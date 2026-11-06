@@ -695,7 +695,9 @@
 "white_bed",
 "white_bed_head",
 "yellow_bed",
-"yellow_bed_head"
+"yellow_bed_head",
+"oak_door",
+"oak_door_upper"
 ],
 "items": [
 "abandoned_camp_map",
