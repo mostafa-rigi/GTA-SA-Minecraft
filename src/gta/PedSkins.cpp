@@ -143,13 +143,17 @@ float SeatedFit(CPed* p, const CVector& up, float headAboveHipPx, CVector* hip) 
 
 void PedSkinsExcludePed(CPed* p) {
     auto* pool = CPools::ms_pPedPool;
-    if (p && pool)
+    // GetRef's slot arithmetic is only defined for pool members: on any
+    // other pointer (the boss's heap-built perception body) the index runs
+    // wild and the slot-map read lands out of bounds. He needs no exclusion
+    // anyway - this system only ever adopts peds out of the pool.
+    if (p && pool && pool->IsObjectValid(p))
         gExcludedRefs.insert(pool->GetRef(p));
 }
 
 void PedSkinsIncludePed(CPed* p) {
     auto* pool = CPools::ms_pPedPool;
-    if (p && pool)
+    if (p && pool && pool->IsObjectValid(p))
         gExcludedRefs.erase(pool->GetRef(p));
 }
 

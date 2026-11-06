@@ -112,8 +112,40 @@ struct BossProxyState {
 };
 BossProxyState gBossProxy;
 
+// He is a heap ped of our own making (new CPed at creation below), never a
+// slot of the game's fixed ped pool - so no pool handle can speak for him,
+// and the game's pool-based culling (population, streaming) cannot see him
+// either. What can be proven locally, every sync, is that the memory still
+// reads as the body we built: a ped entity, the cop type and the model 0 he
+// was created with. Anything else means the game has taken him (a session
+// teardown clears the whole world) or the block was reused, and one more
+// touch through the pointer is how you crash.
+bool BossProxyIsOurs(CPed* ped) {
+    return ped && ped->m_nType == ENTITY_TYPE_PED && ped->m_nPedType == PED_TYPE_COP &&
+           ped->m_nModelIndex == 0;
+}
+
+bool BossProxyAlive(CPed* ped) {
+    return BossProxyIsOurs(ped) && ped->m_fHealth > 0.0f &&
+           ped->m_ePedState != PEDSTATE_DIE && ped->m_ePedState != PEDSTATE_DEAD;
+}
+
+// Drop the pointer and touch NOTHING through it. For the states where the
+// game has already taken the body: removing or deleting through a pointer
+// in that state is a double-free waiting for a frame.
+void BossProxyForget() {
+    if (gBossProxy.ped)
+        Log("boss proxy: his body is gone or no longer reads as ours - forgetting the pointer, hands off");
+    gBossProxy.ped = nullptr;
+    gBossProxy.mobId = 0;
+}
+
 void BossProxyKill() {
     if (gBossProxy.ped) {
+        if (!BossProxyIsOurs(gBossProxy.ped)) {
+            BossProxyForget(); // not ours any more: hands off entirely
+            return;
+        }
         PedSkinsIncludePed(gBossProxy.ped); // his pool ref may be reused: unmark before he goes
         CWorld::Remove(gBossProxy.ped);
         delete gBossProxy.ped;
@@ -144,6 +176,8 @@ void BossProxySync(float dt, CPlayerPed* player) {
         return;
     }
     Mob& m = gMobs[bi];
+    if (gBossProxy.ped && !BossProxyIsOurs(gBossProxy.ped))
+        BossProxyForget(); // the game took him (session teardown): never touch that pointer again
     if (gBossProxy.ped && gBossProxy.mobId != m.id)
         BossProxyKill();
     if (!gBossProxy.ped) {
@@ -162,6 +196,17 @@ void BossProxySync(float dt, CPlayerPed* player) {
         Log("boss proxy up: one invisible cop-type body carries the street's fire for him");
     }
     CPed* ped = gBossProxy.ped;
+    if (!BossProxyAlive(ped)) {
+        // He died in the game: the health top-up only runs while we sync,
+        // and a single explosion-class hit can take the whole 1000 between
+        // frames. A corpse is no perception body - the game is already
+        // running its own death on him, gangs stop aiming at the dead, and
+        // the relay below would read a stuck health value. Retire ours and
+        // let the creation above build a fresh body next frame.
+        Log("boss proxy: he died in the game - retiring the body, a fresh one is built next sync");
+        BossProxyKill();
+        return;
+    }
     // who is fighting him, by the game's own books: a ped whose kill task
     // names the proxy. Throttled to 4 Hz and to the street around him.
     gBossProxy.scanT -= dt;
@@ -258,6 +303,16 @@ void BossProxySync(float dt, CPlayerPed* player) {
     }
 }
 } // namespace
+
+void BossProxySessionReset() {
+    // a new session (load / new game): the game has torn every ped in the
+    // world down, this heap body included - forget the pointer without a
+    // single touch through it. PedSkinsForget has done exactly this for the
+    // villager system since long ago; the proxy was missing from that list,
+    // and the first sync after a load would have killed through the stale
+    // pointer (Remove + delete on a body the game already destroyed).
+    BossProxyForget();
+}
 
 // Host::SpawnGround: grass, earth or sand of the GTA map (rarely anything else), not too steep, not under water
 bool GtaAnimalSpawnGround(const CVector& from, CVector& out) {

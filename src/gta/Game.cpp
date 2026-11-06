@@ -408,6 +408,7 @@ void GameOnNewSession() {
     CombatClear();
     GtaCombatClear();
     MobsClear();
+    BossProxySessionReset();
     PedSkinsForget();
     FishingClear();
     BlocksClear();
