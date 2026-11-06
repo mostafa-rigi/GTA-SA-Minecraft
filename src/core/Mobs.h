@@ -99,6 +99,7 @@ struct Mob {
     int bossState = 0;         // boss: 0 calm, 1 command, 2 combat, 3 hunt, 4 suspicious
     float detect = 0.0f;       // boss: the detection meter, 0..1 (fills by visible fraction)
     float primedT = 0.0f;      // boss: seconds his detection still runs primed (x2)
+    bool sawPlayerAlive = true; // boss: the player was alive at his last tick (the death edge stands him down)
     bool negotiated = false;   // boss: this encounter already had its one talk-first chance
     bool fightStarted = false; // boss: a fight is (or was) in progress this encounter - the gate on talk-first (G): commands belong to the guard context only; summoned into a fight or already engaged, he fights at once and gives no orders
     float loudT = 99.0f;       // boss: seconds since a gunshot-class sound was last heard (the same gate)

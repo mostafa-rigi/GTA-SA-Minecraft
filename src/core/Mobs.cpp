@@ -1275,6 +1275,34 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         m.bossState = BS_SUSPICIOUS; // a hurt or a noise leaves him primed, not calm
 
     const bool playerAlive = gGame.deathTime < 0.0f;
+    // The kill ends the fight - the law of this world: death resets only the
+    // current pressure, the system itself never switches off. The moment the
+    // player dies, a command, fight or hunt in progress stands down: he drops
+    // to primed suspicion and walks back to his Grove anchor to watch, instead
+    // of what the first build did - holding a live lock on a corpse and
+    // replanning a cross-city A* route to the hospital bed every 2.5 s for the
+    // whole 45 s hunt (a train of hitches on the respawn on a 2 GB Core 2 Duo),
+    // until the distance sweep erased him at 320 m anyway and the "posted
+    // boss" was simply gone when the player walked back.
+    if (m.sawPlayerAlive && !playerAlive && m.bossState >= BS_COMMAND) {
+        m.bossState = BS_SUSPICIOUS;
+        m.fightStarted = false;
+        m.detect = 0.45f;  // primed, not blind: the compliance stand-down's own level
+        m.primedT = 60.0f; // ...and its own minute of doubled sharpness
+        m.cmdPhase = 0;
+        m.cmdT = 0.0f;
+        m.huntT = 0.0f;
+        m.huntPhase = 0;
+        m.searchPts.clear();
+        m.searchIdx = 0;
+        m.searchTime = 0.0f;
+        m.route.clear();
+        m.routeIdx = 0;
+        m.routeT = 0.0f;
+        m.lostT = 0.0f;
+        m.targetVisT = 0.0f;
+    }
+    m.sawPlayerAlive = playerAlive;
     const int playerVeh = TheHost().PlayerVehicle();
     const bool inVeh = playerAlive && playerVeh >= 0;
     Vec3 vehCentre, vehFwd, vehSeat, vehVel;
@@ -2939,7 +2967,12 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
             mm.flap += mm.flapping * 2.0f * ticks;
         }
 
-        const float limit = mm.id == gGame.ridingMob ? 1e9f : mm.persistent ? 320.0f : 130.0f;
+        // the boss is a posted man, not a wandering spawn: the distance sweep
+        // never erases him (his own anchor logic walks him home, and his
+        // perception body's teardown rides on his death alone) - the first
+        // build lost him at the 320 m persistent limit the moment his player
+        // respawned across the city
+        const float limit = mm.id == gGame.ridingMob || mm.kind == MOB_SOLDIER ? 1e9f : mm.persistent ? 320.0f : 130.0f;
         if (distToPlayer > limit || mm.pos.z < -120.0f)
             remove = true;
         if (remove) {

@@ -18,6 +18,13 @@ void PedSkinsForget();  // the game deleted all peds (new game / load)
 
 // Switches a ped's GTA model on / off.
 void SetPedDrawn(CPed* ped, bool drawn);
+// Marks a ped as never to be adopted or drawn by this system, and unmarks it.
+// The boss's invisible perception body: the bridge hides that ped itself, in
+// layers (see GtaMobs' BossProxySync); this only guarantees the villager skin
+// can never land on him - a cop-type ped caught visible for one frame at
+// first sight would otherwise be drawn as a pillager standing on the boss.
+void PedSkinsExcludePed(CPed* p);
+void PedSkinsIncludePed(CPed* p);
 // Seated in a vehicle: where the hip is and how small a model must be so its head stays under the roof.
 // headAboveHipPx = model pixels from the hip to the top of the head.
 float SeatedFit(CPed* ped, const CVector& up, float headAboveHipPx, CVector* hip);

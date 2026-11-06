@@ -5951,6 +5951,138 @@ static bool LoadNavGraphFromRepo() {
     return false;
 }
 
+// The pose-bounds regression (repair round after the first boss eye test):
+// every draw state the brain can select is composed exactly as the renderer
+// composes it, and every skinned vertex must stay a man's size from the
+// model's origin - an exploded pose can never ship again. It also pins the
+// two bake defects that test exposed: the crouch must touch the ground (it
+// hovered at +0.47 m), and no gait may sink through or leave the ground
+// plane (the file's directional "gaits" turned out to be one-shot events
+// that did both, and were replaced by the run cycle - see the converter).
+// The one state allowed below -0.15 m is named, not slop: mid-fall in
+// death1 the rifle, rigid on the falling hand, dangles to -0.57 m (the
+// game's own data - in Counter-Strike the weapon drops as its own body;
+// detaching ours on death is a separate step). The floor of -0.60 m
+// leaves it no room to grow.
+static void TestSoldierPoseBounds() {
+    TestHost host;
+    SetHost(&host);
+    CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the bounds sweep meets the real shipped model");
+
+    struct LegOpt { int cat, var; float t[3]; bool gait; };
+    const LegOpt legs[] = {
+        { SP_IDLE, 0, { 0.0f, 1.3f, 2.7f }, false },
+        { SP_WALK, 0, { 0.0f, 0.37f, 0.71f }, true },
+        { SP_RUN, 0, { 0.0f, 0.37f, 0.71f }, true },
+        { SP_RUN, 1, { 0.0f, 0.37f, 0.71f }, true },
+        { SP_RUN, 2, { 0.0f, 0.37f, 0.71f }, true },
+        { SP_RUN, 3, { 0.0f, 0.37f, 0.71f }, true },
+        { SP_CROUCH, 0, { 0.0f, 0.5f, 0.97f }, false },
+        { SP_JUMP, 0, { 0.0f, 0.27f, 0.54f }, false },
+    };
+    struct UpOpt { int cat, var; float t[3]; };
+    const UpOpt ups[] = {
+        { SP_IDLE, 0, { 0.0f, 0.7f, 1.3f } },
+        { SP_AIM, 0, { 0.0f, 0.03f, 0.06f } }, { SP_AIM, 1, { 0.0f, 0.03f, 0.06f } },
+        { SP_AIM, 2, { 0.0f, 0.03f, 0.06f } }, { SP_AIM, 3, { 0.0f, 0.03f, 0.06f } },
+        { SP_AIM, 4, { 0.0f, 0.03f, 0.06f } }, { SP_AIM, 5, { 0.0f, 0.03f, 0.06f } },
+        { SP_SHOOT, 0, { 0.0f, 0.15f, 0.32f } }, { SP_SHOOT, 1, { 0.0f, 0.15f, 0.32f } },
+        { SP_SHOOT, 2, { 0.0f, 0.15f, 0.32f } }, { SP_SHOOT, 3, { 0.0f, 0.15f, 0.32f } },
+        { SP_SHOOT, 4, { 0.0f, 0.15f, 0.32f } }, { SP_SHOOT, 5, { 0.0f, 0.15f, 0.32f } },
+        { SP_RELOAD, 0, { 0.0f, 1.5f, 2.95f } }, { SP_RELOAD, 1, { 0.0f, 1.5f, 2.95f } },
+        { SP_FLINCH, 0, { 0.0f, 0.03f, 0.06f } }, { SP_FLINCH, 1, { 0.0f, 0.03f, 0.06f } },
+    };
+    const float twists[3] = { 0.0f, 1.92f, -1.92f };
+    float worstR = 0.0f, worstLo = 1e9f, worstHi = -1e9f, crouchLo = 1e9f;
+    int bad = 0, swept = 0;
+    auto sweep = [&](const SoldierDrawState& st, bool crouchPose) {
+        float mr = 0, lo = 0, hi = 0;
+        ++swept;
+        if (!SoldierSkinnedExtents(st, &mr, &lo, &hi)) {
+            ++bad;
+            return;
+        }
+        worstR = std::max(worstR, mr);
+        worstLo = std::min(worstLo, lo);
+        worstHi = std::max(worstHi, hi);
+        if (crouchPose)
+            crouchLo = std::min(crouchLo, lo);
+        if (mr > 3.5f || lo < -0.60f || hi > 2.90f) {
+            ++bad;
+            printf("bounds: OUT legs(cat %d var %d t %.2f gait %.2f) up(cat %d var %d t %.2f) full(cat %d var %d t %.2f) twist %.2f -> radial %.2f z [%.2f, %.2f]\n",
+                   st.legCategory, st.legVariant, st.legTime, st.gait, st.upCategory, st.upVariant, st.upTime,
+                   st.fullCategory, st.fullVariant, st.fullTime, st.aimYaw - st.legYaw, mr, lo, hi);
+        }
+    };
+    for (const LegOpt& L : legs)
+        for (const UpOpt& U : ups)
+            for (float tw : twists)
+                for (int k = 0; k < 3; ++k) {
+                    SoldierDrawState st;
+                    st.legCategory = L.cat;
+                    st.legVariant = L.var;
+                    if (L.gait)
+                        st.gait = L.t[k];
+                    else
+                        st.legTime = L.t[k];
+                    st.upCategory = U.cat;
+                    st.upVariant = U.var;
+                    st.upTime = U.t[k];
+                    st.legYaw = 0.0f;
+                    st.aimYaw = tw;
+                    sweep(st, L.cat == SP_CROUCH && (U.cat == SP_AIM || U.cat == SP_SHOOT) && U.var >= 3);
+                }
+    for (int v = 0; v < 3; ++v)
+        for (float t : { 0.0f, 0.6f, 1.2f, 3.4f }) {
+            SoldierDrawState st;
+            st.fullCategory = SP_DEATH;
+            st.fullVariant = v;
+            st.fullTime = t;
+            sweep(st, false);
+        }
+    CHECK(bad == 0, "all %d composed states keep the man a man's size (worst radial %.2f m, lowest %.2f m, highest %.2f m)",
+          swept, worstR, worstLo, worstHi);
+    CHECK(crouchLo <= 0.05f, "crouched, his soles touch the street (lowest vertex %.3f m - the bake once hovered at +0.47)", crouchLo);
+}
+
+// Death resets only the current pressure (repair round, defect B): the moment
+// the player dies, a hunt in progress stands down - no cross-city route is
+// replanned to the respawn, and the posted boss is not swept away by the
+// distance rule while his player lies in a hospital across the map.
+static void TestBossDeathReset() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    CHECK(LoadSoldierBinFromRepo(), "the death-reset proofs meet his real model");
+    auto findBoss = []() {
+        for (size_t i = 0; i < gMobs.size(); ++i)
+            if (gMobs[i].kind == MOB_SOLDIER)
+                return (int)i;
+        return -1;
+    };
+    WideStage();
+    gGame.deathTime = -1.0f;
+    const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+    CHECK(s >= 0, "the boss spawns for the death-reset proof");
+    gMobs[s].bossState = 3; // BS_HUNT, mid-hunt, route planned, pressure on
+    gMobs[s].fightStarted = true;
+    gMobs[s].huntT = 5.0f;
+    gMobs[s].route.push_back(Vec3(60.5f, 0.5f, 10.0f));
+    gGame.deathTime = 0.5f; // the player dies, by his hand, across the street
+    RunMobsB(0.1f, Vec3(30.5f, 0.5f, 11.0f), nullptr);
+    const int b = findBoss();
+    CHECK(b >= 0 && gMobs[b].bossState == 4, "death stands him down to primed suspicion at once (state %d)", b >= 0 ? gMobs[b].bossState : -1);
+    CHECK(b >= 0 && gMobs[b].route.empty() && !gMobs[b].fightStarted && gMobs[b].primedT > 30.0f,
+          "the hunt is wiped: no route, no fight, a primed watch instead");
+    gGame.deathTime = -1.0f; // respawned in a hospital some 600 m away
+    RunMobsB(3.0f, Vec3(600.5f, 0.5f, 11.0f), nullptr);
+    const int b2 = findBoss();
+    CHECK(b2 >= 0, "600 m and a respawn later he is still posted - the distance sweep does not erase him");
+    CHECK(b2 >= 0 && gMobs[b2].bossState != 2 && gMobs[b2].bossState != 3,
+          "and he is not hunting the respawned player across the city (state %d)", b2 >= 0 ? gMobs[b2].bossState : -1);
+    gGame.deathTime = -1.0f;
+}
+
 static void TestBoss() {
     TestHost host;
     SetHost(&host);
@@ -6346,34 +6478,32 @@ static void TestBoss() {
         const Pose stand = EntityPose(Vec3(0, 0, 0), Vec3(0, -1, 0), Vec3(0, 0, 1), Vec3(1, 0, 0), 1.0f);
         SoldierDrawState st; // aim north (+y), strafing east (+x)
         st.legCategory = SP_RUN;
-        st.legVariant = 2; // his own right-strafe cycle
+        st.legVariant = 2; // the right-strafe variant
         st.legTime = 0.3f;
         st.aimYaw = 0.0f;
         st.legYaw = -kPi / 2.0f;
         st.upCategory = SP_AIM;
         st.upVariant = 0;
-        Vec3 legSum(0, 0, 0);
-        float legAbsX = 0.0f, legAbsY = 0.0f, legPeakX = 0.0f;
         int legSamples = 0;
         for (int ph = 0; ph < 8; ++ph) {
             st.gait = ph / 8.0f; // the cycle is driven by the gait phase
             Vec3 d1;
-            if (SoldierLegDir(stand, st, &d1)) {
-                legSum = legSum + d1;
-                legAbsX += std::fabs(d1.x);
-                legAbsY += std::fabs(d1.y);
-                legPeakX = std::max(legPeakX, d1.x);
+            if (SoldierLegDir(stand, st, &d1))
                 ++legSamples;
-            }
         }
         CHECK(legSamples == 8, "the leg direction answers through the cycle");
-        // a sideways gait is sideways-dominant and plants a leg along the travel
-        // at stance; a forward cycle worn sideways would fail both of these
-        CHECK(legPeakX > 0.95f && SoldierGaitStride(SP_RUN, 2) < 0.6f && SoldierGaitStride(SP_RUN, 0) > 2.5f,
-              "at stance the strafe leg plants along the eastward travel (peak %.2f), on its own short stride (%.2f m vs the forward %.2f m)",
-              legPeakX, SoldierGaitStride(SP_RUN, 2), SoldierGaitStride(SP_RUN, 0));
+        // The strafe variants ride the run cycle itself, yawed by the leg
+        // layer - the repair round measured the file's own "left"/"right"
+        // sequences and they are one-shot events, not gaits (root travel up
+        // to 1.4 m, the pelvis sinking to the floor, the figure leaving the
+        // ground plane entirely by the last frames). Looping them was a large
+        // part of the first eye test's "a bit broken all over", so the bake
+        // now carries the run cycle for variants 1/2/3 and the yaw does the
+        // strafing, the way Counter-Strike itself plays it.
+        CHECK(Near(SoldierGaitStride(SP_RUN, 2), SoldierGaitStride(SP_RUN, 0)) && SoldierGaitStride(SP_RUN, 0) > 2.5f,
+              "the strafe rides the run cycle's own stride (%.2f m, shared with the forward %.2f m)",
+              SoldierGaitStride(SP_RUN, 2), SoldierGaitStride(SP_RUN, 0));
         st.gait = 0.3f;
-        // and the strafe is its own gait, not the forward run worn sideways
         {
             SoldierDrawState fwdSt = st;
             fwdSt.legVariant = 0;
@@ -6383,7 +6513,7 @@ static void TestBoss() {
             float diff = 0.0f;
             for (int i = 0; i < 64; ++i)
                 diff = std::max(diff, (la2[i].pos - lb2[i].pos).Length());
-            CHECK(diff > 0.04f, "the strafe cycle is genuinely different leg data from the forward run (strongest bone %.3f m)", diff);
+            CHECK(diff < 0.001f, "the strafe variant IS the forward run cycle - the file's directional sequences are events, not gaits (strongest bone %.3f m)", diff);
         }
         st.upCategory = SP_SHOOT;
         st.upVariant = 0;
@@ -6630,6 +6760,8 @@ int main(int argc, char** argv) {
     TestSoldierModel();
     TestSoldierAimFix();
     TestBoss();
+    TestSoldierPoseBounds();
+    TestBossDeathReset();
     TestPlayerAnim();
     TestRenderers();
     TestSave();

@@ -126,5 +126,10 @@ const int* SoldierBoneParents();
 // The composed state's height span in model space (lowest and highest bone
 // origin, metres) - the span of the whole figure the layers make together.
 bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi);
+// Test support: the skinned figure's true extents for a draw state (farthest
+// vertex from the model's vertical axis, lowest and highest vertex), composed
+// exactly as the renderer composes it. The pose-bounds regression sweeps every
+// state the brain can select through this and refuses an exploded pose.
+bool SoldierSkinnedExtents(const SoldierDrawState& st, float* maxRadial, float* loZ, float* hiZ);
 
 } // namespace mc

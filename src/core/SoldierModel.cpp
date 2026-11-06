@@ -700,4 +700,33 @@ bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi) {
     return true;
 }
 
+// Test support (the pose-bounds regression): the true extents of the SKINNED
+// figure for one draw state - the farthest any vertex lands from the model's
+// vertical axis, and the lowest/highest vertex - composed exactly the way the
+// renderer composes it (layers, waist twist, no cross-fade). An exploded pose
+// (a bone transform gone wrong in a converter rebake or a compose change)
+// shows up here as a vertex metres from the man, and the suite refuses it.
+bool SoldierSkinnedExtents(const SoldierDrawState& st, float* maxRadial, float* loZ, float* hiZ) {
+    if (!gReady || !maxRadial || !loZ || !hiZ)
+        return false;
+    SoldierLocal locals[64];
+    if (!SoldierComposeLocals(st, locals, 64))
+        return false;
+    std::vector<SoldierLocal> lv(locals, locals + gBones);
+    std::vector<Mat> mats;
+    const float twist = Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
+    ComposeWorldMats(lv, st.fullCategory >= 0 ? 0.0f : twist, mats);
+    float mr = 0.0f, lo = 1e9f, hi = -1e9f;
+    for (const Vert& v : gVerts) {
+        const Vec3 p = Apply(mats[v.bone], v.pos);
+        mr = std::max(mr, std::sqrt(p.x * p.x + p.y * p.y));
+        lo = std::min(lo, p.z);
+        hi = std::max(hi, p.z);
+    }
+    *maxRadial = mr;
+    *loZ = lo;
+    *hiZ = hi;
+    return true;
+}
+
 } // namespace mc

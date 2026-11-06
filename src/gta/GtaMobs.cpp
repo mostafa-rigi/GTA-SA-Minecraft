@@ -20,6 +20,7 @@
 #include "Inventory.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "PedSkins.h"
 #include "SoldierModel.h"
 #include "PlayerAnim.h"
 #include "Render3D.h"
@@ -95,9 +96,11 @@ void CarsHitMobs() {
 // and relayed into the boss's core health (MobProxyDamage, capped), and a
 // ped whose own kill task names him is reported as an attacker
 // (MobProvoked) - the boss's K1 self-defence does the rest. He is invisible
-// (entity flag), taskless by construction (position and heading are re-glued
-// every frame; he never gets to walk anywhere), and he dies with the boss:
-// no orphans.
+// in layers (the entity flag alone proved re-decidable by the game - the
+// first eye test saw him; BossProxySync now also strips his clump's render
+// flags every frame and the villager system is told to never skin him),
+// taskless by construction (position and heading are re-glued every frame;
+// he never gets to walk anywhere), and he dies with the boss: no orphans.
 struct BossProxyState {
     CPed* ped = nullptr;
     uint32_t mobId = 0;
@@ -108,6 +111,7 @@ BossProxyState gBossProxy;
 
 void BossProxyKill() {
     if (gBossProxy.ped) {
+        PedSkinsIncludePed(gBossProxy.ped); // his pool ref may be reused: unmark before he goes
         CWorld::Remove(gBossProxy.ped);
         delete gBossProxy.ped;
         gBossProxy.ped = nullptr;
@@ -136,6 +140,8 @@ void BossProxySync(float dt, CPlayerPed* player) {
         ped->SetModelIndex(0);
         CWorld::Add(ped);
         ped->bIsVisible = false;
+        PedSkinsExcludePed(ped);  // the villager system must never adopt or draw him
+        SetPedDrawn(ped, false);  // ...and his clump's atomics lose their render flags at once
         ped->m_fMaxHealth = 1000.0f;
         ped->m_fHealth = 1000.0f;
         gBossProxy.ped = ped;
@@ -196,7 +202,20 @@ void BossProxySync(float dt, CPlayerPed* player) {
     ped->Teleport(CVector(m.pos.x, m.pos.y, m.pos.z + 0.9f), false);
     ped->SetHeading(m.yaw);
     ped->m_vecMoveSpeed = CVector(0, 0, 0);
-    ped->bIsVisible = false; // whatever the game re-decides, he never shows
+    // He never shows - by layers, not by one flag. The entity flag alone was
+    // the first build's only lock, and the game re-decides it (the first boss
+    // eye test saw a separate skin standing on the boss, reaching up out of
+    // his body: this body, rendered - his feet ride 0.9 m above the boss's,
+    // so a shown proxy reads as a second man growing out of him). SetPedDrawn
+    // re-strips the render flag from every atomic of his clump each frame, so
+    // even a clump that streams in late has nothing drawable, whatever the
+    // flag says; the PedSkins exclusion registered at creation covers the
+    // villager overlay. And his skeleton is kept up to date by hand: a ped
+    // the renderer skips stops updating the hit spheres the street's bullets
+    // test against, and he must stay hittable.
+    SetPedDrawn(ped, false);
+    if (ped->m_pRwObject)
+        ped->UpdateRpHAnim();
     // the street's fear while he fights: nearby civilians cower with the
     // game's own duck, a few at a time, four times a second at most
     gBossProxy.cowerT -= dt;

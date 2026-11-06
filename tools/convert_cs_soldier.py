@@ -167,11 +167,35 @@ def bake(urban, comb, plan):
             t = i / OUT_FPS
             loc = sample_locals(urban, seq, t * stretch, clamp, blend)
             frames.append(comb.pose(urban, loc))
+        if spec.get("detrend_root") and len(frames) > 1:
+            # The model's directional gaits (left / right / back) are NOT in-place
+            # cycles in the file: their root bone carries the whole travel of the
+            # move (up to 1.4 m) and sinks steadily to the floor across the cycle
+            # (pelvis z 0.90 -> 0.12 m in baked terms). The game extracts that root
+            # motion itself and plays the gait in place; a runtime that loops the
+            # baked track as-is draws a man who swims off his true position, sinks
+            # into the street and snaps back every cycle - the first boss eye test
+            # called the result "a bit broken all over". Remove the root's linear
+            # trend so the cycle starts and ends at the same root offset: what is
+            # left is the stepping itself (bob and sway stay), loop-clean.
+            p0 = frames[0][0][0]
+            p1 = frames[-1][0][0]
+            n = len(frames)
+            for i, fr in enumerate(frames):
+                k = i / (n - 1.0)
+                pos = tuple(fr[0][0][j] - (p1[j] - p0[j]) * k for j in range(3))
+                fr[0] = (pos, fr[0][1])
+        if spec.get("root_dz"):
+            # a constant root lift/drop for the whole sequence, in model units
+            dz = spec["root_dz"]
+            for fr in frames:
+                pos = (fr[0][0][0], fr[0][0][1], fr[0][0][2] + dz)
+                fr[0] = (pos, fr[0][1])
         seqs.append((spec["cat"], spec["layer"], 1 if spec["loop"] else 0, frames))
     return seqs
 
 
-def measure_stride(mdl, seq, scale, axis=0):
+def measure_stride(mdl, seq, scale, axis=0, detrend_root=False):
     """The gait's own stride, measured off the model: how far the planted foot
     travels against the pelvis during its stance, per second of stance
     (that rate IS the ground speed at which the feet do not slip), times the cycle
@@ -186,6 +210,12 @@ def measure_stride(mdl, seq, scale, axis=0):
         mats = mdl.bone_matrices(seq, f)
         frames.append([np.array(mats[bi])[:3, 3] * scale for bi in range(len(mdl.bones))])
     frames = np.array(frames)  # (F, bones, 3) metres
+    if detrend_root and len(frames) > 1:
+        # measure the gait the way it is baked: with the root's linear trend
+        # removed (see bake()), so the directional gaits' root travel and sink
+        # do not corrupt the toe-vs-pelvis stance reading
+        ramp = (frames[-1, 0] - frames[0, 0]) * (np.arange(len(frames)) / (len(frames) - 1.0))[:, None]
+        frames = frames - ramp[:, None, :]
     speeds = []
     for ti in toes:
         x = frames[:, ti, axis] - frames[:, i_pelvis, axis]
@@ -341,9 +371,23 @@ def main():
     def native_frames(seq):
         return max(2, int(round(seq.numframes / seq.fps * OUT_FPS)))
 
+    # crouch_idle is authored around a root that sits higher than the standing
+    # root: baked as-is, the crouched man's soles hover over the street (the
+    # first boss eye test's floating crouch). The game lowers the whole figure
+    # when a player ducks; our runtime places his feet at the ground instead,
+    # so the bake drops the crouch root by exactly the hover - measured here
+    # off the model itself, as the crouch cycle's lowest skinned point above
+    # the standing soles' line (model units; the ground lift is added later).
+    crouch_min = min(float(skin_corners(urban, urban.bone_matrices(S["crouch_idle"], f))[:, 2].min())
+                     for f in range(S["crouch_idle"].numframes))
+    crouch_root_dz = -(crouch_min + zshift)
+    print("crouch root drop %.2f units (%.3f m): the crouch cycle's soles hovered that far over the ground"
+          % (crouch_root_dz, crouch_root_dz * scale))
+
     # V3 plan: layers stored separately. Legs variants: WALK 0 = forward; RUN
-    # 0 = forward, 1 = strafe-left, 2 = strafe-right, 3 = back (the model's own
-    # directional gaits). Upper variants: AIM/SHOOT 0..2 = standing pitch rows
+    # 0 = forward, 1 = strafe-left, 2 = strafe-right, 3 = back (all four carry
+    # the run cycle - the file's directional sequences are events, not gaits;
+    # see the note at the RUN entries below). Upper variants: AIM/SHOOT 0..2 = standing pitch rows
     # (level/up/down of the aim grid), 3..5 = the crouched rows; RELOAD 0 =
     # standing, 1 = crouched; FLINCH 0 = gut, 1 = head.
     plan = [
@@ -351,10 +395,25 @@ def main():
         dict(cat=CAT_IDLE, layer=LYR_LEG, loop=True, frames=122, seq=spec(S["idle1"])),
         dict(cat=CAT_WALK, layer=LYR_LEG, loop=True, frames=33, seq=spec(S["walk"])),
         dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=19, seq=spec(S["run"])),
-        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["left"]), seq=spec(S["left"])),
-        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["right"]), seq=spec(S["right"])),
-        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["back"]), seq=spec(S["back"])),
-        dict(cat=CAT_CROUCH, layer=LYR_LEG, loop=True, frames=30, seq=spec(S["crouch_idle"])),
+        # RUN 1/2/3 (strafe-left, strafe-right, back) are baked from the model's
+        # own "run" cycle, NOT from the file's "left"/"right"/"back" sequences:
+        # measured off urban.mdl itself, those three are one-shot events, not
+        # in-place gaits - their root carries up to 1.4 m of travel, the pelvis
+        # sinks to the floor ("left": z 0.90 -> 0.12 m), and by the last frames
+        # the whole figure has left the ground plane (toes 0.8 m up, head at
+        # the floor in "back": a backward fall). Looping any of them drew a man
+        # who sank, swam off his position and snapped back - a large part of
+        # the first boss eye test's "a bit broken all over". Counter-Strike
+        # itself strafes by yawing the leg layer to the movement while the run
+        # cycle steps - which is exactly what the runtime's two-layer compose
+        # does with legYaw - so the strafe and back variants carry the run
+        # cycle and the yaw does the rest. (bake() still supports detrend_root
+        # for any future sequence that only needs its root trend removed.)
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=19, seq=spec(S["run"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=19, seq=spec(S["run"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=19, seq=spec(S["run"])),
+        dict(cat=CAT_CROUCH, layer=LYR_LEG, loop=True, frames=30, seq=spec(S["crouch_idle"]),
+             root_dz=crouch_root_dz),
         dict(cat=CAT_JUMP, layer=LYR_LEG, loop=False, frames=native_frames(S["jump"]),
              seq=spec(S["jump"], 1.0, True)),
         # ---- upper layer ----
@@ -407,18 +466,10 @@ def main():
 
     stride_walk, v_walk = measure_stride(urban, S["walk"], scale)
     stride_run, v_run = measure_stride(urban, S["run"], scale)
-    try:
-        stride_strafe_l, _vl = measure_stride(urban, S["left"], scale, axis=1)
-        stride_strafe_r, _vr = measure_stride(urban, S["right"], scale, axis=1)
-        stride_strafe = (stride_strafe_l + stride_strafe_r) * 0.5
-    except SystemExit:
-        stride_strafe = stride_run
-        print("strafe stride unmeasurable - falling back to the run stride")
-    try:
-        stride_back, _vb = measure_stride(urban, S["back"], scale)
-    except SystemExit:
-        stride_back = stride_run
-        print("back stride unmeasurable - falling back to the run stride")
+    # the strafe and back variants ARE the run cycle (see the plan), so they
+    # share its stride by construction
+    stride_strafe = stride_run
+    stride_back = stride_run
     print("strides: walk %.3f m (feet match the ground at %.2f m/s), run %.3f m (at %.2f m/s), strafe %.3f m, back %.3f m"
           % (stride_walk, v_walk, stride_run, v_run, stride_strafe, stride_back))
     muzzle, butt = gun_anchors(urban, weapon, comb, scale)

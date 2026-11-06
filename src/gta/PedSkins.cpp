@@ -1,5 +1,7 @@
 #include "PedSkins.h"
 
+#include <unordered_set>
+
 #include "CCamera.h"
 #include "CCarCtrl.h"
 #include "CObject.h"
@@ -37,6 +39,7 @@ struct Look : NpcLook {
 };
 
 std::unordered_map<int, Look> gLooks; // by ped pool reference
+std::unordered_set<int> gExcludedRefs; // pool refs never adopted or drawn (the boss's perception body)
 bool gActive = false;
 unsigned gFrame = 0;
 
@@ -138,9 +141,22 @@ float SeatedFit(CPed* p, const CVector& up, float headAboveHipPx, CVector* hip) 
     return Clamp(avail / (headAboveHipPx / 16.0f), 0.5f, kNpcScale);
 }
 
+void PedSkinsExcludePed(CPed* p) {
+    auto* pool = CPools::ms_pPedPool;
+    if (p && pool)
+        gExcludedRefs.insert(pool->GetRef(p));
+}
+
+void PedSkinsIncludePed(CPed* p) {
+    auto* pool = CPools::ms_pPedPool;
+    if (p && pool)
+        gExcludedRefs.erase(pool->GetRef(p));
+}
+
 void PedSkinsForget() {
     gLooks.clear();
     gLaunched.clear();
+    gExcludedRefs.clear();
 }
 
 // shows the GTA models again
@@ -177,6 +193,17 @@ void PedSkinsUpdate(float dt, CPlayerPed* player) {
         if (!p || p == player || p->IsPlayer())
             continue;
         const int ref = pool->GetRef(p);
+        if (gExcludedRefs.count(ref)) {
+            // never ours to skin over: if a race adopted him before the
+            // exclusion landed, hand him back undrawn and forget him
+            auto ex = gLooks.find(ref);
+            if (ex != gLooks.end()) {
+                if (ex->second.hidden)
+                    SetPedDrawn(p, false);
+                gLooks.erase(ex);
+            }
+            continue;
+        }
         auto it = gLooks.find(ref);
         if (it == gLooks.end()) {
             Look l;
