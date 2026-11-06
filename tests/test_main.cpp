@@ -4153,6 +4153,14 @@ static void TestModels() {
     CHECK(sink.quads[0] == 60 && sink.lo.z > -0.01f && sink.lo.z < 0.02f, "a spider stands on its own feet, not in the air (lowest point %.3f m)", sink.lo.z);
 
     sink.Reset();
+    DrawMob(MOB_ZOMBIE, stand, MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.lo.z > -0.01f && sink.lo.z < 0.02f, "a zombie stands on its own feet, not sunk in the ground (lowest point %.3f m)", sink.lo.z);
+
+    sink.Reset();
+    DrawMob(MOB_SKELETON, stand, MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.lo.z > -0.01f && sink.lo.z < 0.02f, "a skeleton stands on its own feet, not sunk in the ground (lowest point %.3f m)", sink.lo.z);
+
+    sink.Reset();
     HumanoidAnim a;
     PlayerAnimInput in;
     ComputePlayerAnim(a, in);

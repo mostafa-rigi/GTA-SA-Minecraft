@@ -800,35 +800,39 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
     }
     case MOB_ZOMBIE: {
         // ZombieModel (64 x 64): a Steve-shaped corpse, both arms stretched out in front the way zombies hold them;
-        // a blow (a.attack) chops the arms down
+        // a blow (a.attack) chops the arms down. Like every model it stands with its lowest point on the feet
+        // plane (y = 24 px in this frame): the 32 px frame is drawn 8 px higher than first sketched, so the
+        // 12 px legs pivoting at y = 12 end exactly on the plane instead of 8 px (0.5 m) under the ground.
         st.tex = ENT_ZOMBIE;
         const float chop = std::sin(Clamp(a.attack, 0.0f, 1.0f) * kPi) * 0.55f;
         const float armRx = -kPi / 2.0f + chop;
-        McCube(Part(base, 0, 8, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
-        McCube(Part(base, 0, 8, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
-        McCube(Part(base, -6, 10, 0, armRx, 0, 0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st);
-        McCube(Part(base, 6, 10, 0, armRx, 0, -0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st, 0.0f, true);
-        McCube(Part(base, -2, 20, 0, legA, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st);
-        McCube(Part(base, 2, 20, 0, legB, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st, 0.0f, true);
+        McCube(Part(base, 0, 0, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
+        McCube(Part(base, 0, 0, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
+        McCube(Part(base, -6, 2, 0, armRx, 0, 0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st);
+        McCube(Part(base, 6, 2, 0, armRx, 0, -0.06f), -2, -2, -2, 4, 12, 4, 40, 16, st, 0.0f, true);
+        McCube(Part(base, -2, 12, 0, legA, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st);
+        McCube(Part(base, 2, 12, 0, legB, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st, 0.0f, true);
         break;
     }
     case MOB_SKELETON: {
         // SkeletonModel (64 x 64): the same frame as a man's, but the limbs are bare 2 px bone; while it aims and
-        // just after it looses (a.attack) both arms come up with a plain brown bow in the right hand
+        // just after it looses (a.attack) both arms come up with a plain brown bow in the right hand. Like every
+        // model it stands with its lowest point on the feet plane (y = 24 px in this frame): the 32 px frame is
+        // drawn 8 px higher than first sketched, bow hand included, so the legs end on the plane, not under it.
         st.tex = ENT_SKELETON;
         const float aim = Clamp(a.attack * 2.0f, 0.0f, 1.0f);
         const float armRx = -kPi / 2.0f * aim;
-        McCube(Part(base, 0, 8, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
-        McCube(Part(base, 0, 8, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
-        McCube(Part(base, -5, 10, 0, armRx + legB * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st);
-        McCube(Part(base, 5, 10, 0, armRx + legA * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st, 0.0f, true);
-        McCube(Part(base, -2, 20, 0, legA, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st);
-        McCube(Part(base, 2, 20, 0, legB, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st, 0.0f, true);
+        McCube(Part(base, 0, 0, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
+        McCube(Part(base, 0, 0, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
+        McCube(Part(base, -5, 2, 0, armRx + legB * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st);
+        McCube(Part(base, 5, 2, 0, armRx + legA * (1.0f - aim), 0, 0), -1, -2, -1, 2, 12, 2, 40, 16, st, 0.0f, true);
+        McCube(Part(base, -2, 12, 0, legA, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st);
+        McCube(Part(base, 2, 12, 0, legB, 0, 0), -1, 0, -1, 2, 12, 2, 4, 16, st, 0.0f, true);
         // the bow: two bent limbs and a string, flat brown and grey (no bow lives on the entity sheet)
         ModelStyle bow = st;
         bow.untextured = true;
         bow.r *= 0.45f; bow.g *= 0.32f; bow.b *= 0.18f;
-        const Pose hand = aim > 0.02f ? Part(base, -5, 10, -12) : Part(base, -5, 21, -1);
+        const Pose hand = aim > 0.02f ? Part(base, -5, 2, -12) : Part(base, -5, 13, -1);
         McCube(hand, -0.5f, -6, 0, 1, 5, 1, 0, 0, bow);
         McCube(hand, -0.5f, 1, 0, 1, 5, 1, 0, 0, bow);
         ModelStyle str = st;
