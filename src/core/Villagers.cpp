@@ -111,7 +111,7 @@ NpcLook NpcStart(int kind, int profession, float health, bool dead) {
     l.lastHealth = health;
     l.say = 4.0f + Rand01() * 40.0f;
     l.death = dead ? 10.0f : -1.0f;
-    l.offer = rand() % 5;
+    l.offer = McsaRand() % 5;
     return l;
 }
 
@@ -211,7 +211,7 @@ void VillagerTrade(int profession, int& offer, const Vec3& head) {
 }
 
 void DropVillagerLoot(const Vec3& at, bool illager) {
-    SpawnXp(at, illager ? 5 + rand() % 3 : 1 + rand() % 5);
+    SpawnXp(at, illager ? 5 + McsaRand() % 3 : 1 + McsaRand() % 5);
     struct Loot { uint16_t id; int maxCount; float chance; };
     if (illager) {
         // pillager loot
@@ -219,14 +219,14 @@ void DropVillagerLoot(const Vec3& at, bool illager) {
                               { ID_IRON_INGOT, 1, 0.15f } };
         for (auto& l : loot)
             if (Rand01() < l.chance)
-                SpawnDropItem(at, l.id, 1 + rand() % l.maxCount);
+                SpawnDropItem(at, l.id, 1 + McsaRand() % l.maxCount);
     } else {
         const Loot loot[] = { { ID_ROTTEN_FLESH, 2, 0.45f }, { ID_BONE, 2, 0.3f }, { ID_STRING, 2, 0.35f },
                               { ID_GUNPOWDER, 2, 0.35f }, { ID_ARROW, 3, 0.3f }, { ID_PAPER, 2, 0.15f },
                               { ID_BREAD, 2, 0.25f }, { ID_EMERALD, 1, 0.12f } };
         for (auto& l : loot)
             if (Rand01() < l.chance)
-                SpawnDropItem(at, l.id, 1 + rand() % l.maxCount);
+                SpawnDropItem(at, l.id, 1 + McsaRand() % l.maxCount);
     }
 }
 

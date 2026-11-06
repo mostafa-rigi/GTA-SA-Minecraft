@@ -75,6 +75,18 @@ inline float Smoothstep(float a, float b, float x) {
 
 float Rand01(); // a random number, 0 <= r < 1
 
+// The core rolls its own dice. The C library's rand() sequence for a given
+// srand seed is implementation-defined - glibc and the Microsoft CRT produce
+// different streams - so any behaviour fed by it (a strafe's timing, a burst's
+// length, a voice's silence) came out differently on CI than on a developer's
+// machine, and a test could pass here and fail there on dice alone. McsaRand
+// is one small generator (the classic 214013/2531011 LCG, output from the high
+// bits - the Microsoft stream, so CI keeps the dice it has always rolled),
+// bit-identical on every platform. Tests seed it through McsaSrand, exactly
+// where they used to call srand.
+void McsaSrand(unsigned seed);
+int McsaRand(); // [0, 32767], like rand()
+
 // Six face directions. Order is used everywhere (meshing, textures, raycast normals).
 enum Face : int { FACE_EAST = 0, FACE_WEST, FACE_NORTH, FACE_SOUTH, FACE_TOP, FACE_BOTTOM };
 constexpr Int3 FACE_DIR[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };

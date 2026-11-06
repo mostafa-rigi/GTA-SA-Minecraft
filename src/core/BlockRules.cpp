@@ -205,15 +205,15 @@ void SetFire(const Int3& p, int age) {
 void BurnOut(const Int3& n, int chance, int age) {
     const int b = gWorld.GetBlock(n.x, n.y, n.z);
     const int odds = FireBurn(b);
-    if (odds <= 0 || rand() % chance >= odds)
+    if (odds <= 0 || McsaRand() % chance >= odds)
         return;
     if (b == ID_TNT) {
         gWorld.Set(n.x, n.y, n.z, MakeVox(ID_AIR));
         IgniteTnt(n, 4.0f);
         return;
     }
-    if (rand() % (age + 10) < 5)
-        SetFire(n, age + (rand() % 5) / 4);
+    if (McsaRand() % (age + 10) < 5)
+        SetFire(n, age + (McsaRand() % 5) / 4);
     else
         gWorld.Set(n.x, n.y, n.z, MakeVox(ID_AIR));
 }
@@ -232,7 +232,7 @@ void FireTick(const Int3& p) {
         gWorld.Set(p.x, p.y, p.z, MakeVox(ID_AIR));
         return;
     }
-    const int newAge = std::min(15, age + (rand() % 3) / 2);
+    const int newAge = std::min(15, age + (McsaRand() % 3) / 2);
     if (newAge != age)
         gWorld.SetRaw(p.x, p.y, p.z, MakeVox(ID_FIRE, newAge));
     const int below = gWorld.GetBlock(p.x, p.y, p.z - 1);
@@ -241,7 +241,7 @@ void FireTick(const Int3& p) {
             gWorld.Set(p.x, p.y, p.z, MakeVox(ID_AIR));
         return;
     }
-    if (age == 15 && rand() % 4 == 0 && FireBurn(below) == 0) {
+    if (age == 15 && McsaRand() % 4 == 0 && FireBurn(below) == 0) {
         gWorld.Set(p.x, p.y, p.z, MakeVox(ID_AIR));
         return;
     }
@@ -263,18 +263,18 @@ void FireTick(const Int3& p) {
                     continue;
                 const int k = 100 + (dz > 1 ? (dz - 1) * 100 : 0);
                 const int l = (odds + 40 + 14) / (age + 30);
-                if (l > 0 && rand() % k <= l)
-                    SetFire(q, age + (rand() % 5) / 4);
+                if (l > 0 && McsaRand() % k <= l)
+                    SetFire(q, age + (McsaRand() % 5) / 4);
             }
 }
 
 // LavaFluid.randomTick: lava sets things around it on fire
 void LavaTick(const Int3& p) {
-    const int i = rand() % 3;
+    const int i = McsaRand() % 3;
     if (i > 0) {
         Int3 q = p;
         for (int j = 0; j < i; ++j) {
-            q = { q.x + rand() % 3 - 1, q.y + rand() % 3 - 1, q.z + 1 };
+            q = { q.x + McsaRand() % 3 - 1, q.y + McsaRand() % 3 - 1, q.z + 1 };
             const int b = gWorld.GetBlock(q.x, q.y, q.z);
             if (b == ID_AIR) {
                 if (IgniteOddsAt(q) > 0 || TheHost().FlammableUnder(q)) {
@@ -287,7 +287,7 @@ void LavaTick(const Int3& p) {
         }
     } else {
         for (int k = 0; k < 3; ++k) {
-            const Int3 q{ p.x + rand() % 3 - 1, p.y + rand() % 3 - 1, p.z };
+            const Int3 q{ p.x + McsaRand() % 3 - 1, p.y + McsaRand() % 3 - 1, p.z };
             const Int3 up{ q.x, q.y, q.z + 1 };
             if (gWorld.GetBlock(up.x, up.y, up.z) == ID_AIR &&
                 (FireIgnite(gWorld.GetBlock(q.x, q.y, q.z)) > 0 || TheHost().FlammableUnder(up)))
@@ -407,13 +407,13 @@ void Blob(int x, int y, int top, int leaves, int lower, int upper) {
 
 bool GrowAt(const Int3& p, const Species& s) {
     const int x = p.x, y = p.y, z = p.z;
-    int height = 4 + rand() % 3;
+    int height = 4 + McsaRand() % 3;
     if (s.log == ID_BIRCH_LOG)
-        height = 5 + rand() % 3;
+        height = 5 + McsaRand() % 3;
     else if (s.log == ID_SPRUCE_LOG)
-        height = 6 + rand() % 4;
+        height = 6 + McsaRand() % 4;
     else if (s.log == ID_JUNGLE_LOG)
-        height = 6 + rand() % 5;
+        height = 6 + McsaRand() % 5;
     for (int h = 1; h <= height + 1; ++h)
         if (!Free(x, y, z + h))
             return false;
@@ -441,9 +441,9 @@ bool GrowAt(const Int3& p, const Species& s) {
         Leaf(x, y, z + height, s.leaves);
     } else if (s.log == ID_ACACIA_LOG || s.log == ID_CHERRY_LOG) {
         // the trunk bends to one side, a flat crown on top
-        const int dir = rand() % 4;
+        const int dir = McsaRand() % 4;
         const Int3& d = FACE_DIR[dir];
-        const int straight = 2 + rand() % 2;
+        const int straight = 2 + McsaRand() % 2;
         int cx = x, cy = y, cz = z;
         for (int h = 0; h < height; ++h) {
             if (h >= straight) {
@@ -662,7 +662,7 @@ bool ApplyBoneMeal(bool voxel, const Int3& cell, const Vec3& point, const Vec3& 
     auto spread = [&](float cx, float cy, float cz) {
         int placed = 0;
         for (int i = 0; i < 24 && placed < 10; ++i) {
-            const int x = FloorI(cx) + rand() % 7 - 3, y = FloorI(cy) + rand() % 7 - 3;
+            const int x = FloorI(cx) + McsaRand() % 7 - 3, y = FloorI(cy) + McsaRand() % 7 - 3;
             const uint16_t plant = Rand01() < 0.7f ? ID_SHORT_GRASS : (Rand01() < 0.85f ? RandomFlower() : ID_FERN);
             // a grass block nearby?
             bool done = false;
@@ -713,7 +713,7 @@ uint16_t RandomFlower() {
     static const uint16_t kFlowers[] = { ID_DANDELION, ID_POPPY, ID_BLUE_ORCHID, ID_ALLIUM, ID_AZURE_BLUET, ID_RED_TULIP,
                                          ID_ORANGE_TULIP, ID_WHITE_TULIP, ID_PINK_TULIP, ID_OXEYE_DAISY, ID_CORNFLOWER,
                                          ID_LILY_OF_THE_VALLEY };
-    return kFlowers[rand() % (sizeof(kFlowers) / sizeof(kFlowers[0]))];
+    return kFlowers[McsaRand() % (sizeof(kFlowers) / sizeof(kFlowers[0]))];
 }
 
 bool IsSoil(int b) {

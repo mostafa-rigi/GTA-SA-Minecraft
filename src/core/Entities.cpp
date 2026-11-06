@@ -59,7 +59,7 @@ void SpawnBlockDrops(int block, const Vec3& at) {
             continue;
         if (dr.group)
             groupDone[dr.group & 7] = true;
-        int count = dr.min + (dr.max > dr.min ? rand() % (dr.max - dr.min + 1) : 0);
+        int count = dr.min + (dr.max > dr.min ? McsaRand() % (dr.max - dr.min + 1) : 0);
         if (IsValidItem(dr.item) && count > 0)
             SpawnDropItem(at, dr.item, count);
     }
@@ -279,7 +279,7 @@ void TntTick(float dt) {
         t.vel.y *= drag;
         t.pos = np;
         // smoke from the fuse
-        if (rand() % 3 == 0) {
+        if (McsaRand() % 3 == 0) {
             Particle p;
             p.pos = t.pos + Vec3(0, 0, 1.1f);
             p.vel = Vec3(0, 0, 0.8f);

@@ -339,7 +339,7 @@ bool AddXp(int points) {
 }
 
 int XpForBlock(int block) {
-    auto range = [](int lo, int hi) { return lo + rand() % (hi - lo + 1); };
+    auto range = [](int lo, int hi) { return lo + McsaRand() % (hi - lo + 1); };
     switch (block) {
     case ID_COAL_ORE: case ID_DEEPSLATE_COAL_ORE: return range(0, 2);
     case ID_DIAMOND_ORE: case ID_DEEPSLATE_DIAMOND_ORE: return range(3, 7);
@@ -424,7 +424,7 @@ bool HealthTick(float dt, float& health, float maxHealth, float direct, float* h
                 p.anim = 1;
                 p.size = 0.12f;
                 p.gravity = 1.5f;
-                p.color = rand() % 2 ? 0xFFF0E040 : 0xFF60E040;
+                p.color = McsaRand() % 2 ? 0xFFF0E040 : 0xFF60E040;
                 p.glow = true;
                 SpawnParticle(p);
             }

@@ -34,8 +34,8 @@ void HitParticles(const Vec3& at, const Vec3& normal, int block) {
         pt.vel = normal * 1.5f + Vec3(Rand01() - 0.5f, Rand01() - 0.5f, Rand01()) * 1.5f;
         pt.maxLife = pt.life = 0.4f + Rand01() * 0.3f;
         pt.tile = tile;
-        pt.u = (rand() % 4) * 0.25f;
-        pt.v = (rand() % 4) * 0.25f;
+        pt.u = (McsaRand() % 4) * 0.25f;
+        pt.v = (McsaRand() % 4) * 0.25f;
         pt.sub = 0.25f;
         pt.size = 0.05f;
         SpawnParticle(pt);

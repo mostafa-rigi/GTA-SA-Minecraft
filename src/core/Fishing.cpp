@@ -40,12 +40,12 @@ ItemStack RollLoot() {
     } else if (r < 0.95f) {
         static const uint16_t junk[] = { ID_LEATHER, ID_BONE, ID_STRING, ID_BOWL, ID_STICK, ID_INK_SAC, ID_ROTTEN_FLESH,
                                          ID_FISHING_ROD };
-        s.id = junk[rand() % 8];
+        s.id = junk[McsaRand() % 8];
         if (s.id == ID_FISHING_ROD)
             s.damage = (uint16_t)(Item(ID_FISHING_ROD).durability * (0.3f + Rand01() * 0.6f));
     } else {
         static const uint16_t treasure[] = { ID_NAME_TAG, ID_SADDLE, ID_BOW, ID_NAUTILUS_SHELL };
-        s.id = treasure[rand() % 4];
+        s.id = treasure[McsaRand() % 4];
     }
     return s;
 }
@@ -58,7 +58,7 @@ void StartFloating(float waterZ) {
     gBobber.wait = 4.0f + Rand01() * 14.0f;
     gBobber.dip = 0.15f;
     for (int i = 0; i < 6; ++i)
-        WaterParticle(gBobber.pos, TILE_P_SPLASH_0 + rand() % 4, 2.0f, 0.3f);
+        WaterParticle(gBobber.pos, TILE_P_SPLASH_0 + McsaRand() % 4, 2.0f, 0.3f);
     PlaySfx(SND_BOBBER_SPLASH, &gBobber.pos, 0.2f, 1.2f + Rand01() * 0.4f);
 }
 } // namespace
@@ -87,9 +87,9 @@ bool FishingUse() {
     int wear = 0;
     if (gBobber.state == BOB_FLOATING && gBobber.nibble > 0.0f) {
         SpawnDrop(gBobber.pos + Vec3(0, 0, 0.3f), RollLoot(), pull, 0.3f);
-        SpawnXp(playerPos + Vec3(0, 0, -0.5f), 1 + rand() % 6);
+        SpawnXp(playerPos + Vec3(0, 0, -0.5f), 1 + McsaRand() % 6);
         for (int i = 0; i < 8; ++i)
-            WaterParticle(gBobber.pos, TILE_P_SPLASH_0 + rand() % 4, 3.0f, 0.4f);
+            WaterParticle(gBobber.pos, TILE_P_SPLASH_0 + McsaRand() % 4, 3.0f, 0.4f);
         gSurvival.exhaustion += 0.05f;
         wear = 1;
     } else if (gBobber.state == BOB_HOOKED_MOB) {
@@ -216,7 +216,7 @@ void FishingTick(float dt) {
         const Vec3 surface(gBobber.pos.x, gBobber.pos.y, gBobber.waterZ);
         if (gBobber.nibble > 0.0f) {
             gBobber.nibble -= dt;
-            if (rand() % 3 == 0)
+            if (McsaRand() % 3 == 0)
                 WaterParticle(surface, TILE_P_BUBBLE, 1.0f, 0.3f);
             if (gBobber.nibble <= 0.0f)
                 gBobber.wait = 4.0f + Rand01() * 10.0f; // it got away
@@ -225,14 +225,14 @@ void FishingTick(float dt) {
             // the wake of the fish coming closer
             float r = gBobber.approach * 1.6f;
             Vec3 at = surface + Vec3(std::cos(gBobber.approachAngle) * r, std::sin(gBobber.approachAngle) * r, 0.0f);
-            if (rand() % 2 == 0)
-                WaterParticle(at, TILE_P_SPLASH_0 + rand() % 4, 0.8f, 0.12f);
+            if (McsaRand() % 2 == 0)
+                WaterParticle(at, TILE_P_SPLASH_0 + McsaRand() % 4, 0.8f, 0.12f);
             if (gBobber.approach <= 0.0f) {
                 gBobber.nibble = 1.0f + Rand01() * 1.0f;
                 gBobber.dip = 0.3f;
                 PlaySfx(SND_BOBBER_SPLASH, &gBobber.pos, 0.4f, 1.0f + (Rand01() - Rand01()) * 0.4f);
                 for (int i = 0; i < 10; ++i)
-                    WaterParticle(surface, i % 2 ? TILE_P_BUBBLE : TILE_P_SPLASH_0 + rand() % 4, 2.5f, 0.35f);
+                    WaterParticle(surface, i % 2 ? TILE_P_BUBBLE : TILE_P_SPLASH_0 + McsaRand() % 4, 2.5f, 0.35f);
             }
         } else {
             gBobber.wait -= dt;

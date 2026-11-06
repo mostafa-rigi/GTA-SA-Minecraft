@@ -162,6 +162,7 @@ struct Mob {
     int groundBad = 0;         // soldier: consecutive ground samples his feet refused (see MoveMob)
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
+    float steerSide = 0.0f;    // soldier: the side (+1/-1) his current obstacle is being rounded on; 0 = none
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

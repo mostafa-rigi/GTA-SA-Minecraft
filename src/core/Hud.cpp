@@ -115,7 +115,7 @@ void HotbarAndStats(Pieces& P, const HudFacts& f) {
             const bool poisoned = HasEffect(EFFECT_POISON);
             for (int i = 0; i < 10; ++i) {
                 float x = hx + i * 8;
-                float yy = y + (shake ? (float)((rand() % 3) - 1) : 0.0f);
+                float yy = y + (shake ? (float)((McsaRand() % 3) - 1) : 0.0f);
                 P.Sprite(AT_BOTTOM, GUI_HEART_CONTAINER, x, yy);
                 if (hp >= i * 2 + 2)
                     P.Sprite(AT_BOTTOM, poisoned ? GUI_HEART_POISONED_FULL : GUI_HEART_FULL, x, yy);
@@ -142,7 +142,7 @@ void HotbarAndStats(Pieces& P, const HudFacts& f) {
             const bool hungry = HasEffect(EFFECT_HUNGER);
             for (int i = 0; i < 10; ++i) {
                 float x = hx + (182 - 9 - i * 8);
-                float yy = y + (gSurvival.saturation <= 0.0f && food <= 6 ? (float)((rand() % 3) - 1) : 0.0f);
+                float yy = y + (gSurvival.saturation <= 0.0f && food <= 6 ? (float)((McsaRand() % 3) - 1) : 0.0f);
                 P.Sprite(AT_BOTTOM, hungry ? GUI_FOOD_EMPTY_HUNGER : GUI_FOOD_EMPTY, x, yy);
                 if (food >= i * 2 + 2)
                     P.Sprite(AT_BOTTOM, hungry ? GUI_FOOD_FULL_HUNGER : GUI_FOOD_FULL, x, yy);

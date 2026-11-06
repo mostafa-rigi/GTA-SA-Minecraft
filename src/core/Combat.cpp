@@ -57,8 +57,8 @@ void Puff(const Vec3& at, uint16_t tile, int count) {
         p.tile = tile;
         p.size = 0.06f;
         p.sub = 0.5f;
-        p.u = (rand() % 2) * 0.5f;
-        p.v = (rand() % 2) * 0.5f;
+        p.u = (McsaRand() % 2) * 0.5f;
+        p.v = (McsaRand() % 2) * 0.5f;
         SpawnParticle(p);
     }
 }
@@ -80,7 +80,7 @@ void Smoke(const Vec3& at, int count, float spread, float speed, uint32_t color)
 }
 
 void FireworkBlast(const Vec3& at) {
-    uint32_t c1 = kFireworkColors[rand() % 8], c2 = kFireworkColors[rand() % 8];
+    uint32_t c1 = kFireworkColors[McsaRand() % 8], c2 = kFireworkColors[McsaRand() % 8];
     Sparks(at, c1, 60, 9.0f);
     Sparks(at, c2, 30, 5.0f);
     PlaySfx(SND_FIREWORK_BLAST, &at, 4.0f);
@@ -328,7 +328,7 @@ void Gust(const Vec3& centre, float radius, float side, float up, bool playerToo
 }
 
 void StrikeLightning(const Vec3& at) {
-    gBolts.push_back({ at, 0.0f, (uint32_t)rand() * 2654435761u });
+    gBolts.push_back({ at, 0.0f, (uint32_t)McsaRand() * 2654435761u });
     gFlash = 0.25f;
     PlaySfx(SND_THUNDER, nullptr, 1.0f, 0.8f + Rand01() * 0.2f);
     PlaySfx(SND_LIGHTNING_IMPACT, &at, 2.0f, 0.5f + Rand01() * 0.2f);
@@ -662,7 +662,7 @@ bool UseHeldItem() {
             p.pos = at + Vec3((Rand01() - 0.5f) * 1.5f, (Rand01() - 0.5f) * 1.5f, Rand01() * 0.5f);
             p.vel = Vec3((Rand01() - 0.5f) * 3.0f, (Rand01() - 0.5f) * 3.0f, 1.0f + Rand01() * 3.0f);
             p.maxLife = p.life = 0.6f + Rand01() * 0.4f;
-            p.tile = TILE_P_SPLASH_0 + rand() % 4;
+            p.tile = TILE_P_SPLASH_0 + McsaRand() % 4;
             p.size = 0.09f;
             p.gravity = 9.0f;
             SpawnParticle(p);
@@ -815,9 +815,9 @@ void ProjectilesTick(float dt) {
                     sp.gravity = -0.5f;
                     sp.glow = true;
                     SpawnParticle(sp);
-                } else if (pr.type == PJ_WIND && rand() % 2 == 0) {
+                } else if (pr.type == PJ_WIND && McsaRand() % 2 == 0) {
                     Smoke(pr.pos, 1, 0.1f, 0.3f, 0xFFE0E8F0);
-                } else if (pr.crit && pr.type == PJ_ARROW && rand() % 2 == 0) {
+                } else if (pr.crit && pr.type == PJ_ARROW && McsaRand() % 2 == 0) {
                     Particle sp;
                     sp.pos = pr.pos;
                     sp.vel = Vec3(0, 0, 0);
@@ -863,7 +863,7 @@ void ProjectilesTick(float dt) {
                     pr.pos = mh.point;
                     const Vec3 from = pr.pos - dir * 3.0f;
                     if (pr.type == PJ_ARROW || pr.type == PJ_TRIDENT) {
-                        MobHurt(mh.index, arrowDmg + (pr.crit ? (float)(rand() % 5) : 0.0f), from, 0.7f);
+                        MobHurt(mh.index, arrowDmg + (pr.crit ? (float)(McsaRand() % 5) : 0.0f), from, 0.7f);
                         PlaySfx(pr.type == PJ_TRIDENT ? SND_TRIDENT_HIT : SND_ARROW_HIT, &pr.pos);
                     } else if (pr.type != PJ_PEARL) {
                         MobHurt(mh.index, 0.0f, from, 0.5f);
@@ -874,7 +874,7 @@ void ProjectilesTick(float dt) {
                 } else if (victim >= 0) {
                     pr.pos = point;
                     if (pr.type == PJ_ARROW || pr.type == PJ_TRIDENT) {
-                        float dmg = arrowDmg + (pr.crit ? (float)(rand() % 5) : 0.0f);
+                        float dmg = arrowDmg + (pr.crit ? (float)(McsaRand() % 5) : 0.0f);
                         TheHost().HurtBeing(victim, dmg, HURT_SHOT, &by);
                         TheHost().PushBeing(victim, dir * 2.0f);
                         PlaySfx(pr.type == PJ_TRIDENT ? SND_TRIDENT_HIT : SND_ARROW_HIT, &point);
@@ -922,12 +922,12 @@ void ProjectilesTick(float dt) {
                     case PJ_XPBOTTLE:
                         Puff(pr.pos, Item(ID_EXPERIENCE_BOTTLE).tile, 8);
                         PlaySfx(SND_DIG_GLASS, &pr.pos);
-                        SpawnXp(pr.pos - dir * 0.3f, 3 + rand() % 9);
+                        SpawnXp(pr.pos - dir * 0.3f, 3 + McsaRand() % 9);
                         remove = true;
                         break;
                     case PJ_EGG:
                         Puff(pr.pos, Item(ID_EGG).tile, 8);
-                        if (rand() % 8 == 0) {
+                        if (McsaRand() % 8 == 0) {
                             Vec3 at = pr.pos - dir * 0.3f;
                             float gz;
                             if (GroundBelow(at + Vec3(0, 0, 0.5f), 6.0f, &gz))

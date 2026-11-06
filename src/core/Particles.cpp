@@ -22,8 +22,8 @@ void SpawnBreakParticles(const Int3& p, int block) {
         pt.vel = Vec3((rx - 0.5f) * 3.0f, (ry - 0.5f) * 3.0f, 1.5f + rz * 2.5f);
         pt.maxLife = pt.life = 0.5f + Rand01() * 0.5f;
         pt.tile = tile;
-        pt.u = (rand() % 4) * 0.25f;
-        pt.v = (rand() % 4) * 0.25f;
+        pt.u = (McsaRand() % 4) * 0.25f;
+        pt.v = (McsaRand() % 4) * 0.25f;
         pt.sub = 0.25f;
         pt.size = 0.05f;
         SpawnParticle(pt);

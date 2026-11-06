@@ -117,9 +117,9 @@ void DropLoot(const Mob& m) {
     if (m.baby > 0.0f)
         return;
     Vec3 at = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
-    SpawnXp(at, kTypes[m.kind].monster ? 5 : 1 + rand() % 3);
+    SpawnXp(at, kTypes[m.kind].monster ? 5 : 1 + McsaRand() % 3);
     auto drop = [&](uint16_t id, int lo, int hi) {
-        int n = lo + (hi > lo ? rand() % (hi - lo + 1) : 0);
+        int n = lo + (hi > lo ? McsaRand() % (hi - lo + 1) : 0);
         if (m.burn > 0.0f) {
             // died on fire: the meat comes out cooked
             id = id == ID_BEEF ? ID_COOKED_BEEF : id == ID_PORKCHOP ? ID_COOKED_PORKCHOP
@@ -1106,14 +1106,35 @@ Vec3 SoldierAdvance(Mob& m, const Vec3& want, float dt) {
         return m.steerDir;
     }
     const Vec3 from = m.pos + Vec3(0, 0, 1.1f);
-    if (!TheHost().LineBlocked(from, from + want * 2.4f))
+    if (!TheHost().LineBlocked(from, from + want * 2.4f)) {
+        m.steerSide = 0.0f; // the way ahead is clear: the old obstacle is done with
         return want;
+    }
     static const float kTry[6] = { 0.61f, -0.61f, 1.22f, -1.22f, 1.92f, -1.92f }; // 35, 70, 110 degrees
-    for (float a : kTry) {
+    // a man going around a building commits to a side: while this obstacle
+    // lasts, the side he first found open is tried first at every re-probe.
+    // Re-picking from scratch used to slide him along the face one way, then
+    // back the other - hugging walls for half a minute and rounding nothing.
+    float order[6];
+    int nTry = 0;
+    if (m.steerSide != 0.0f) {
+        for (float a : kTry)
+            if ((a > 0.0f) == (m.steerSide > 0.0f))
+                order[nTry++] = a;
+        for (float a : kTry)
+            if ((a > 0.0f) != (m.steerSide > 0.0f))
+                order[nTry++] = a;
+    } else {
+        for (float a : kTry)
+            order[nTry++] = a;
+    }
+    for (int i = 0; i < nTry; ++i) {
+        const float a = order[i];
         const float c = std::cos(a), s = std::sin(a);
         const Vec3 cand(want.x * c - want.y * s, want.x * s + want.y * c, 0.0f);
         if (!TheHost().LineBlocked(from, from + cand * 2.4f)) {
             m.steerDir = cand;
+            m.steerSide = a > 0.0f ? 1.0f : -1.0f;
             // a steep detour means a long obstacle (a wall, a building): commit
             // to it, or he hugs the face re-probing every half second and crawls
             m.steerTime = std::fabs(a) > 1.0f ? 1.1f : 0.6f;
@@ -1644,7 +1665,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     if (m.burstShots <= 0 && m.reloadT <= 0.0f) {
                         const int avail = m.pistolOut ? m.pistolMag : m.mag;
                         if (avail > 0) {
-                            m.burstSize = m.burstShots = std::min(avail, kSoldier.burstMin + rand() % (kSoldier.burstMax - kSoldier.burstMin + 1));
+                            m.burstSize = m.burstShots = std::min(avail, kSoldier.burstMin + McsaRand() % (kSoldier.burstMax - kSoldier.burstMin + 1));
                             m.shotTimer = 0.0f;
                         } else if (m.pistolOut && m.pistolMag <= 0) {
                             m.pistolOut = false;
@@ -2249,7 +2270,7 @@ void TrySpawn(const Vec3& playerPos) {
         return;
     float r = Rand01();
     int kind = r < 0.3f ? MOB_COW : (r < 0.55f ? MOB_SHEEP : (r < 0.78f ? MOB_PIG : MOB_CHICKEN));
-    int pack = 2 + rand() % 3;
+    int pack = 2 + McsaRand() % 3;
     for (int i = 0; i < pack && wild < gRules.maxAnimals; ++i) {
         Vec3 p = ground;
         if (i > 0) {
@@ -2697,7 +2718,7 @@ bool MobInteract(int index, bool playerOnFoot) {
     if (d.special == SP_SHEARS && m.kind == MOB_SHEEP && !m.sheared && m.baby <= 0.0f) {
         m.sheared = true;
         m.woolTimer = 60.0f + Rand01() * 60.0f;
-        int n = 1 + rand() % 3;
+        int n = 1 + McsaRand() % 3;
         for (int i = 0; i < n; ++i) {
             ItemStack s;
             s.id = ID_WHITE_WOOL;
@@ -2873,7 +2894,7 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
             }
             if (m.love > 0.0f) {
                 m.love -= dt;
-                if (rand() % 20 == 0)
+                if (McsaRand() % 20 == 0)
                     Puff(centre + Vec3(0, 0, MobHeight(m) * 0.5f), TILE_P_HEART, 1, 0.6f);
                 for (size_t j = 0; j < gMobs.size(); ++j) {
                     Mob& o = gMobs[j];
@@ -2886,7 +2907,7 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
                     Vec3 at = (m.pos + o.pos) * 0.5f;
                     const int kind = m.kind;
                     const bool persistent = m.persistent || o.persistent;
-                    SpawnXp(at + Vec3(0, 0, 0.5f), 1 + rand() % 7);
+                    SpawnXp(at + Vec3(0, 0, 0.5f), 1 + McsaRand() % 7);
                     SpawnMob(kind, at, persistent, true); // may move gMobs: do not touch m / o after this
                     Puff(at + Vec3(0, 0, 0.8f), TILE_P_HEART, 7, 0.8f);
                     break;

@@ -796,7 +796,7 @@ static int CountBlocks(int block, int r = 12, int z0 = 9, int z1 = 30) {
 static void TestBlockRules() {
     TestHost host;
     SetHost(&host);
-    srand(2024);
+    McsaSrand(2024);
     // the sound of a block being put down, by what it is made of
     auto placeSound = [](int block) { return (SoundEvent)(SND_PLACE_STONE + Block(block).sound); };
 
@@ -1361,7 +1361,7 @@ static void TestSurvival() {
             eaten = EatingTick(0.05f, true, false).finished;
         CHECK(eaten == ID_MILK_BUCKET && Heard(SND_DRINK) >= 5 && Heard(SND_BURP) == 2, "milk is drunk, not chewed");
 
-        srand(12345);
+        McsaSrand(12345);
         int sick = 0;
         for (int i = 0; i < 2000; ++i) {
             ClearEffects();
@@ -1390,7 +1390,7 @@ static void RunEntities(float seconds, const Vec3* collector = nullptr, float re
 static void TestEntities() {
     TestHost host;
     SetHost(&host);
-    srand(77);
+    McsaSrand(77);
     const Vec3 still(0, 0, 0.01f); // (an item spawned without any speed hops off in a random direction)
 
     // the ground under a point
@@ -1625,7 +1625,7 @@ static void Mine(float seconds, bool held = true) {
 static void TestInteract() {
     TestHost host;
     SetHost(&host);
-    srand(99);
+    McsaSrand(99);
     const Vec3 eye(0.5f, 0.5f, 11.62f), down(0, 0, -1);
 
     // how long a block takes, and whether the tool gets its drops
@@ -2056,7 +2056,7 @@ static void WideStage() {
 static void TestNewMobs() {
     TestHost host;
     SetHost(&host);
-    srand(777);
+    McsaSrand(777);
     const Vec3 player(0.5f, 0.5f, 11.0f); // his middle; his feet stand at z = 10
 
     // what they are
@@ -2225,7 +2225,7 @@ static void FaceMob(int s, float yaw) {
 static void TestSoldier() {
     TestHost host;
     SetHost(&host);
-    srand(4242);
+    McsaSrand(4242);
     const Vec3 player(0.5f, 0.5f, 11.0f); // his middle; his feet stand at z = 10
 
     // what he is: Counter-Strike's numbers on this host's scale, posted to the counter team
@@ -2327,7 +2327,7 @@ static void TestSoldier() {
 static void TestMobs() {
     TestHost host;
     SetHost(&host);
-    srand(4242);
+    McsaSrand(4242);
     const Vec3 player(0.5f, 0.5f, 10.0f);
 
     // what they are
@@ -2690,7 +2690,7 @@ static int XpOnTheGround() {
 static void TestCombat() {
     TestHost host;
     SetHost(&host);
-    srand(2468);
+    McsaSrand(2468);
 
     // the bow
     {
@@ -3195,7 +3195,7 @@ static void Cast() {
 static void TestFishing() {
     TestHost host;
     SetHost(&host);
-    srand(1357);
+    McsaSrand(1357);
 
     // a catch
     {
@@ -3314,7 +3314,7 @@ static void TestFishing() {
 static void TestVillagers() {
     TestHost host;
     SetHost(&host);
-    srand(97531);
+    McsaSrand(97531);
     const Vec3 player(0.5f, 0.5f, 11.0f);
 
     // how they act
@@ -3397,7 +3397,7 @@ static void TestVillagers() {
 static void TestPlayerHealth() {
     TestHost host;
     SetHost(&host);
-    srand(8642);
+    McsaSrand(8642);
 
     // damage
     {
@@ -3574,7 +3574,7 @@ static HandsResult HoldHands(Action a, float seconds, HandsFacts f = HandsFacts(
 static void TestHands() {
     TestHost host;
     SetHost(&host);
-    srand(1122);
+    McsaSrand(1122);
     const Vec3 down45 = Vec3(1, 0, -1) * (1.0f / std::sqrt(2.0f));
 
     // screens
@@ -3771,7 +3771,7 @@ static void ClickAt(int gx, int gy, bool right = false, bool shift = false) { Sc
 static void TestScreens() {
     TestHost host;
     SetHost(&host);
-    srand(4711);
+    McsaSrand(4711);
 
     // the inventory
     {
@@ -3984,7 +3984,7 @@ static int CountKind(const std::vector<HudPiece>& v, int kind) {
 static void TestHud() {
     TestHost host;
     SetHost(&host);
-    srand(5150);
+    McsaSrand(5150);
     std::vector<HudPiece> v;
     HudFacts f;
     f.camera = Vec3(0.5f, 0.5f, 30.0f);
@@ -4407,7 +4407,7 @@ static void RunAnim(float seconds, const PlayerMotion& m) {
 static void TestPlayerAnim() {
     TestHost host;
     SetHost(&host);
-    srand(31337);
+    McsaSrand(31337);
 
     // the body's clocks
     {
@@ -4709,7 +4709,7 @@ static void TestRenderers() {
 static void TestCreeper() {
     TestHost host;
     SetHost(&host);
-    srand(2718);
+    McsaSrand(2718);
     const Vec3 player(0.5f, 0.5f, 11.0f); // (his middle; his feet are on the floor at z = 10)
 
     // it goes for a player in survival, swells and blows up
@@ -4792,7 +4792,7 @@ static void TestCreeper() {
 static void TestShapes() {
     TestHost host;
     SetHost(&host);
-    srand(31415);
+    McsaSrand(31415);
 
     // what they are made of
     {
@@ -4951,7 +4951,7 @@ static void TestShapes() {
 static void TestBeds() {
     TestHost host;
     SetHost(&host);
-    srand(2718);
+    McsaSrand(2718);
 
     // what a bed is
     {
@@ -5053,7 +5053,7 @@ static void TestBeds() {
 static void TestDoors() {
     TestHost host;
     SetHost(&host);
-    srand(3141);
+    McsaSrand(3141);
 
     // what a door is
     {
@@ -5191,7 +5191,7 @@ static void TestDoors() {
 static void TestWarden() {
     TestHost host;
     SetHost(&host);
-    srand(1618);
+    McsaSrand(1618);
     const Vec3 player(0.5f, 0.5f, 11.0f); // (his middle; his feet are on the floor at z = 10)
 
     MobStage();
@@ -5617,7 +5617,7 @@ static bool LoadSoldierBinFromRepo() {
 static void TestSoldierModel() {
     TestHost host;
     SetHost(&host);
-    srand(31337);
+    McsaSrand(31337);
 
     // the law: no model file, no soldier - and no box wearing his name either
     {
@@ -5750,7 +5750,7 @@ struct GunBoundsSink : ModelSink {
 static void TestSoldierAimFix() {
     TestHost host;
     SetHost(&host);
-    srand(4242);
+    McsaSrand(4242);
     const std::vector<BeingInfo> none;
     CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the model loads for the fix-round proofs");
 
@@ -5933,7 +5933,7 @@ static bool LoadNavGraphFromRepo() {
 static void TestBoss() {
     TestHost host;
     SetHost(&host);
-    srand(777);
+    McsaSrand(777);
     const std::vector<BeingInfo> none;
     CHECK(LoadSoldierBinFromRepo(), "the boss tests meet his real model");
 
@@ -6181,8 +6181,12 @@ static void TestBoss() {
         }
         host.wall = false;
         // past the fence his sight line clears and the ducked man is found: he
-        // ends north of the fence, fighting - that IS the hunt succeeding
-        CHECK(maxZ > 10.8f && gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2,
+        // ends north of the fence, fighting - that IS the hunt succeeding.
+        // "North of it" is the fence's own line (y 6.5) with the man in his
+        // sight right now - the exact settle point of a fight is his combat
+        // movement's business, and a 7.5 line used to leave this check to the
+        // dice exactly as its tall-wall twin did (see the next block).
+        CHECK(maxZ > 10.8f && gMobs[s].pos.y > 6.5f && gMobs[s].bossState == 2 && gMobs[s].lostT < 0.5f,
               "the fence is jumped on the hunt and the man found behind it (peak %.2f m, ends y %.1f in state %d)",
               maxZ, gMobs[s].pos.y, gMobs[s].bossState);
     }
@@ -6191,24 +6195,40 @@ static void TestBoss() {
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 14.5f, 11.0f), nullptr); // he has the man's measure
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), nullptr); // he has the man's measure
         host.wall = true;
         host.wallC = Vec3(0.5f, 6.5f, 10.0f); // band to 13: a 3 m wall, and blind
         host.wallDir = Vec3(1, 0, 0);
-        host.wallHalf = 3.0f; // probe steering's honest reach; long walls are the city graph's job
+        // the wall is 18 m long and the man stands 14 m behind it - measured
+        // the hard way: his combat strafe orbits a man 14 m off in a sweep
+        // +-8 m wide, and around a shorter wall's end that orbit kept glimpsing
+        // him, resetting the hunt clock and leaving "did he get around it" to
+        // the dice of whichever C library rolled them. At this size no orbit
+        // position and no corner graze can see the man: the pursuit has to
+        // walk around an end on foot, which is the deed this test exists for.
+        // (Longer walls than this are the city graph's job in the game.)
+        host.wallHalf = 9.0f;
         float maxZ = 0.0f;
+        float peakLost = 0.0f; // his longest blind stretch: proof he truly lost the man
         float dEnd = 1e9f;
+        // re-engaged means: fighting again, the man in his sight right now, and
+        // his body past the wall's cover - north of its line or out past an end
+        auto reengaged = [&]() {
+            return gMobs[s].bossState == 2 && gMobs[s].lostT < 0.05f &&
+                   (gMobs[s].pos.y > 6.5f || std::fabs(gMobs[s].pos.x - 0.5f) > host.wallHalf);
+        };
         for (int i = 0; i < 640; ++i) {
-            MobsTick(0.05f, Vec3(0.5f, 14.5f, 11.0f), 0, true, &none);
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.0f), 0, true, &none);
             maxZ = std::max(maxZ, gMobs[s].pos.z);
-            dEnd = (gMobs[s].pos - Vec3(0.5f, 14.5f, 10.0f)).Length();
-            if (gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2)
+            peakLost = std::max(peakLost, gMobs[s].lostT);
+            dEnd = (gMobs[s].pos - Vec3(0.5f, 20.5f, 10.0f)).Length();
+            if (reengaged())
                 break;
         }
         host.wall = false;
-        CHECK(maxZ < 10.6f && gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2,
-              "the tall wall is not jumped - the hunt walks around its end and re-engages (peak %.2f m, ends y %.1f in state %d, %.1f m off)",
-              maxZ, gMobs[s].pos.y, gMobs[s].bossState, dEnd);
+        CHECK(maxZ < 10.6f && peakLost > 0.5f && reengaged(),
+              "the tall wall is not jumped - the hunt walks around its end and re-engages (peak %.2f m, blind %.2f s, ends y %.1f in state %d, %.1f m off)",
+              maxZ, peakLost, gMobs[s].pos.y, gMobs[s].bossState, dEnd);
     }
     // ---- K1: the street may start a fight with him; he finishes it, and only that one
     {
@@ -6252,15 +6272,22 @@ static void TestBoss() {
         gMobs[s].negotiated = true;
         host.vehicle = TestHost::kCarNumber;
         host.vehPoseOn = true;
-        host.vehCentre = Vec3(0.5f, 20.5f, 10.5f);
+        // a low car, close enough that he fights it from the strafe band: the
+        // tyre branch lives below the body line's 0.45, and from the old
+        // staging (a seat 0.85 over the centre, settled spread) his aim line
+        // could not physically reach that low - pops came only from the dice
+        // of his opening steps, about one run in four. Here his spread while
+        // strafing honestly crosses the wheel line, and 360 ticks covers the
+        // slowest of twenty measured dice streams (first pop at tick 268).
+        host.vehCentre = Vec3(0.5f, 14.5f, 10.5f);
         host.vehFwd = Vec3(0, -1, 0);
-        host.vehSeat = Vec3(0.5f, 19.6f, 11.35f);
+        host.vehSeat = Vec3(0.5f, 13.6f, 10.95f);
         host.vehVel = Vec3();
         host.playerHurt = 0.0f;
         host.carHurt = 0.0f;
         host.tyrePops = 0;
-        for (int i = 0; i < 120; ++i)
-            MobsTick(0.05f, Vec3(0.5f, 19.6f, 11.0f), 0, false, &none);
+        for (int i = 0; i < 360; ++i)
+            MobsTick(0.05f, Vec3(0.5f, 13.6f, 10.95f), 0, false, &none);
         CHECK(host.playerHurt > 0.0f, "the driver is hit through his own windshield (%.1f half hearts)", host.playerHurt);
         CHECK(host.carHurt > 0.0f, "and the car itself takes his fire (%.1f)", host.carHurt);
         CHECK(host.tyrePops >= 1, "low hits pop tyres through the bridge effect (%d)", host.tyrePops);
@@ -6279,8 +6306,13 @@ static void TestBoss() {
         const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s2, 0.0f);
         for (int i = 0; i < 12; ++i) {
+            // each pass is its own idle moment, cooldown and all: without the
+            // reset, the first attempt's silence roll (one in five) sets a 5 s
+            // cooldown that vetoes all eleven retries, and the whole check is
+            // a single 80/20 flip of wherever the dice happen to sit
             gMobs[s2].patrolWait = 5.0f;
             gMobs[s2].idleVoiceT = 0.01f;
+            gMobs[s2].voiceCd = 0.0f;
             MobsTick(0.05f, Vec3(90.5f, 0.5f, 11.0f), 0, true, &none);
         }
         CHECK(Heard(SND_BOSS_IDLE1) + Heard(SND_BOSS_IDLE2) >= 1, "on his post he checks in by radio now and then");
