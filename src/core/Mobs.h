@@ -57,6 +57,8 @@ struct Mob {
     float heart = 1.0f, pulse = 0.0f; // until the next heartbeat; 1..0 after one
     float shoot = 0.0f;        // skeleton: seconds until it may loose the next arrow
     int huntBeing = -1;        // the host's number of the being it is after (-1: the player, or nobody)
+    bool huntValid = false;    // it is after someone (huntBeing says whom; -1 = the player)
+    float huntMemory = 0.0f;   // seconds a held prey is still remembered once it slips out of reach
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

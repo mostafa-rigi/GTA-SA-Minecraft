@@ -1002,7 +1002,7 @@ void ShootArrowAt(const Vec3& from, const Vec3& to, int shooter, int vehicle) {
     pr.pos = from + dir * 0.5f;
     pr.vel = dir * speed;
     pr.hostile = true;
-    pr.damage = 4.0f + Rand01() * 2.0f;
+    pr.damage = 3.0f + Rand01() * 2.0f; // a skeleton's shot in Minecraft: some 3 to 5 half hearts a hit
     pr.life = 10.0f;
     pr.shooter = shooter;
     pr.vehicle = vehicle;

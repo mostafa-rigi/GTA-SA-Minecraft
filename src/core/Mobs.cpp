@@ -30,13 +30,14 @@ const MobType kTypes[MOB_KIND_COUNT] = {
     { 0.6f, 1.7f, 20.0f, 1.2f, 2.6f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
     { 0.9f, 2.9f, 500.0f, 1.6f, 5.0f, SND_WARDEN_AMBIENT, SND_WARDEN_HURT, SND_WARDEN_DEATH, { 0, 0, 0 }, true },
     // zombie, skeleton, spider: their own voices are not in the generated sound table, so the nearest voices stand in
-    { 0.6f, 1.95f, 20.0f, 1.1f, 2.3f, SND_PILLAGER_SAY, SND_PILLAGER_HURT, SND_PILLAGER_DEATH, { 0, 0, 0 }, true },
-    { 0.6f, 1.9f, 20.0f, 1.25f, 2.5f, SND_VILLAGER_SAY, SND_VILLAGER_HURT, SND_VILLAGER_DEATH, { 0, 0, 0 }, true },
-    { 1.4f, 0.9f, 16.0f, 1.6f, 3.4f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
+    { 0.6f, 1.95f, 40.0f, 1.1f, 2.3f, SND_PILLAGER_SAY, SND_PILLAGER_HURT, SND_PILLAGER_DEATH, { 0, 0, 0 }, true },
+    { 0.6f, 1.9f, 40.0f, 1.25f, 2.5f, SND_VILLAGER_SAY, SND_VILLAGER_HURT, SND_VILLAGER_DEATH, { 0, 0, 0 }, true },
+    { 1.4f, 0.9f, 32.0f, 1.6f, 3.4f, SND_CREEPER_HURT, SND_CREEPER_HURT, SND_CREEPER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
 float gSpawnTimer = 3.0f;
+std::vector<Vec3> gReinforceCalls; // where hurt zombies have called for help (answered at the top of MobsTick)
 } // namespace
 
 std::vector<Mob> gMobs;
@@ -461,39 +462,96 @@ bool WardenBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     return true;
 }
 
-// Who a hunting monster goes for this tick: the player (in survival, alive), or the nearest of the host's own
-// people — whichever is nearer, exactly as the creeper's fuse and the warden's brain pick between them. Sets
-// m.huntBeing and hands back the prey's feet and middle (host positions are a man's middle: feet are 1 m lower).
-bool PickPrey(Mob& m, const Vec3& playerPos, const std::vector<BeingInfo>* beings, float range, Vec3* feet, Vec3* mid,
-              float* dist) {
-    bool have = false;
-    float best = range;
-    if (gGame.gameMode == MODE_SURVIVAL && gGame.deathTime < 0.0f) {
-        const Vec3 f = playerPos - Vec3(0, 0, 1.0f);
-        const float d = (f - m.pos).Length();
-        if (d < best) {
-            best = d;
-            *feet = f;
-            *mid = playerPos;
-            m.huntBeing = -1;
-            have = true;
-        }
-    }
-    if (beings)
-        for (const BeingInfo& b : *beings) {
-            const Vec3 f = b.pos - Vec3(0, 0, 1.0f);
+// Who a hunting monster goes for: the player (in survival, alive), or the nearest of the host's own people —
+// whichever is nearer, exactly as the creeper's fuse and the warden's brain pick between them. Sets m.huntBeing
+// and hands back the prey's feet and middle (host positions are a man's middle: feet are 1 m lower).
+// A monster does not forget its prey the moment it steps out of reach, the way Minecraft's do not: once it is
+// after someone (m.huntValid) it keeps after him while he stays within half as much again of the range that
+// found him, and only forgets him after kHuntMemory seconds with the prey out of that reach (or gone, or dead).
+// The scan runs every tick, and a prey within 3 m is always seen at once — nobody overlooks what is under his nose.
+bool PickPrey(Mob& m, float dt, const Vec3& playerPos, const std::vector<BeingInfo>* beings, float range, Vec3* feet,
+              Vec3* mid, float* dist) {
+    const float kHuntMemory = 10.0f; // seconds a prey stays remembered once out of reach
+    // one pass of the hunt scan: the nearest prey closer than `cap`, or nobody
+    auto scan = [&](float cap, int* being) {
+        bool have = false;
+        float best = cap;
+        if (gGame.gameMode == MODE_SURVIVAL && gGame.deathTime < 0.0f) {
+            const Vec3 f = playerPos - Vec3(0, 0, 1.0f);
             const float d = (f - m.pos).Length();
             if (d < best) {
                 best = d;
                 *feet = f;
-                *mid = b.pos;
-                m.huntBeing = b.being;
+                *mid = playerPos;
+                *being = -1;
                 have = true;
             }
         }
-    if (have)
-        *dist = best;
-    return have;
+        if (beings)
+            for (const BeingInfo& b : *beings) {
+                const Vec3 f = b.pos - Vec3(0, 0, 1.0f);
+                const float d = (f - m.pos).Length();
+                if (d < best) {
+                    best = d;
+                    *feet = f;
+                    *mid = b.pos;
+                    *being = b.being;
+                    have = true;
+                }
+            }
+        if (have)
+            *dist = best;
+        return have;
+    };
+    int being = -1;
+    // fresh sight: point blank first, then the full range
+    if (scan(3.0f, &being) || scan(range, &being)) {
+        m.huntBeing = being;
+        m.huntValid = true;
+        m.huntMemory = kHuntMemory;
+        return true;
+    }
+    if (!m.huntValid)
+        return false;
+    // nobody in sight: is the remembered prey still within reach (half as much again of the range)?
+    if (m.huntBeing < 0) {
+        if (gGame.gameMode != MODE_SURVIVAL || gGame.deathTime >= 0.0f) {
+            m.huntValid = false; // the player is dead (or no longer prey): drop him at once
+            m.huntMemory = 0.0f;
+            return false;
+        }
+        const Vec3 f = playerPos - Vec3(0, 0, 1.0f);
+        const float d = (f - m.pos).Length();
+        if (d <= range * 1.5f) {
+            *feet = f;
+            *mid = playerPos;
+            *dist = d;
+            m.huntMemory = kHuntMemory;
+            return true;
+        }
+    } else if (beings) {
+        for (const BeingInfo& b : *beings) {
+            if (b.being != m.huntBeing)
+                continue;
+            const Vec3 f = b.pos - Vec3(0, 0, 1.0f);
+            const float d = (f - m.pos).Length();
+            if (d <= range * 1.5f) {
+                *feet = f;
+                *mid = b.pos;
+                *dist = d;
+                m.huntMemory = kHuntMemory;
+                return true;
+            }
+            break;
+        }
+    }
+    // out of reach (or gone from the host's list): the memory fades, then he is forgotten
+    m.huntMemory -= dt;
+    if (m.huntMemory <= 0.0f) {
+        m.huntValid = false;
+        m.huntMemory = 0.0f;
+    }
+    return false;
 }
 
 // A blow at the prey PickPrey picked: one of the host's people takes it through the bridge, the player directly.
@@ -516,7 +574,7 @@ bool ZombieBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 3.0f);
     Vec3 feet, mid;
     float dist = 0.0f;
-    if (!PickPrey(m, playerPos, beings, 16.0f, &feet, &mid, &dist))
+    if (!PickPrey(m, dt, playerPos, beings, 35.0f, &feet, &mid, &dist))
         return false;
     Vec3 to = feet - m.pos;
     to.z = 0.0f;
@@ -528,7 +586,7 @@ bool ZombieBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     *speed = kTypes[m.kind].run;
     m.moving = flat > 1.5f;
     if (flat < 1.9f && std::fabs(feet.z - m.pos.z) < 2.2f && m.attackCooldown <= 0.0f) {
-        m.attackCooldown = 0.8f;
+        m.attackCooldown = 1.0f; // about a blow a second, the way Minecraft's zombies hit
         m.attackAnim = 1.0f;
         StrikePrey(m, dir, 3.0f, 3.0f);
         const Vec3 c = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
@@ -546,7 +604,7 @@ bool SkeletonBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* 
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 1.5f);
     Vec3 feet, mid;
     float dist = 0.0f;
-    if (!PickPrey(m, playerPos, beings, 16.0f, &feet, &mid, &dist))
+    if (!PickPrey(m, dt, playerPos, beings, 20.0f, &feet, &mid, &dist))
         return false;
     Vec3 to = feet - m.pos;
     to.z = 0.0f;
@@ -583,15 +641,15 @@ bool SkeletonBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* 
 
 // Spider: the fastest of the three. It runs its prey down and bites (2 half hearts); walls do not stop it —
 // MoveMob lets it climb them. In daylight Minecraft's spiders calm down unless they are already after someone;
-// here they simply hunt less far by day (they notice prey at half the range).
+// here they simply hunt less far by day (they notice prey at 18 m in the dark, 12 m by day).
 bool SpiderBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
                  const std::vector<BeingInfo>* beings) {
     m.attackCooldown -= dt;
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 3.0f);
-    const float range = TheHost().Dark() ? 16.0f : 8.0f;
+    const float range = TheHost().Dark() ? 18.0f : 12.0f;
     Vec3 feet, mid;
     float dist = 0.0f;
-    if (!PickPrey(m, playerPos, beings, range, &feet, &mid, &dist))
+    if (!PickPrey(m, dt, playerPos, beings, range, &feet, &mid, &dist))
         return false;
     Vec3 to = feet - m.pos;
     to.z = 0.0f;
@@ -786,6 +844,7 @@ bool MobRide(uint32_t id, const Vec3& velocity, Vec3* seat, float* yaw) {
 void MobsClear() {
     gMobs.clear();
     gSpawnTimer = 3.0f;
+    gReinforceCalls.clear();
 }
 
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
@@ -876,6 +935,12 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
         Kill(m);
     else
         PlaySfx(kTypes[m.kind].hurt, &c, 1.0f, m.baby > 0.0f ? 1.5f : 0.9f + Rand01() * 0.2f);
+    // a zombie that lives through the blow and is after someone may call for help, the way Minecraft's do
+    // (8% a landed hit, Normal-style). The call is only noted here: spawning inside MobHurt could move gMobs
+    // under a caller that still holds a Mob&, so the spawn itself happens at the top of MobsTick.
+    if (m.kind == MOB_ZOMBIE && m.health > 0.0f && m.huntValid && gRules.monsters && gReinforceCalls.size() < 4 &&
+        Rand01() < 0.08f)
+        gReinforceCalls.push_back(m.pos);
 }
 
 void MobPush(int index, const Vec3& velocity) {
@@ -994,6 +1059,27 @@ void MobsSpawnTick(float dt, const Vec3& playerPos) {
 
 void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot,
               const std::vector<BeingInfo>* beings) {
+    // zombie reinforcements called for since the last tick are answered here, before any Mob& is held: one new
+    // zombie on real ground 10 to 20 m from the one that called, through the same SpawnMob as every other spawn.
+    // The ceiling is sane: never more monsters than twice the night-spawn limit (and SpawnMob's own cap besides).
+    if (!gReinforceCalls.empty()) {
+        std::vector<Vec3> calls;
+        calls.swap(gReinforceCalls);
+        for (const Vec3& at : calls) {
+            int monsters = 0;
+            for (const Mob& o : gMobs)
+                monsters += kTypes[o.kind].monster;
+            if (monsters >= gRules.maxMonsters * 2)
+                continue;
+            for (int tries = 0; tries < 8; ++tries) {
+                const float a = Rand01() * 6.2831853f, d = 10.0f + Rand01() * 10.0f;
+                Vec3 from(at.x + std::cos(a) * d, at.y + std::sin(a) * d, at.z + 30.0f);
+                Vec3 ground;
+                if (TheHost().SpawnGround(from, &ground) && SpawnMob(MOB_ZOMBIE, ground, false) >= 0)
+                    break;
+            }
+        }
+    }
     for (size_t i = 0; i < gMobs.size();) {
         Mob& m = gMobs[i];
         const MobType& t = kTypes[m.kind];

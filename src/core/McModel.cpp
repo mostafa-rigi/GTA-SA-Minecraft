@@ -839,11 +839,14 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
     }
     case MOB_SPIDER: {
         // SpiderModel (64 x 32): a low two-part body on eight long legs that step in turn; the red eyes are in the
-        // texture's face, the way Minecraft's own spider wears them
+        // texture's face, the way Minecraft's own spider wears them. Every model stands with its lowest point on
+        // the feet plane (y = 24 px in this frame): at their 0.5 rad slant the 16 px legs reach only
+        // 8 + 16*sin(0.5) + cos(0.5) = 16.5 px from a pivot at y = 8, so the whole spider sits 7.45 px lower
+        // than first drawn — with the pivots at 14.45 / 15.45 the leg tips land exactly on the plane.
         st.tex = ENT_SPIDER;
-        Pose head = Part(base, 0, 7, -5, a.headPitch * 0.5f, a.headYaw * 0.5f, 0);
+        Pose head = Part(base, 0, 14.45f, -5, a.headPitch * 0.5f, a.headYaw * 0.5f, 0);
         McCube(head, -4, -4, -4, 8, 8, 8, 32, 0, st);
-        McCube(Part(base, 0, 7, 5), -5, -4, -5, 10, 8, 10, 0, 0, st);
+        McCube(Part(base, 0, 14.45f, 5), -5, -4, -5, 10, 8, 10, 0, 0, st);
         for (int side = 0; side < 2; side++) {
             const float s = side == 0 ? 1.0f : -1.0f;
             for (int i = 0; i < 4; i++) {
@@ -851,9 +854,9 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
                 const float fan = ((float)i - 1.5f) * 0.16f;
                 const float step = std::sin(sw * 0.9f + (float)(i + side * 2) * 1.7f) * 0.3f * am;
                 if (s > 0.0f)
-                    McCube(Part(base, 5, 8, z, 0, fan + step, 0.5f), 0, -1, -1, 16, 2, 2, 0, 20, st);
+                    McCube(Part(base, 5, 15.45f, z, 0, fan + step, 0.5f), 0, -1, -1, 16, 2, 2, 0, 20, st);
                 else
-                    McCube(Part(base, -5, 8, z, 0, -fan - step, -0.5f), -16, -1, -1, 16, 2, 2, 0, 20, st);
+                    McCube(Part(base, -5, 15.45f, z, 0, -fan - step, -0.5f), -16, -1, -1, 16, 2, 2, 0, 20, st);
             }
         }
         break;

@@ -1979,6 +1979,19 @@ static void RunMobsB(float seconds, const Vec3& player, const std::vector<BeingI
         MobsTick(dt, player, 0, true, beings);
 }
 
+// a long open floor with no pen walls, for the tests of how far the new monsters see and how long they remember
+static void WideStage() {
+    BlockStage();
+    for (int x = -95; x <= 95; ++x)
+        for (int y = -14; y <= 14; ++y)
+            gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+    MobsClear();
+    ResetSurvival();
+    gGame = GameState();
+    gRules = GameRules();
+    gPlayed.clear();
+}
+
 static void TestNewMobs() {
     TestHost host;
     SetHost(&host);
@@ -1992,9 +2005,9 @@ static void TestNewMobs() {
         const int z = SpawnMob(MOB_ZOMBIE, Vec3(3.5f, 0.5f, 10.0f), true);
         const int s = SpawnMob(MOB_SKELETON, Vec3(-3.5f, 0.5f, 10.0f), true);
         const int sp = SpawnMob(MOB_SPIDER, Vec3(0.5f, 4.5f, 10.0f), true);
-        CHECK(gMobs[z].health == 20.0f && IsMonster(MOB_ZOMBIE) && Near(MobHeight(gMobs[z]), 1.95f), "a zombie has twenty half hearts");
-        CHECK(gMobs[s].health == 20.0f && IsMonster(MOB_SKELETON), "a skeleton has twenty half hearts");
-        CHECK(gMobs[sp].health == 16.0f && IsMonster(MOB_SPIDER) && Near(MobWidth(gMobs[sp]), 1.4f), "a spider has sixteen half hearts and is 1.4 wide");
+        CHECK(gMobs[z].health == 40.0f && IsMonster(MOB_ZOMBIE) && Near(MobHeight(gMobs[z]), 1.95f), "a zombie has forty half hearts");
+        CHECK(gMobs[s].health == 40.0f && IsMonster(MOB_SKELETON), "a skeleton has forty half hearts");
+        CHECK(gMobs[sp].health == 32.0f && IsMonster(MOB_SPIDER) && Near(MobWidth(gMobs[sp]), 1.4f), "a spider has thirty-two half hearts and is 1.4 wide");
         CHECK(Item(ID_ZOMBIE_SPAWN_EGG).special == SP_EGG_ZOMBIE && Item(ID_SKELETON_SPAWN_EGG).special == SP_EGG_SKELETON &&
                   Item(ID_SPIDER_SPAWN_EGG).special == SP_EGG_SPIDER,
               "each of them has its own spawn egg");
@@ -2054,9 +2067,60 @@ static void TestNewMobs() {
         host.dark = false;
         host.outdoors = true;
         SpawnMob(MOB_ZOMBIE, Vec3(3.5f, 0.5f, 10.0f), true);
-        RunMobsB(4.0f, Vec3(30.5f, 0.5f, 11.0f), nullptr); // the player is far away: it just stands there and burns
-        CHECK(gMobs.size() == 1 && gMobs[0].health < 20.0f, "a zombie burns in daylight");
+        RunMobsB(4.0f, Vec3(63.5f, 0.5f, 11.0f), nullptr); // the player is 60 m away, beyond even its long sight: it just stands there and burns
+        CHECK(gMobs.size() == 1 && gMobs[0].health < 40.0f, "a zombie burns in daylight");
         CHECK(gMobs[0].burn > 0.0f, "and is on fire while it does");
+    }
+    // the zombie sees as far as Minecraft's do: a man 30 m off is already prey (it used to notice at 16 m)
+    {
+        WideStage();
+        host.dark = true;
+        SpawnMob(MOB_ZOMBIE, Vec3(30.5f, 0.5f, 10.0f), true);
+        RunMobsB(2.0f, player, nullptr);
+        CHECK(gMobs.size() == 1 && gMobs[0].huntValid && gMobs[0].pos.x < 28.5f, "a zombie spots the player 30 m away and comes for him");
+    }
+    // and it does not give him up the moment he steps back: out of sight, still inside its stubborn reach
+    {
+        WideStage();
+        host.dark = true;
+        SpawnMob(MOB_ZOMBIE, Vec3(20.5f, 0.5f, 10.0f), true);
+        RunMobsB(1.0f, player, nullptr);
+        const float x1 = gMobs[0].pos.x;
+        RunMobsB(2.0f, Vec3(63.5f, 0.5f, 11.0f), nullptr); // 45 m off: beyond the 35 it sees, inside the 52.5 it remembers
+        CHECK(gMobs.size() == 1 && gMobs[0].huntValid && gMobs[0].pos.x > x1 + 2.0f, "a zombie keeps coming for a prey that stepped out of sight");
+        RunMobsB(11.0f, Vec3(200.5f, 0.5f, 11.0f), nullptr); // hopelessly far: once the memory fades it forgets him
+        CHECK(gMobs.size() == 1 && !gMobs[0].huntValid, "and forgets him once he is long out of reach");
+    }
+    // point blank is never overlooked: one tick at 2.5 m and it is already after him
+    {
+        WideStage();
+        host.dark = true;
+        SpawnMob(MOB_ZOMBIE, Vec3(3.0f, 0.5f, 10.0f), true);
+        RunMobsB(0.05f, player, nullptr);
+        CHECK(gMobs.size() == 1 && gMobs[0].huntValid, "a zombie notices a man standing at its nose at once");
+    }
+    // a hurt zombie that is after someone calls for help, and help comes (8% a landed hit: 80 light hits make it near-certain)
+    {
+        WideStage();
+        host.dark = true;
+        host.herdGround = true; // the host offers ground anywhere at z = 10
+        const int z = SpawnMob(MOB_ZOMBIE, Vec3(5.5f, 0.5f, 10.0f), true);
+        const uint32_t zid = MobIdAt(z);
+        RunMobsB(0.5f, player, nullptr);
+        CHECK(gMobs.size() == 1 && gMobs[0].huntValid, "the zombie is after the player before the hitting starts");
+        for (int i = 0; i < 80; ++i) {
+            const int idx = MobIndexById(zid);
+            if (idx < 0)
+                break;
+            MobHurt(idx, 0.4f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+            RunMobsB(0.3f, player, nullptr);
+        }
+        int zombies = 0;
+        for (const Mob& m : gMobs)
+            zombies += m.kind == MOB_ZOMBIE;
+        CHECK(MobIndexById(zid) >= 0 && gMobs[MobIndexById(zid)].health > 0.0f, "the beaten zombie lives through it");
+        CHECK(zombies >= 2, "and its call brought at least one more zombie (%d zombies in all)", zombies);
+        host.herdGround = false;
     }
 }
 
@@ -2554,8 +2618,8 @@ static void TestCombat() {
                   Near(gProjectiles[0].vel.Length(), 48.0f, 0.01f) && Heard(SND_CROSSBOW_SHOOT) == 1,
               "a pillager's arrow");
         RunShots(0.5f);
-        CHECK(gProjectiles.empty() && host.playerHurt >= 4.0f && host.playerHurt <= 6.0f && host.lastShooter == 3,
-              "hits the player for 4 to 6 (%.1f)", host.playerHurt);
+        CHECK(gProjectiles.empty() && host.playerHurt >= 3.0f && host.playerHurt <= 5.0f && host.lastShooter == 3,
+              "hits the player for 3 to 5 (%.1f)", host.playerHurt);
         ShootArrowAt(Vec3(8.5f, 0.5f, 11.0f), Vec3(8.5f, 0.5f, 11.2f), 3, -1);
         CHECK(gProjectiles.empty(), "nobody shoots at his own feet");
         ShootArrowAt(Vec3(0.5f, 0.5f, 11.0f), Vec3(8.5f, 0.5f, 10.5f), 3, -1);
@@ -4083,6 +4147,10 @@ static void TestModels() {
     sink.Reset();
     DrawMob(MOB_CREEPER, stand, swelling, 1.0f, 1.0f, 1.0f, 1.0f);
     CHECK(sink.hi.x - sink.lo.x > creeperW * 1.25f && sink.lo.z > -0.01f, "about to blow up it is a third wider, still on its feet");
+
+    sink.Reset();
+    DrawMob(MOB_SPIDER, stand, MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.quads[0] == 60 && sink.lo.z > -0.01f && sink.lo.z < 0.02f, "a spider stands on its own feet, not in the air (lowest point %.3f m)", sink.lo.z);
 
     sink.Reset();
     HumanoidAnim a;
