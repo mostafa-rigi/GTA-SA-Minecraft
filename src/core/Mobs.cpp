@@ -40,6 +40,12 @@ const MobType kTypes[MOB_KIND_COUNT] = {
     { 0.6f, 1.95f, 40.0f, 1.1f, 2.9f, SND_ZOMBIE_SAY, SND_ZOMBIE_HURT, SND_ZOMBIE_DEATH, { 0, 0, 0 }, true },
     { 0.6f, 1.9f, 40.0f, 1.7f, 3.1f, SND_SKELETON_SAY, SND_SKELETON_HURT, SND_SKELETON_DEATH, { 0, 0, 0 }, true },
     { 1.4f, 0.9f, 32.0f, 1.6f, 4.3f, SND_SPIDER_SAY, SND_SPIDER_HURT, SND_SPIDER_DEATH, { 0, 0, 0 }, true },
+    // the Counter-Strike soldier: a man, not a monster of Minecraft's - 1.8 m tall, and his 100 health
+    // points of Counter-Strike are counted the way this host counts everything, in half hearts (so 200),
+    // with another 200 of kevlar on top (the `armor` field, set at spawn). His `say` is never played on
+    // the ambient timer (monsters have none); his brain plays his footsteps itself, on his stride. His
+    // walk is his patrol pace, his run his fighting pace; the whole of his difficulty lives in kSoldier.
+    { 0.6f, 1.8f, 200.0f, 2.4f, 5.2f, SND_SOLDIER_STEP, SND_SOLDIER_HURT, SND_SOLDIER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
@@ -721,6 +727,303 @@ bool SpiderBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
     return true;
 }
 
+// ================================================================ the Counter-Strike soldier
+// Step 1 of the Counter-Strike project: one counter-terrorist (the SEAL model), a real creature of this
+// core like the monsters - not a skin and not one of the host's people. His body, his voice and his
+// M4A1 are Counter-Strike 1.6's own (his texture is cut out of the game's own model file, his sounds are
+// the game's own sound files); his brain is written here the way the zombie's was: from the game's own
+// rules, seen from outside, since Valve's bot code was never published. The user's standard for him is
+// zero-to-a-hundred faithful to the game, but much better - so the brain is deliberately a professional
+// player's, far past the original bots. One line is kept: he is a strong professional, not a cheat wall.
+// Every bullet still rolls its spread, a moving man at range can live, and he can be outplayed. His
+// final ceiling is set by the user's own eyes in the game, which is why every number of his strength
+// sits in this ONE table and nowhere else.
+
+// The one soldier table: turn a number here and the soldier in the game changes with it.
+struct SoldierTune {
+    float sightRange;   // how far he sees his enemy
+    float sightCos;     // the edge of his field of view, as a cosine (120 degrees in all)
+    float pointBlank;   // inside this he feels the enemy even at his back
+    float reaction;     // seconds of seeing before the first burst (half of it once he is alerted)
+    float strafeSpeed;  // his sideways drift while he holds his angle in a fight
+    float patrolRadius; // how far around his post he patrols
+    int magazine;       // the M4A1's thirty rounds
+    float reloadTime;   // the M4A1's reload, about three seconds
+    float shotInterval; // 600 rounds a minute
+    int burstMin, burstMax; // a professional's burst: three to five rounds, then a breath
+    float burstPauseMin, burstPauseMax;
+    float damage;     // half hearts a bullet does up close (the M4A1's 33, on this host's scale)
+    float damageFar;  // the share of it left at sightRange (Counter-Strike's falloff with distance)
+    float spreadSettled; // his aim error in degrees: standing settled...
+    float spreadStrafe;  // ...drifting sideways...
+    float spreadRun;     // ...and at a run (Counter-Strike punishes shooting on the move the same way)
+    float firstShot;     // the first bullet of a burst is this much tighter (tap discipline)
+    float retreatUnder;  // below this share of his health he falls back while he fights
+    float searchSeconds; // how long he hunts a lost enemy before he gives him up
+    float armorAbsorb;   // kevlar swallows this share of every hit while it lasts (Counter-Strike: half)
+};
+const SoldierTune kSoldier = {
+    45.0f, 0.5f, 4.0f, // sight
+    0.22f,             // reaction
+    3.0f,              // strafe
+    13.0f,             // patrol radius
+    30, 3.0f, 0.1f,    // the M4A1
+    3, 5, 0.35f, 0.6f, // bursts
+    6.0f, 0.55f,       // damage and falloff
+    1.1f, 2.8f, 5.5f,  // spread: settled, strafing, running
+    0.6f,              // first shot of a burst
+    0.30f,             // retreat under 30% health
+    5.0f,              // search seconds
+    0.5f,              // kevlar absorbs half
+};
+
+// turn his body towards a flat direction at a set rate (his brain uses it while he stands and scans;
+// while he walks, Think turns him)
+void SoldierTurn(Mob& m, const Vec3& toward, float rate, float dt) {
+    Vec3 t = toward;
+    t.z = 0.0f;
+    if (t.Length() < 0.05f)
+        return;
+    const float want = std::atan2(-t.x, t.y);
+    const float d = WrapAngle(want - m.yaw);
+    const float step = rate * dt;
+    m.yaw = WrapAngle(m.yaw + Clamp(d, -step, step));
+}
+
+// One bullet of his M4A1. Counter-Strike's rifles are hitscan - no flying bullet, the shot lands the
+// moment it is fired - so the shot is a line, not a projectile: from his muzzle, through an aim point
+// scattered by his spread, and the man is hit when the line passes through his body. His spread follows
+// Counter-Strike's own rule (settled he is tight, moving he sprays) and the first bullet of a burst is
+// the tightest, the way a professional taps.
+void SoldierShoot(Mob& m, const Vec3& playerFeet, const Vec3& playerMid, float dist) {
+    const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+    const Vec3 fwd = Flat(playerFeet - m.pos);
+    const Vec3 from = eye + fwd * 0.6f;
+    const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+    float spread = hv < 0.6f ? kSoldier.spreadSettled : hv < 3.6f ? kSoldier.spreadStrafe : kSoldier.spreadRun;
+    if (m.burstShots == m.burstSize)
+        spread *= kSoldier.firstShot;
+    const float err = std::tan(spread * kPi / 180.0f) * dist;
+    const float a = Rand01() * 6.2831853f, rr = err * std::sqrt(Rand01());
+    const Vec3 aim = playerMid + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err);
+    Vec3 dir = aim - from;
+    const float len = dir.Length();
+    bool hit = false;
+    if (len > 0.1f) {
+        dir = dir * (1.0f / len);
+        // the closest the line comes to the man's body (checked at shin, chest and head height)
+        for (float h = 0.4f; h <= 1.7f && !hit; h += 0.65f) {
+            const Vec3 p = playerFeet + Vec3(0, 0, h);
+            const Vec3 rel = p - from;
+            const float t = rel.Dot(dir);
+            if (t < 0.0f || t > dist + 2.0f)
+                continue;
+            hit = (rel - dir * t).Length() < 0.42f;
+        }
+    }
+    m.attackAnim = 1.0f;
+    PlaySfx(SND_M4A1_SHOOT, &from, 3.0f, 0.95f + Rand01() * 0.1f);
+    if (hit) {
+        float dmg = kSoldier.damage;
+        if (dist > 10.0f) {
+            const float f = Clamp((dist - 10.0f) / (kSoldier.sightRange - 10.0f), 0.0f, 1.0f);
+            dmg *= 1.0f - (1.0f - kSoldier.damageFar) * f;
+        }
+        StrikePrey(m, fwd, dmg, 0.0f); // his prey is the player (huntBeing -1), down the usual road
+    }
+}
+
+// The soldier's brain. His enemy is the other team and only the other team: in this step that is the
+// player (the player fights for the terrorists; the soldier is counter). The host's people in the
+// street belong to no team and he never goes for them, whatever passes - `beings` is not even read.
+// He patrols his post, checks the angles at every stop, and fights the way he was tuned: see, react,
+// burst, hold or close, fall back when he is hurt, hunt what he lost, and reload like a man who knows
+// an empty rifle is a death sentence - on the move, never standing in the open.
+bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
+                  const std::vector<BeingInfo>* beings) {
+    (void)beings; // the street is not his war
+    m.attackAnim = std::max(0.0f, m.attackAnim - dt * 2.5f);
+    const bool wasAlerted = m.alerted;
+    const Vec3 playerFeet = playerPos - Vec3(0, 0, 1.0f);
+    Vec3 to = playerFeet - m.pos;
+    to.z = 0.0f;
+    const float dist = to.Length();
+    const Vec3 dir = dist > 0.01f ? to * (1.0f / dist) : Vec3(0, 1, 0);
+    const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+
+    // ---- seeing: a cone in front of him (and a man's instinct at point blank), a clear line, a living enemy
+    bool see = false;
+    if (gGame.deathTime < 0.0f && dist < kSoldier.sightRange && std::fabs(playerFeet.z - m.pos.z) < 8.0f) {
+        const Vec3 fwd(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
+        const float dot = fwd.x * dir.x + fwd.y * dir.y;
+        if (dot > kSoldier.sightCos || dist < kSoldier.pointBlank)
+            see = !TheHost().LineBlocked(eye, playerPos);
+    }
+    if (see) {
+        m.seenTime += dt;
+        m.lastSeen = playerFeet;
+        m.searchTime = kSoldier.searchSeconds;
+        m.alerted = true;
+        m.alertFade = 0.0f;
+        m.scanTime = 0.0f;
+    } else {
+        m.seenTime = std::max(0.0f, m.seenTime - dt * 3.0f);
+        if (m.searchTime > 0.0f)
+            m.searchTime -= dt;
+        else if (m.alerted) {
+            m.alertFade += dt;
+            if (m.alertFade > 25.0f)
+                m.alerted = false; // a long quiet: he settles back to a patrolman's calm
+        }
+    }
+    const float reaction = wasAlerted ? kSoldier.reaction * 0.5f : kSoldier.reaction;
+    const bool canFire = see && m.seenTime >= reaction;
+    m.huntValid = see; // Think's head and body machinery reads the prey from these two
+    m.huntBeing = -1;
+    *looking = see;
+
+    // ---- the rifle: reload first (it owns him until it is done), then bursts while he may fire
+    if (m.reloadT > 0.0f) {
+        m.reloadT -= dt;
+        if (m.reloadStage == 1 && m.reloadT <= 2.0f) {
+            m.reloadStage = 2;
+            const Vec3 c = m.pos + Vec3(0, 0, 1.2f);
+            PlaySfx(SND_M4A1_CLIPIN, &c, 1.2f);
+        } else if (m.reloadStage == 2 && m.reloadT <= 0.8f) {
+            m.reloadStage = 3;
+            const Vec3 c = m.pos + Vec3(0, 0, 1.2f);
+            PlaySfx(SND_M4A1_BOLTPULL, &c, 1.2f);
+        }
+        if (m.reloadT <= 0.0f) {
+            m.mag = kSoldier.magazine;
+            m.burstShots = 0;
+            m.burstPause = 0.15f;
+        }
+    } else if (canFire) {
+        if (m.burstPause > 0.0f) {
+            m.burstPause -= dt;
+        } else {
+            if (m.burstShots <= 0) { // a new burst (or, with an empty magazine, the reload)
+                if (m.mag <= 0) {
+                    m.reloadT = kSoldier.reloadTime;
+                    m.reloadStage = 1;
+                    const Vec3 c = m.pos + Vec3(0, 0, 1.2f);
+                    PlaySfx(SND_M4A1_CLIPOUT, &c, 1.2f);
+                } else {
+                    m.burstSize = m.burstShots = std::min(m.mag, kSoldier.burstMin + rand() % (kSoldier.burstMax - kSoldier.burstMin + 1));
+                    m.shotTimer = 0.0f;
+                }
+            }
+            if (m.burstShots > 0) {
+                m.shotTimer -= dt;
+                if (m.shotTimer <= 0.0f) {
+                    m.shotTimer = kSoldier.shotInterval;
+                    SoldierShoot(m, playerFeet, playerPos, dist);
+                    --m.burstShots;
+                    --m.mag;
+                    if (m.burstShots <= 0)
+                        m.burstPause = kSoldier.burstPauseMin + Rand01() * (kSoldier.burstPauseMax - kSoldier.burstPauseMin);
+                }
+            }
+        }
+        m.attackAnim = std::max(m.attackAnim, 0.7f); // the rifle stays up while the enemy is in his sight
+    } else {
+        m.burstPause = std::max(0.0f, m.burstPause - dt);
+        m.shotTimer = 0.0f;
+    }
+
+    // ---- moving: fight, hunt, or patrol
+    const MobType& t = kTypes[m.kind];
+    const float maxHealth = t.health;
+    m.aiTimer = 0.5f;
+    if (see) {
+        const bool hurt = m.health < maxHealth * kSoldier.retreatUnder;
+        if (hurt && dist < 30.0f) {
+            m.goal = dir * -1.0f; // falling back, still facing the fight (Think keeps his body on the enemy)
+            m.moving = true;
+            *speed = t.run * 0.8f;
+        } else if (dist > 26.0f) {
+            m.goal = dir;
+            m.moving = true;
+            *speed = t.run;
+        } else if (dist < 6.0f) {
+            m.goal = dir * -1.0f;
+            m.moving = true;
+            *speed = kSoldier.strafeSpeed;
+        } else {
+            // his band: he holds his angle and drifts across it, changing side every few seconds -
+            // a standing target is a dead one, and he knows it
+            m.strafeTime -= dt;
+            if (m.strafeTime <= 0.0f) {
+                m.strafeTime = 1.6f + Rand01() * 1.6f;
+                m.strafeDir = -m.strafeDir;
+            }
+            const Vec3 side(dir.y, -dir.x, 0.0f);
+            m.goal = side * m.strafeDir;
+            m.moving = true;
+            *speed = kSoldier.strafeSpeed;
+        }
+    } else if (m.searchTime > 0.0f) {
+        Vec3 toSeen = m.lastSeen - m.pos;
+        toSeen.z = 0.0f;
+        if (toSeen.Length() > 1.8f) {
+            m.goal = Flat(toSeen);
+            m.moving = true;
+            *speed = t.run * 0.75f; // he advances on a lost enemy like a man clearing a street: fast, not charging
+            m.scanTime = 0.0f;
+        } else {
+            // at the last seen spot: he stops and sweeps the angles before he gives the man up
+            m.moving = false;
+            if (m.scanTime <= 0.0f)
+                m.scanTime = 2.2f;
+            m.scanTime -= dt;
+            SoldierTurn(m, Vec3(std::sin(m.scanTime * 2.4f + (float)m.id), std::cos(m.scanTime * 2.4f + (float)m.id), 0.0f), 2.2f, dt);
+            m.attackAnim = std::max(m.attackAnim, 0.7f);
+        }
+    } else {
+        // patrol: six posts around his anchor; at every post he stops, rifle up, and checks the angles
+        // before he walks on (the seed of corner-checking: never drift past an angle unlooked)
+        if (m.patrolWait > 0.0f) {
+            m.patrolWait -= dt;
+            m.moving = false;
+            m.attackAnim = std::max(m.attackAnim, 0.7f);
+            const float a = (float)m.patrolStep * 1.0472f + (float)(m.id % 6) * 0.5f;
+            SoldierTurn(m, Vec3(std::cos(a), std::sin(a), 0.0f), 1.6f, dt);
+            if (m.patrolWait <= 0.0f) {
+                m.patrolStep = (m.patrolStep + 1) % 6;
+                m.patrolLeg = 0.0f;
+            }
+        } else {
+            const float a = (float)m.patrolStep * 1.0472f + (float)(m.id % 6) * 0.5f;
+            const Vec3 post = m.anchor + Vec3(std::cos(a), std::sin(a), 0.0f) * kSoldier.patrolRadius;
+            Vec3 toPost = post - m.pos;
+            toPost.z = 0.0f;
+            m.patrolLeg += dt;
+            if (toPost.Length() < 1.2f || m.patrolLeg > 9.0f) {
+                m.patrolWait = 1.2f + Rand01() * 1.2f; // (a leg that takes too long is given up, post reached or not)
+                m.moving = false;
+            } else {
+                m.goal = Flat(toPost);
+                m.moving = true;
+                *speed = t.walk;
+            }
+        }
+    }
+
+    // ---- his steps, on his stride, the game's own footstep sounds
+    if (m.moving && m.onGround) {
+        const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+        m.stepAcc += hv * dt;
+        if (m.stepAcc > 2.6f) {
+            m.stepAcc = 0.0f;
+            PlaySfx(SND_SOLDIER_STEP, &m.pos, 1.3f, 0.95f + Rand01() * 0.1f);
+        }
+    } else {
+        m.stepAcc = 0.0f;
+    }
+    return true; // a soldier is always on duty: patrol, hunt and fight are all his
+}
+
 void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t playerHeld,
            const std::vector<BeingInfo>* beings) {
     const MobType& t = kTypes[m.kind];
@@ -741,6 +1044,8 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
             chasing = SkeletonBrain(m, dt, playerPos, &speed, &looking, beings);
         else if (m.kind == MOB_SPIDER)
             chasing = SpiderBrain(m, dt, playerPos, &speed, &looking, beings);
+        else if (m.kind == MOB_SOLDIER)
+            chasing = SoldierBrain(m, dt, playerPos, &speed, &looking, beings);
         else
             chasing = CreeperFuse(m, dt, playerPos, toPlayer, &speed, &looking, beings);
     }
@@ -796,8 +1101,9 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
     // or closes in. Its bow is drawn in the body's frame (McModel) and its head rides on the body, so facing
     // the prey is what puts the look, the aim and the arrow on one line. Before this, the body faced where it
     // walked (sideways, while strafing), the head looked at the player, and the arrow flew at the prey: three
-    // different ways at once, which is exactly what the user saw.
-    const bool aiming = hasPrey && m.kind == MOB_SKELETON;
+    // different ways at once, which is exactly what the user saw. The soldier fights the same way - a man
+    // with a rifle keeps his body on his enemy while his feet drift - so he shares the rule.
+    const bool aiming = hasPrey && (m.kind == MOB_SKELETON || m.kind == MOB_SOLDIER);
 
     // turn the body towards where it walks (a skeleton with prey: towards the prey, fast, the way it aims)
     if (aiming) {
@@ -952,6 +1258,13 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     m.persistent = persistent;
     m.groundZ = feet.z;
     m.baby = baby ? 90.0f : 0.0f;
+    if (kind == MOB_SOLDIER) {
+        // posted where he was summoned: counter-terrorist, kevlar on, a full magazine in the rifle
+        m.team = TEAM_COUNTER;
+        m.armor = 200.0f; // Counter-Strike's 100 kevlar points, in half hearts like his health
+        m.anchor = feet;
+        m.mag = kSoldier.magazine;
+    }
     m.id = gNextMobId++;
     gMobs.push_back(m);
     return (int)gMobs.size() - 1;
@@ -1004,7 +1317,23 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
     Mob& m = gMobs[index];
     if (m.death >= 0.0f || m.hurt > 0.25f)
         return; // dead, or still invulnerable from the last hit
-    m.health -= halfHearts;
+    float dmg = halfHearts;
+    if (m.kind == MOB_SOLDIER) {
+        // Counter-Strike's kevlar: while it lasts it swallows half of every hit, and what is left reaches
+        // the man. A professional in armour is also barely shoved by a blow. And being shot at tells him
+        // where his enemy is: he is alerted, and he hunts the shot's origin.
+        knock *= 0.25f;
+        if (m.armor > 0.0f) {
+            const float absorbed = std::min(m.armor, dmg * kSoldier.armorAbsorb);
+            m.armor -= absorbed;
+            dmg -= absorbed;
+        }
+        m.alerted = true;
+        m.alertFade = 0.0f;
+        m.lastSeen = from;
+        m.searchTime = std::max(m.searchTime, kSoldier.searchSeconds);
+    }
+    m.health -= dmg;
     m.hurt = 0.5f;
     m.panic = kTypes[m.kind].monster ? 0.0f : 4.0f + Rand01() * 2.0f;
     m.aiTimer = 0.0f;

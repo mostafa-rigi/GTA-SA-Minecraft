@@ -2151,6 +2151,105 @@ static void TestNewMobs() {
     }
 }
 
+// the Counter-Strike soldier of the CS project, step 1: one counter-terrorist with the game's own
+// M4A1 and a professional's brain, tuned very hard (his whole difficulty sits in kSoldier in Mobs.cpp)
+static void TestSoldier() {
+    TestHost host;
+    SetHost(&host);
+    srand(4242);
+    const Vec3 player(0.5f, 0.5f, 11.0f); // his middle; his feet stand at z = 10
+
+    // what he is: Counter-Strike's numbers on this host's scale, posted to the counter team
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        CHECK(s >= 0 && gMobs[s].health == 200.0f && gMobs[s].armor == 200.0f, "a soldier: 100 health and 100 kevlar, counted in half hearts");
+        CHECK(gMobs[s].team == TEAM_COUNTER && IsMonster(MOB_SOLDIER), "he fights for the counter-terrorists");
+        CHECK(gMobs[s].mag == 30 && Near(MobHeight(gMobs[s]), 1.8f), "a full M4A1 magazine and a man's height");
+        CHECK(TEAM_TERRORIST != TEAM_COUNTER && TEAM_NONE != TEAM_COUNTER, "the two sides of the war are kept apart");
+    }
+    // kevlar swallows half of every hit while it lasts; without it the man takes the whole blow
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        CHECK(Near(gMobs[s].health, 195.0f) && Near(gMobs[s].armor, 195.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
+        gMobs[s].hurt = 0.0f;
+        gMobs[s].armor = 0.0f;
+        MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        CHECK(Near(gMobs[s].health, 185.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
+        CHECK(gMobs[s].alerted && gMobs[s].searchTime > 0.0f, "and being shot at alerts him and sends him hunting");
+    }
+    // the street is not his war: a man of the host's people at his nose is never his target
+    {
+        WideStage();
+        host.people.clear();
+        TestHost::Person p;
+        p.centre = Vec3(6.5f, 0.5f, 11.0f);
+        host.people.push_back(p);
+        const std::vector<BeingInfo> beings = { BeingInfo{ 0, p.centre } };
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(10.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = kPi / 2.0f; // facing the man in the street
+        RunMobsB(4.0f, Vec3(90.5f, 0.5f, 11.0f), &beings); // the player is 80 m off: nobody's fight
+        CHECK(host.people[0].hurt == 0.0f, "a soldier never shoots the people of the street");
+        CHECK(host.playerHurt == 0.0f && !gMobs[s].alerted, "and a far-off player is not engaged either");
+        CHECK(std::fabs(gMobs[s].pos.x - 10.5f) < 16.0f, "he stays on his patrol, around his post");
+        host.people.clear();
+    }
+    // his eyes are a cone, not a sphere: a man behind him is not seen (he stands at a patrol stop)
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(20.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = -kPi / 2.0f; // facing +x; the player stands 15 m behind him, at -x
+        gMobs[s].patrolWait = 5.0f;
+        RunMobsB(0.3f, Vec3(5.5f, 0.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].seenTime == 0.0f && !gMobs[s].alerted && host.playerHurt == 0.0f, "a man at his back is not seen");
+    }
+    // in front of him it takes only a moment: he sees, reacts, and his bursts land
+    {
+        WideStage();
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = kPi / 2.0f; // facing the player, 14 m off
+        RunMobsB(0.3f, player, nullptr);
+        CHECK(gMobs[s].huntValid && gMobs[s].alerted, "a man in front of him is seen at once");
+        RunMobsB(2.5f, player, nullptr);
+        CHECK(host.playerHurt > 0.0f, "and his rifle lands hits (%.1f half hearts)", host.playerHurt);
+        const int used = 30 - gMobs[s].mag;
+        CHECK(used >= 3 && used <= 18, "fired in professional bursts, not a hose (%d rounds in the first seconds; a hose would be over 20)", used);
+    }
+    // an empty magazine means a reload: three seconds of no fire, then a full rifle again
+    {
+        WideStage();
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(12.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = kPi / 2.0f;
+        RunMobsB(1.0f, player, nullptr); // he is engaged by now
+        gMobs[s].mag = 1;
+        gMobs[s].burstShots = 0;
+        gMobs[s].burstPause = 0.0f;
+        RunMobsB(0.7f, player, nullptr);
+        CHECK(gMobs[s].mag == 0 && gMobs[s].reloadT > 0.0f, "the last round goes, and the reload begins");
+        const float hurtAtReload = host.playerHurt;
+        RunMobsB(2.0f, player, nullptr);
+        CHECK(host.playerHurt == hurtAtReload, "no shot is fired while he reloads");
+        RunMobsB(2.5f, player, nullptr);
+        CHECK(gMobs[s].mag >= 20, "and the rifle is full again after it (mag %d)", gMobs[s].mag);
+    }
+    // badly hurt, he does not stand and die: he falls back while he fights
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(30.5f, 0.5f, 10.0f), true);
+        gMobs[s].yaw = kPi / 2.0f; // facing the player, 12 m west of him
+        gMobs[s].health = 50.0f;  // a quarter of his health: under the retreat line
+        const Vec3 pl(18.5f, 0.5f, 11.0f);
+        const float d0 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
+        RunMobsB(2.5f, pl, nullptr);
+        const float d1 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
+        CHECK(d1 > d0 + 3.0f, "a hurt soldier falls back (%.1f m -> %.1f m)", d0, d1);
+    }
+}
+
 static void TestMobs() {
     TestHost host;
     SetHost(&host);
@@ -4188,6 +4287,11 @@ static void TestModels() {
     CHECK(sink.lo.z > -0.01f && sink.lo.z < 0.02f, "a skeleton stands on its own feet, not sunk in the ground (lowest point %.3f m)", sink.lo.z);
 
     sink.Reset();
+    DrawMob(MOB_SOLDIER, stand, MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.quads[0] >= 60 && sink.lo.z > -0.01f && sink.lo.z < 0.02f && sink.hi.z > 1.8f && sink.hi.z < 2.05f,
+          "a soldier: a man with a rifle, on his own feet (lowest point %.3f m, %.2f m tall, %d quads)", sink.lo.z, sink.hi.z, sink.quads[0]);
+
+    sink.Reset();
     HumanoidAnim a;
     PlayerAnimInput in;
     ComputePlayerAnim(a, in);
@@ -5537,6 +5641,7 @@ int main(int argc, char** argv) {
     TestInteract();
     TestMobs();
     TestNewMobs();
+    TestSoldier();
     TestCreeper();
     TestCombat();
     TestFishing();

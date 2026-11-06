@@ -2586,7 +2586,7 @@ const CookingRecipe kCooking[102] = {
 const int kNumShaped = 583, kNumShapeless = 214, kNumCooking = 102;
 const int kNumIngredientSets = 510;
 
-const SoundFile kSoundFiles[498] = {
+const SoundFile kSoundFiles[513] = {
     { "dig_stone1.ogg", 1.00f, 1.00f },
     { "dig_stone2.ogg", 1.00f, 1.00f },
     { "dig_stone3.ogg", 1.00f, 1.00f },
@@ -3085,6 +3085,21 @@ const SoundFile kSoundFiles[498] = {
     { "mob_spider_say3.ogg", 1.00f, 1.00f },
     { "mob_spider_say4.ogg", 1.00f, 1.00f },
     { "mob_spider_death.ogg", 1.00f, 1.00f },
+    { "cs_m4a1-1.wav", 1.00f, 1.00f },
+    { "cs_m4a1_clipout.wav", 1.00f, 1.00f },
+    { "cs_m4a1_clipin.wav", 1.00f, 1.00f },
+    { "cs_m4a1_boltpull.wav", 1.00f, 1.00f },
+    { "cs_pl_step1.wav", 1.00f, 1.00f },
+    { "cs_pl_step2.wav", 1.00f, 1.00f },
+    { "cs_pl_step3.wav", 1.00f, 1.00f },
+    { "cs_pl_step4.wav", 1.00f, 1.00f },
+    { "cs_bhit_kevlar-1.wav", 1.00f, 1.00f },
+    { "cs_bhit_flesh-1.wav", 1.00f, 1.00f },
+    { "cs_bhit_flesh-2.wav", 1.00f, 1.00f },
+    { "cs_bhit_flesh-3.wav", 1.00f, 1.00f },
+    { "cs_die1.wav", 1.00f, 1.00f },
+    { "cs_die2.wav", 1.00f, 1.00f },
+    { "cs_die3.wav", 1.00f, 1.00f },
 };
 const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 0, 4 }, // DIG_STONE
@@ -3240,6 +3255,13 @@ const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 489, 4 }, // SPIDER_SAY
     { 493, 4 }, // SPIDER_HURT
     { 497, 1 }, // SPIDER_DEATH
+    { 498, 1 }, // M4A1_SHOOT
+    { 499, 1 }, // M4A1_CLIPOUT
+    { 500, 1 }, // M4A1_CLIPIN
+    { 501, 1 }, // M4A1_BOLTPULL
+    { 502, 4 }, // SOLDIER_STEP
+    { 506, 4 }, // SOLDIER_HURT
+    { 510, 3 }, // SOLDIER_DEATH
 };
 
 } // namespace mc

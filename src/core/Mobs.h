@@ -9,7 +9,13 @@ namespace mc {
 
 struct BeingInfo; // Host.h: one of the host's own people near a point
 
-enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_ZOMBIE, MOB_SKELETON, MOB_SPIDER, MOB_KIND_COUNT };
+enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_ZOMBIE, MOB_SKELETON, MOB_SPIDER, MOB_SOLDIER, MOB_KIND_COUNT };
+
+// The two sides of the Counter-Strike war, kept apart from the first step on: the player and whoever
+// fights at his side are TEAM_TERRORIST, the soldiers are TEAM_COUNTER. A soldier only ever goes for the
+// other side - never for his own team, and never for the host's people in the street (they belong to no
+// team at all). Every older kind stays TEAM_NONE and plays by the old rules.
+enum MobTeam { TEAM_NONE = 0, TEAM_TERRORIST, TEAM_COUNTER };
 
 struct Mob {
     int kind = 0;
@@ -61,6 +67,29 @@ struct Mob {
     float huntMemory = 0.0f;   // seconds a held prey is still remembered once it slips out of reach
     float doorHitTime = 0.0f;  // zombie: seconds of steady hitting on the door in doorCell
     Int3 doorCell{ 0, 0, -1 }; // zombie: the lower cell of the door it is hitting (z < 0: none)
+    // the Counter-Strike soldier (MOB_SOLDIER); every other kind leaves these at their defaults
+    int team = TEAM_NONE;      // whose side he fights for (MobTeam); the war kinds set it at spawn
+    float armor = 0.0f;        // soldier: kevlar points, counted in half hearts like health
+    Vec3 anchor{ 0, 0, 0 };    // soldier: the post he was summoned at; his patrol walks around it
+    int patrolStep = 0;        // soldier: which patrol point he is walking to
+    float patrolWait = 0.0f;   // soldier: seconds he still stands at a patrol point, checking the angles
+    float patrolLeg = 0.0f;    // soldier: seconds this patrol leg has taken (a stuck leg is given up)
+    float seenTime = 0.0f;     // soldier: seconds his enemy has been in his sight (his reaction runs on it)
+    bool alerted = false;      // soldier: he knows the enemy is about (he saw him, or a shot told him)
+    float alertFade = 0.0f;    // soldier: quiet seconds after which being alerted wears off
+    Vec3 lastSeen{ 0, 0, 0 };  // soldier: where he last saw (or heard) his enemy
+    float searchTime = 0.0f;   // soldier: seconds he still hunts around lastSeen before giving up
+    float scanTime = 0.0f;     // soldier: seconds of looking around at lastSeen / at a patrol point
+    float shotTimer = 0.0f;    // soldier: seconds until the next shot of this burst
+    int burstShots = 0;        // soldier: shots left in this burst (0: between bursts)
+    int burstSize = 0;         // soldier: how many shots this burst started with (the first is the tightest)
+    float burstPause = 0.0f;   // soldier: seconds until the next burst
+    int mag = 0;               // soldier: bullets left in the magazine
+    float reloadT = 0.0f;      // soldier: seconds the reload still takes (> 0: he is reloading)
+    int reloadStage = 0;       // soldier: which reload sound is still to come (clip out, clip in, bolt)
+    float strafeTime = 0.0f;   // soldier: seconds until he changes his sideways drift in a fight
+    float strafeDir = 1.0f;    // soldier: which way he drifts while he holds his angle
+    float stepAcc = 0.0f;      // soldier: metres walked since his last footstep sound
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

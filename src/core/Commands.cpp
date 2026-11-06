@@ -99,9 +99,9 @@ size_t SkipTarget(const Args& a, size_t i) {
     return i;
 }
 
-const char* const kMobNames[MOB_KIND_COUNT] = { "cow", "pig", "sheep", "chicken", "creeper", "warden", "zombie", "skeleton", "spider" };
-const char* const kMobNamesTr[MOB_KIND_COUNT] = { "İnek", "Domuz", "Koyun", "Tavuk", "Creeper", "Warden", "Zombi", "İskelet", "Örümcek" };
-const char* const kMobNamesEn[MOB_KIND_COUNT] = { "Cow", "Pig", "Sheep", "Chicken", "Creeper", "Warden", "Zombie", "Skeleton", "Spider" };
+const char* const kMobNames[MOB_KIND_COUNT] = { "cow", "pig", "sheep", "chicken", "creeper", "warden", "zombie", "skeleton", "spider", "soldier" };
+const char* const kMobNamesTr[MOB_KIND_COUNT] = { "İnek", "Domuz", "Koyun", "Tavuk", "Creeper", "Warden", "Zombi", "İskelet", "Örümcek", "Asker" };
+const char* const kMobNamesEn[MOB_KIND_COUNT] = { "Cow", "Pig", "Sheep", "Chicken", "Creeper", "Warden", "Zombie", "Skeleton", "Spider", "Soldier" };
 const char* const kEffectKeys[EFFECT_COUNT] = { "absorption", "regeneration", "fire_resistance", "resistance", "hunger", "poison" };
 const char* const kGameRules[] = { "keepInventory", "doMobSpawning", "mobGriefing" };
 
@@ -296,7 +296,7 @@ void CmdXp(const Args& a) {
 
 void CmdSummon(const Args& a) {
     if (a.size() < 2)
-        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider> [x y z]");
+        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider|soldier> [x y z]");
     const int kind = MobByName(a[1]);
     if (kind < 0)
         return Fail(Fmt(Tr("Unknown entity: %s", "Bilinmeyen varlık: %s"), a[1].c_str()));

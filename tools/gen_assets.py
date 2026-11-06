@@ -1448,6 +1448,12 @@ ent_add("WARDEN", gimg("entity/warden/warden"))
 ent_add("ZOMBIE", gimg("entity/zombie/zombie"))
 ent_add("SKELETON", gimg("entity/skeleton/skeleton"))
 ent_add("SPIDER", gimg("entity/spider/spider"))
+# The Counter-Strike soldier's texture is not a Minecraft asset, so it cannot be painted here: its
+# rectangle is reserved by hand in the one free slot of the sheet (right of the spider's), and the
+# pixels are patched into entity.png afterwards by tools/cs_soldier_texture.py, which cuts them out of
+# the SEAL model file of the user's own Counter-Strike 1.6. A regeneration leaves the slot empty until
+# that script runs - it never moves any other rectangle.
+ent_rects["SOLDIER"] = (448, 256, 64, 64)
 ent.save(os.path.join(OUT, "entity.png"))
 
 # ======================================================================= sounds
@@ -1553,6 +1559,25 @@ for enum, ev in SOUND_EVENTS.items():
         shutil.copyfile(src, os.path.join(OUT, "sounds", dst_name))
         sound_files_flat.append((dst_name, vol, pitch))
     sound_rows.append((enum, first, len(sound_files_flat) - first))
+
+# Counter-Strike soldier sounds: not Minecraft events, so sounds.json cannot resolve them - the files
+# are Counter-Strike 1.6's own (taken from the user's own install), registered here by name and copied
+# into the sounds folder by the CS asset pipeline. Their rows are appended after every Minecraft event,
+# so no existing event number or file row ever moves.
+CS_SOUND_FILES = OrderedDict([
+    ("M4A1_SHOOT", ["cs_m4a1-1.wav"]),
+    ("M4A1_CLIPOUT", ["cs_m4a1_clipout.wav"]),
+    ("M4A1_CLIPIN", ["cs_m4a1_clipin.wav"]),
+    ("M4A1_BOLTPULL", ["cs_m4a1_boltpull.wav"]),
+    ("SOLDIER_STEP", ["cs_pl_step1.wav", "cs_pl_step2.wav", "cs_pl_step3.wav", "cs_pl_step4.wav"]),
+    ("SOLDIER_HURT", ["cs_bhit_kevlar-1.wav", "cs_bhit_flesh-1.wav", "cs_bhit_flesh-2.wav", "cs_bhit_flesh-3.wav"]),
+    ("SOLDIER_DEATH", ["cs_die1.wav", "cs_die2.wav", "cs_die3.wav"]),
+])
+for enum, files in CS_SOUND_FILES.items():
+    first = len(sound_files_flat)
+    for name in files:
+        sound_files_flat.append((name, 1.0, 1.0))
+    sound_rows.append((enum, first, len(files)))
 
 # ======================================================================= C++ output
 def cname(k):
