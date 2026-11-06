@@ -4,7 +4,7 @@
 
 namespace mc {
 
-constexpr int NUM_BLOCKS = 697; // including air (0)
+constexpr int NUM_BLOCKS = 699; // including air (0)
 constexpr int FIRST_ITEM = 1024;
 constexpr int ITEM_END = 1419;
 
@@ -705,6 +705,8 @@ constexpr uint16_t ID_WHITE_BED = 693;
 constexpr uint16_t ID_WHITE_BED_HEAD = 694;
 constexpr uint16_t ID_YELLOW_BED = 695;
 constexpr uint16_t ID_YELLOW_BED_HEAD = 696;
+constexpr uint16_t ID_OAK_DOOR = 697;
+constexpr uint16_t ID_OAK_DOOR_UPPER = 698;
 constexpr uint16_t ID_ABANDONED_CAMP_MAP = 1024;
 constexpr uint16_t ID_ACACIA_BOAT = 1025;
 constexpr uint16_t ID_ACACIA_CHEST_BOAT = 1026;
@@ -1244,6 +1246,8 @@ enum SoundEvent : uint16_t {
     SND_WARDEN_LISTENING_ANGRY,
     SND_WARDEN_SNIFF,
     SND_WARDEN_DIG,
+    SND_DOOR_OPEN,
+    SND_DOOR_CLOSE,
     SND_COUNT
 };
 

@@ -22,6 +22,7 @@
 #include "Screens.h"
 #include "Shapes.h"
 #include "Beds.h"
+#include "Doors.h"
 #include "Chat.h"
 #include "Commands.h"
 #include "Villagers.h"
@@ -4844,6 +4845,144 @@ static void TestBeds() {
     gWorld.Clear();
 }
 
+static void TestDoors() {
+    TestHost host;
+    SetHost(&host);
+    srand(3141);
+
+    // what a door is
+    {
+        ShapeBox b[kMaxShapeBoxes];
+        CHECK(DoorOtherBlock(ID_OAK_DOOR) == ID_OAK_DOOR_UPPER && DoorOtherBlock(ID_OAK_DOOR_UPPER) == ID_OAK_DOOR &&
+                  DoorOtherBlock(ID_STONE) == 0 && IsDoorBlock(ID_OAK_DOOR) && IsDoorBlock(ID_OAK_DOOR_UPPER) &&
+                  !IsDoorBlock(ID_OAK_PLANKS) && !IsDoorBlock(ID_OAK_STAIRS),
+              "a door: its lower half and its upper half, and nothing else");
+        const BlockDef& d = Block(ID_OAK_DOOR);
+        CHECK(d.shape == SHAPE_DOOR && Block(ID_OAK_DOOR_UPPER).shape == SHAPE_DOOR_UPPER && d.hardness == 2.0f && d.tool == TOOL_AXE &&
+                  std::string(d.name[0]) == "Oak Door",
+              "oak, worked with an axe, named as in Minecraft");
+        // shut: one panel three pixels thick, flush with the edge away from the front
+        CHECK(BlockShapeBoxes(ID_OAK_DOOR, FACE_EAST, b) == 1 && b[0].x0 == 0.0f && b[0].x1 == 3.0f / 16.0f && b[0].y0 == 0.0f &&
+                  b[0].y1 == 1.0f && b[0].z0 == 0.0f && b[0].z1 == 1.0f,
+              "facing east, shut: the panel at the west edge");
+        CHECK(BlockShapeBoxes(ID_OAK_DOOR_UPPER, FACE_NORTH, b) == 1 && b[0].y0 == 0.0f && b[0].y1 == 3.0f / 16.0f && b[0].x1 == 1.0f,
+              "facing north, shut: the panel at the south edge, the upper half the same");
+        // open: swung flat against the side wall on the hinge's side
+        CHECK(BlockShapeBoxes(ID_OAK_DOOR, FACE_EAST | DOOR_OPEN, b) == 1 && b[0].y0 == 0.0f && b[0].y1 == 3.0f / 16.0f && b[0].x1 == 1.0f,
+              "facing east, open, hinge left: flat on the south wall");
+        CHECK(BlockShapeBoxes(ID_OAK_DOOR, FACE_EAST | DOOR_OPEN | DOOR_HINGE, b) == 1 && b[0].y0 == 13.0f / 16.0f && b[0].y1 == 1.0f,
+              "facing east, open, hinge right: flat on the north wall");
+        CHECK(BlockShapeBoxes(ID_OAK_DOOR, FACE_NORTH | DOOR_OPEN, b) == 1 && b[0].x0 == 13.0f / 16.0f && b[0].x1 == 1.0f && b[0].y1 == 1.0f,
+              "facing north, open, hinge left: flat on the east wall");
+        IconQuad q[kMaxIconQuads];
+        CHECK(ItemIcon(ID_OAK_DOOR, q) == 6, "in the GUI: both halves standing, three faces each");
+        const std::vector<uint16_t>& building = CreativeItems(CAT_BUILDING);
+        CHECK(std::find(building.begin(), building.end(), (uint16_t)ID_OAK_DOOR) != building.end() &&
+                  std::find(building.begin(), building.end(), (uint16_t)ID_OAK_DOOR_UPPER) == building.end(),
+              "in the creative tab: the door, never its upper half alone");
+        BlockMesh m = MeshOf({ { { 3, 3, 3 }, MakeVox(ID_OAK_DOOR, FACE_EAST) }, { { 3, 3, 4 }, MakeVox(ID_OAK_DOOR_UPPER, FACE_EAST) } });
+        CHECK(m.verts.size() == 48, "drawn: two panels, six faces each (%d)", (int)m.verts.size());
+    }
+
+    // put down, swung, broken
+    {
+        CombatStage(host);
+        gTarget.valid = gTarget.voxel = true;
+        gTarget.pos = Int3{ 3, 0, 9 };
+        gTarget.face = FACE_TOP;
+        gTarget.point = Vec3(3.5f, 0.5f, 10.0f);
+        gTarget.normal = Vec3(0, 0, 1);
+        gInv.Held() = Stack(ID_OAK_DOOR, 2);
+        PlaceHeldBlock(); // he looks east (CombatStage), so the front faces him: west, hinge left
+        CHECK(gWorld.Get(3, 0, 10) == MakeVox(ID_OAK_DOOR, FACE_WEST) && gWorld.Get(3, 0, 11) == MakeVox(ID_OAK_DOOR_UPPER, FACE_WEST) &&
+                  gInv.Held().count == 1,
+              "looking east: the lower half here, the upper half above it, the front facing him");
+        // no room above: no door
+        gWorld.SetRaw(5, 0, 11, MakeVox(ID_STONE));
+        gTarget.pos = Int3{ 5, 0, 9 };
+        gTarget.point = Vec3(5.5f, 0.5f, 10.0f);
+        PlaceHeldBlock();
+        CHECK(gWorld.GetBlock(5, 0, 10) == ID_AIR && gInv.Held().count == 1, "no room for the upper half: no door");
+        gWorld.SetRaw(5, 0, 11, MakeVox(ID_AIR));
+
+        // shut it blocks; used, it opens; the upper half shuts it again
+        CHECK(gWorld.IsSolid(3, 0, 10) && gWorld.IsSolid(3, 0, 11), "shut: both halves stop feet");
+        gTarget.pos = Int3{ 3, 0, 10 };
+        CHECK(TargetHasUse(), "a door has a use");
+        const int opened = Heard(SND_DOOR_OPEN);
+        UseTargetBlock();
+        CHECK(gWorld.Get(3, 0, 10) == MakeVox(ID_OAK_DOOR, FACE_WEST | DOOR_OPEN) &&
+                  gWorld.Get(3, 0, 11) == MakeVox(ID_OAK_DOOR_UPPER, FACE_WEST | DOOR_OPEN) && !gWorld.IsSolid(3, 0, 10) &&
+                  !gWorld.IsSolid(3, 0, 11) && Heard(SND_DOOR_OPEN) == opened + 1,
+              "used: both halves swing open together, nothing stops feet, the door's own sound");
+        const int closed = Heard(SND_DOOR_CLOSE);
+        gTarget.pos = Int3{ 3, 0, 11 };
+        UseTargetBlock();
+        CHECK(gWorld.Get(3, 0, 10) == MakeVox(ID_OAK_DOOR, FACE_WEST) && gWorld.IsSolid(3, 0, 10) && Heard(SND_DOOR_CLOSE) == closed + 1,
+              "the upper half used: it shuts again");
+
+        // broken at the upper half: both halves go, one door drops
+        gInv.Held() = ItemStack();
+        gGame.gameMode = MODE_SURVIVAL;
+        BreakVoxel(Int3{ 3, 0, 11 }, true);
+        CHECK(gWorld.GetBlock(3, 0, 10) == ID_AIR && gWorld.GetBlock(3, 0, 11) == ID_AIR && CountDrops(ID_OAK_DOOR) == 1,
+              "the upper half broken: the whole door goes, one door drops");
+    }
+
+    // saved and loaded: the whole state is in the cells, so it comes back as it was left
+    {
+        CombatStage(host);
+        const uint8_t meta = FACE_NORTH | DOOR_OPEN | DOOR_HINGE;
+        gWorld.SetRaw(3, 0, 10, MakeVox(ID_OAK_DOOR, meta));
+        gWorld.SetRaw(3, 0, 11, MakeVox(ID_OAK_DOOR_UPPER, meta));
+        const char* path = "mc_tests_door.tmp";
+        FILE* f = fopen(path, "wb");
+        CHECK(f != nullptr, "the door test file can be written");
+        if (f) {
+            WriteWorldFile(f, 1);
+            fclose(f);
+        }
+        BlockStage();
+        gWorld.Clear();
+        WorldFileInfo info;
+        f = fopen(path, "rb");
+        CHECK(f && ReadWorldFile(f, info) && info.blocksOk, "it reads back");
+        if (f)
+            fclose(f);
+        CHECK(gWorld.Get(3, 0, 10) == MakeVox(ID_OAK_DOOR, meta) && gWorld.Get(3, 0, 11) == MakeVox(ID_OAK_DOOR_UPPER, meta),
+              "an open door, its facing and its hinge survive the save");
+        std::remove(path);
+    }
+
+    // a zombie at a closed door: it stops, beats on the wood, and breaks through
+    {
+        MobStage();
+        host.dark = true; // night, so the sun does not do the player's work for him
+        gGame.gameMode = MODE_SURVIVAL;
+        for (int y = -3; y <= 3; ++y) {
+            if (y == 0)
+                continue;
+            gWorld.SetRaw(2, y, 10, MakeVox(ID_STONE));
+            gWorld.SetRaw(2, y, 11, MakeVox(ID_STONE));
+        }
+        gWorld.SetRaw(2, 0, 10, MakeVox(ID_OAK_DOOR, FACE_EAST));
+        gWorld.SetRaw(2, 0, 11, MakeVox(ID_OAK_DOOR_UPPER, FACE_EAST));
+        const Vec3 player(0.5f, 0.5f, 11.0f); // his middle; his feet are on the floor at z = 10
+        const int z = SpawnMob(MOB_ZOMBIE, Vec3(4.5f, 0.5f, 10.0f), true);
+        CHECK(z >= 0, "a zombie on the other side of the door");
+        const int hits = Heard(SND_HIT_WOOD);
+        RunMobsB(3.0f, player, nullptr);
+        CHECK(gWorld.GetBlock(2, 0, 10) == ID_OAK_DOOR && gMobs[z].pos.x > 3.0f && Heard(SND_HIT_WOOD) > hits,
+              "three seconds: at the door, hitting it, still shut out (x %.2f)", gMobs[z].pos.x);
+        RunMobsB(4.0f, player, nullptr);
+        CHECK(gWorld.GetBlock(2, 0, 10) == ID_AIR && gWorld.GetBlock(2, 0, 11) == ID_AIR && CountDrops(ID_OAK_DOOR) >= 1,
+              "about five seconds of hitting: the door breaks, both halves, and drops");
+        RunMobsB(2.0f, player, nullptr);
+        CHECK(gMobs[z].pos.x < 3.0f, "and then it comes through");
+    }
+    gWorld.Clear();
+}
+
 static void TestWarden() {
     TestHost host;
     SetHost(&host);
@@ -5331,9 +5470,9 @@ int main(int argc, char** argv) {
         printf("creative tab %d: %d items\n", c, (int)CreativeItems(c).size());
         total += CreativeItems(c).size();
     }
-    size_t fluids = 0; // water and lava only come from buckets; a bed's head only with the bed
+    size_t fluids = 0; // water and lava only come from buckets; a bed's head and a door's upper half only with their other half
     for (int b = 1; b < NUM_BLOCKS; ++b)
-        if (IsFluidBlock(b) || IsFireBlock(b) || Block(b).shape == SHAPE_BED_HEAD)
+        if (IsFluidBlock(b) || IsFireBlock(b) || Block(b).shape == SHAPE_BED_HEAD || Block(b).shape == SHAPE_DOOR_UPPER)
             ++fluids;
     CHECK(total == (size_t)(NUM_BLOCKS - 1 - fluids + ITEM_END - FIRST_ITEM), "creative tabs cover everything (%d vs %d)",
           (int)total, (int)(NUM_BLOCKS - 1 - fluids + ITEM_END - FIRST_ITEM));
@@ -5383,6 +5522,7 @@ int main(int argc, char** argv) {
     TestBlockMesh();
     TestShapes();
     TestBeds();
+    TestDoors();
     TestWarden();
     TestLanguage();
     TestBodyYaw();

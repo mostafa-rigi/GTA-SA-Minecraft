@@ -289,6 +289,8 @@ def classify(n):
     """surface, sound group, creative category"""
     if n.endswith("_bed") or n.endswith("_bed_head"):
         return SURF["DEFAULT"], "wood", 1
+    if n.endswith("_door"):
+        return (SURF["METAL"], "metal", 0) if n.startswith("iron_") else (SURF["WOOD"], "wood", 0)
     if n == "iron_bars":
         return SURF["DEFAULT"], "metal", 0
     if n.endswith("_stairs") or n.endswith("_slab") or n.endswith("_fence") or n.endswith("_wall"):
@@ -378,6 +380,18 @@ def build_blocks():
                           extra=dict(name=tr_name("block", key), name_en=en_name("block", key)))
             except (FileNotFoundError, TypeError, AttributeError):
                 pass
+            continue
+        # the oak door: two blocks, the lower half (the item) and the upper half (only ever placed
+        # with it), the bed's pattern turned upright. Its blockstate models are per-facing
+        # templates the resolver cannot follow, so the halves are built from the two door
+        # textures directly: every face of a half is that half's texture, as the mesh samples
+        # a thin panel's faces from the one tile anyway.
+        if key == "oak_door":
+            lo = tex_tile("block/oak_door_bottom")
+            hi = tex_tile("block/oak_door_top")
+            add_block(key, "door", dict(east=lo, west=lo, north=lo, south=lo, top=lo, bottom=lo))
+            add_block(key + "_upper", "door_upper", dict(east=hi, west=hi, north=hi, south=hi, top=hi, bottom=hi),
+                      extra=dict(name=tr_name("block", key), name_en=en_name("block", key)))
             continue
         # panes, bars, fences and walls (multipart: they join their neighbours): the textures of their post
         joined = "pane" if key.endswith("_pane") or key == "iron_bars" else "fence" if key.endswith("_fence") else \
@@ -650,7 +664,7 @@ def loot_drops(key):
 
 def finalize_blocks():
     for key, b in blocks.items():
-        base = key[:-5] if key.endswith("_bed_head") else key  # a bed's head is the bed
+        base = key[:-5] if key.endswith("_bed_head") else key[:-6] if key.endswith("_door_upper") else key  # a bed's head is the bed; a door's upper half is the door
         h = hardness_for(base)
         tool = 0
         for i, t in enumerate(("pickaxe", "axe", "shovel", "hoe")):
@@ -1499,6 +1513,8 @@ SOUND_EVENTS = OrderedDict([
     ("WARDEN_HEARTBEAT", "entity.warden.heartbeat"), ("WARDEN_LISTENING", "entity.warden.listening"),
     ("WARDEN_LISTENING_ANGRY", "entity.warden.listening_angry"), ("WARDEN_SNIFF", "entity.warden.sniff"),
     ("WARDEN_DIG", "entity.warden.dig"),
+    ("DOOR_OPEN", "block.wooden_door.open"),
+    ("DOOR_CLOSE", "block.wooden_door.close"),
 ])
 
 
@@ -1706,7 +1722,7 @@ with open(os.path.join(GEN, "GameData.cpp"), "w", encoding="utf-8") as f:
                  "cube6": "SHAPE_FACING", "cross": "SHAPE_CROSS", "fluid": "SHAPE_FLUID",
                  "fire": "SHAPE_FIRE", "stairs": "SHAPE_STAIRS", "slab": "SHAPE_SLAB",
                  "pane": "SHAPE_PANE", "fence": "SHAPE_FENCE", "wall": "SHAPE_WALL", "bed": "SHAPE_BED",
-                 "bed_head": "SHAPE_BED_HEAD"}
+                 "bed_head": "SHAPE_BED_HEAD", "door": "SHAPE_DOOR", "door_upper": "SHAPE_DOOR_UPPER"}
     w("const BlockDef kBlockDefs[NUM_BLOCKS] = {\n")
     w('    { "air", { "Air", "Hava" }, { 0, 0, 0, 0, 0, 0 }, 0xFFFF, SHAPE_CUBE, RENDER_AIR, 0.0f, 0, 0, false, 0, 0, 0, false, 0, {} },\n')
     for k in block_keys:
