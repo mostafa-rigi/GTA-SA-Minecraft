@@ -58,6 +58,7 @@ struct HudPiece {
 // what the host knows this frame
 struct HudFacts {
     bool shown = true;       // the HUD is on: the mod runs and the world is on screen
+    bool chatShown = false;  // CleanSA: no Minecraft HUD at all, but the chat still draws (the soldier's commands live in it)
     bool hasPlayer = true;
     float health = 1.0f;     // the host's health, 0..1
     float hostAbsorb = 0.0f; // the host's own yellow hearts (body armour), in half hearts

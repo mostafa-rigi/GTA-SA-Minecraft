@@ -481,6 +481,7 @@ void GuiDrawHud() {
     const int s = GuiScale();
     HudFacts f;
     f.shown = gGta.hudVisible;
+    f.chatShown = gConfig.cleanSA; // CleanSA: the chat alone still draws (the soldier's commands live in it)
     if (gGta.hudVisible && gGame.screen != SCREEN_NONE) {
         PlaceWindow();
         f.mouseX = MouseGx();

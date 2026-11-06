@@ -242,6 +242,8 @@ static int gWorldId = -1; // the world being played: -1 none yet, 0 new (not in 
 
 // the core's world file (src/core/Save.h), then what GTA adds: dug ground, broken buildings
 static void SaveAll() {
+    if (gConfig.cleanSA)
+        return; // CleanSA: there is no Minecraft world to save - the session never loads one either
     if (gWorldId < 1)
         return; // only a world that belongs to a GTA save slot is written
     std::string path = WorldPath(gWorldId), tmp = path + ".tmp";
@@ -319,7 +321,8 @@ static void ResetWorldState() {
     gInv.cursor.Clear();
     gInv.selected = 0;
     gSurvival.NewGame();
-    gGame.gameMode = gConfig.startGameMode == 1 ? MODE_CREATIVE : MODE_SURVIVAL;
+    // CleanSA pins survival: no creative proofs may ever arm in a vanilla San Andreas
+    gGame.gameMode = !gConfig.cleanSA && gConfig.startGameMode == 1 ? MODE_CREATIVE : MODE_SURVIVAL;
 }
 
 static int gProcessTicks = 0;    // GameProcess calls so far
@@ -341,7 +344,12 @@ static void ActivateWorld() {
     gActivatedTick = gProcessTicks;
     ResetWorldState();
     gWorldId = want;
-    if (want == 0) {
+    if (gConfig.cleanSA) {
+        // CleanSA: no Minecraft world belongs to this San Andreas - nothing is
+        // loaded, nothing will be saved (SaveAll refuses too), no starter kit.
+        // The voxel world simply never exists in this copy.
+        Log("World: CleanSA - no Minecraft world is loaded");
+    } else if (want == 0) {
         Log("World: a new world (kept only when the game is saved)");
     } else if (WorldFileExists(want)) {
         LoadAll(WorldPath(want));
@@ -359,7 +367,8 @@ static void ActivateWorld() {
         }
     }
     gWorld.dirty = false;
-    GiveStarterKit();
+    if (!gConfig.cleanSA)
+        GiveStarterKit();
 }
 
 void WorldSavedToSlot(int slot) {
@@ -371,6 +380,8 @@ void WorldSavedToSlot(int slot) {
 }
 
 void WorldSlotDeleted(int slot) {
+    if (gConfig.cleanSA)
+        return; // CleanSA: deleting a GTA save must not reach into the Minecraft layer's files
     if (slot < 1 || slot > 8)
         return;
     DeleteFileA(WorldPath(slot).c_str());
@@ -386,6 +397,16 @@ void GameInit() {
     gGta.enabled = gConfig.startEnabled;
     gGame.gameMode = gConfig.startGameMode == 1 ? MODE_CREATIVE : MODE_SURVIVAL;
     gGta.steve = gConfig.startAsSteve;
+    gRules.cleanSA = gConfig.cleanSA;
+    if (gConfig.cleanSA) {
+        // CleanSA pins the session to a vanilla San Andreas: CJ stays CJ (no
+        // Steve overlay), survival is forced so the creative proofs can never
+        // arm, and the mod's own switch stays on - the boss's per-frame brain
+        // (MobsUpdate, below) only runs while it is.
+        gGta.enabled = true;
+        gGta.steve = false;
+        gGame.gameMode = MODE_SURVIVAL;
+    }
     gRules.explosionsBreakBlocks = gConfig.explosionsBreakBlocks;
     gRules.animals = gConfig.animals;
     gRules.maxAnimals = gConfig.maxAnimals;
@@ -449,48 +470,73 @@ void GameProcess() {
     if (ped)
         SetCreativeProofs(ped, gGta.enabled && gGame.gameMode == MODE_CREATIVE);
 
-    // the world keeps running even when the Minecraft HUD is switched off
-    TickFurnaces(dt);
+    // the world keeps running even when the Minecraft HUD is switched off.
+    // CleanSA: every Minecraft-world tick is skipped - no furnaces, drops, orbs,
+    // TNT, arrows, block physics, dug ground or ped loot exist in a vanilla San
+    // Andreas, and GTA explosions stay GTA explosions (PollExplosions is what
+    // would break them into blocks). Two ticks stay because they are inert on
+    // the always-empty CleanSA state (CollisionUpdate/UpdateLaunchedPeds only
+    // ever move what the Minecraft layer put there) - and MobsUpdate is not
+    // the Minecraft world's tick at all: it is the boss's brain, the proxy and
+    // the ped pool reads, and it runs exactly as before. The order below is
+    // the shipped order; with the flag off every call runs as it always did.
+    const bool mcWorld = !gConfig.cleanSA;
+    if (mcWorld)
+        TickFurnaces(dt);
     // items on the ground and experience orbs go to a living player; from a vehicle he reaches further for items
     const bool collects = ped && ped->m_fHealth > 0.0f;
     const Vec3 collector = collects ? Vec3(ped->GetPosition()) : Vec3();
-    DropsTick(dt, collects ? &collector : nullptr, ped && ped->bInVehicle ? 2.8f : 1.6f);
-    ParticlesTick(dt);
-    TntTick(dt);
-    ProjectilesTick(dt);
-    UpdatePedLoot();
-    PollExplosions(dt);
+    if (mcWorld) {
+        DropsTick(dt, collects ? &collector : nullptr, ped && ped->bInVehicle ? 2.8f : 1.6f);
+        ParticlesTick(dt);
+        TntTick(dt);
+        ProjectilesTick(dt);
+        UpdatePedLoot();
+        PollExplosions(dt);
+    }
     CollisionUpdate();
-    BlocksUpdate(dt);
-    BuildingsUpdate(dt);
-    CarveUpdate();
-    UpdateBrokenVehicles();
-    XpTick(dt, collects && gGta.enabled ? &collector : nullptr);
+    if (mcWorld) {
+        BlocksUpdate(dt);
+        BuildingsUpdate(dt);
+        CarveUpdate();
+        UpdateBrokenVehicles();
+        XpTick(dt, collects && gGta.enabled ? &collector : nullptr);
+    }
     MobsUpdate(dt, ped);
-    if (gGta.enabled && ped && ped->m_fHealth > 0.0f)
-        FishingTick(dt);
-    else
-        FishingClear();
+    if (mcWorld) {
+        if (gGta.enabled && ped && ped->m_fHealth > 0.0f)
+            FishingTick(dt);
+        else
+            FishingClear();
+    }
     UpdateLaunchedPeds(dt);
-    PedSkinsUpdate(dt, ped);
+    if (mcWorld)
+        PedSkinsUpdate(dt, ped);
 
     ++gProcessTicks;
 
     if (gGame.screen == SCREEN_NONE) {
         if (KeyPressed(gConfig.keyToggleMode)) {
-            gGta.enabled = !gGta.enabled;
-            ShowMessage(gGta.enabled ? Tr("Minecraft mod: ON", "Minecraft modu: AÇIK") : Tr("Minecraft mod: OFF", "Minecraft modu: KAPALI"));
-            if (!gGta.enabled)
-                SetGtaHud(false);
+            if (gConfig.cleanSA) {
+                // in CleanSA the layer is not a switch: it is set in the ini, and
+                // the boss's brain rides on the mod staying on - F6 only explains
+                ShowMessage(Tr("CleanSA mode: the Minecraft layer is set by CleanSA in MinecraftSA.ini",
+                               "CleanSA modu: Minecraft katmani MinecraftSA.ini icindeki CleanSA ile ayarlanir"));
+            } else {
+                gGta.enabled = !gGta.enabled;
+                ShowMessage(gGta.enabled ? Tr("Minecraft mod: ON", "Minecraft modu: AÇIK") : Tr("Minecraft mod: OFF", "Minecraft modu: KAPALI"));
+                if (!gGta.enabled)
+                    SetGtaHud(false);
+            }
         }
-        if (gGta.enabled)
+        if (gGta.enabled && !gConfig.cleanSA)
             GameKeysTick();
         if (KeyPressed(gConfig.keyRadar)) {
             gConfig.showRadar = !gConfig.showRadar;
             SaveConfigValue("Settings", "ShowRadar", gConfig.showRadar ? "1" : "0");
             ShowMessage(gConfig.showRadar ? Tr("Radar: ON", "Harita (radar): AÇIK") : Tr("Radar: OFF", "Harita (radar): KAPALI"));
         }
-        if (gGta.enabled && KeyPressed(gConfig.keySteve)) {
+        if (gGta.enabled && !gConfig.cleanSA && KeyPressed(gConfig.keySteve)) {
             gGta.steve = !gGta.steve;
             ShowMessage(gGta.steve ? Tr("Character: Steve", "Karakter: Steve") : Tr("Character: CJ", "Karakter: CJ"));
             gWorld.dirty = true;
@@ -499,8 +545,25 @@ void GameProcess() {
 
     bool blocked = FrontEndMenuManager.m_bMenuActive || CCutsceneMgr::ms_running || TheCamera.m_bWideScreenOn;
     gGta.inWorld = ped && !blocked;
-    gGta.hudVisible = gGta.enabled && gGta.inWorld;
+    gGta.hudVisible = gGta.enabled && gGta.inWorld && !gConfig.cleanSA; // CleanSA: GTA draws its own HUD
     gTargetVisual.show = false;
+    if (gConfig.cleanSA) {
+        // CleanSA ends the frame here: San Andreas runs itself - its own HUD,
+        // physics, death and respawn, traffic and missions, none of it touched
+        // (no SetGtaHud, no survival, no movement takeover, no hands). The one
+        // Minecraft surface that stays is the chat, because the soldier's
+        // commands are typed into it; the boss's brain already ticked above.
+        if (!ped || ped->m_fHealth <= 0.0f) {
+            if (gGame.screen != SCREEN_NONE)
+                CloseScreen(); // never leave the chat open over GTA's own wasted screen
+        } else if (!blocked && gGame.screen == SCREEN_NONE && ActionPressed(ACT_CHAT)) {
+            OpenChat("", 'T');
+        }
+        if (gGame.screen == SCREEN_CHAT)
+            BlockAllPadInput();
+        FeedTypedText(); // (after the open: the T that opened the chat does not write into it)
+        return;
+    }
     if (!gGta.enabled || !ped) {
         if (gGame.screen != SCREEN_NONE)
             CloseScreen();
@@ -634,13 +697,16 @@ float CameraRoom(const CVector& from, const CVector& dir, float want, bool vehic
 // After CGame::Process: field of view, camera modes and player visibility.
 void GameAfterProcess() {
     CPlayerPed* ped = FindPlayerPed();
-    bool active = gGta.enabled && gGta.inWorld && ped && ped->m_fHealth > 0.0f;
+    // CleanSA is never "active" here: GTA's own FOV and camera stay untouched.
+    // The eye/look facts further down still update - /summon aims by them.
+    bool active = gGta.enabled && gGta.inWorld && ped && ped->m_fHealth > 0.0f && !gConfig.cleanSA;
     ApplyFov(active);
     if (LightningFlashActive())
         CWeather::LightningFlash = true;
     if (!ped)
         return;
-    PedSkinsAfterProcess(ped);
+    if (!gConfig.cleanSA)
+        PedSkinsAfterProcess(ped);
     MovementAfterProcess(ped);
 
     CCam& cam = TheCamera.m_aCams[TheCamera.m_nActiveCam];

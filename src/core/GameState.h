@@ -94,6 +94,11 @@ struct GameRules {
     bool keepInventory = true; // the player keeps his things when he dies
     bool monsters = true;  // creepers come out at night
     int maxMonsters = 4;   // at a time
+    // CleanSA mode (the host sets it from its ini at boot): this session has no
+    // Minecraft world in it at all - the host runs San Andreas vanilla and only
+    // the Counter-Strike soldier lives here. The gate that lives in the core is
+    // mob spawning: no mob but the soldier may ever come into existence.
+    bool cleanSA = false;
 };
 extern GameRules gRules;
 

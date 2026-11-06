@@ -593,13 +593,16 @@ void InstallMenuHooks() {
     done = true;
     gSaveHook = safetyhook::create_inline(reinterpret_cast<void*>(0x619060), reinterpret_cast<void*>(&HookSaveSlot));
     gDeleteHook = safetyhook::create_inline(reinterpret_cast<void*>(0x6190D0), reinterpret_cast<void*>(&HookDeleteSlot));
-    if (gConfig.minecraftMenu) {
+    // CleanSA keeps GTA's own menus: the save/delete hooks above stay (their
+    // world actions refuse in this mode), the Minecraft menu look never installs
+    const bool mcMenu = gConfig.minecraftMenu && !gConfig.cleanSA;
+    if (mcMenu) {
         gDrawHook = safetyhook::create_inline(reinterpret_cast<void*>(0x57B750), reinterpret_cast<void*>(&HookDrawBackground));
         gInputHook = safetyhook::create_inline(reinterpret_cast<void*>(0x57FD70), reinterpret_cast<void*>(&HookUserInput));
     }
     Log("Hooks: save slot %s, delete slot %s, menu draw %s, menu input %s", gSaveHook ? "ok" : "FAILED",
-        gDeleteHook ? "ok" : "FAILED", gConfig.minecraftMenu ? (gDrawHook ? "ok" : "FAILED") : "off",
-        gConfig.minecraftMenu ? (gInputHook ? "ok" : "FAILED") : "off");
+        gDeleteHook ? "ok" : "FAILED", mcMenu ? (gDrawHook ? "ok" : "FAILED") : "off",
+        mcMenu ? (gInputHook ? "ok" : "FAILED") : "off");
 }
 
 } // namespace mc

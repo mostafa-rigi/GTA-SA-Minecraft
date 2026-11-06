@@ -81,7 +81,10 @@ static const char* kDefaultIni =
     "; volume of the Minecraft sounds, 0.0 - 1.0 (GTA's effects volume counts too)\r\n"
     "SoundVolume=1.0\r\n"
     "; background of the Minecraft menus: minecraft = the panorama, gta = GTA's own artwork\r\n"
-    "MenuBackground=minecraft\r\n";
+    "MenuBackground=minecraft\r\n"
+    "; CleanSA mode: 1 = the whole Minecraft world layer stays off - San Andreas\r\n"
+    "; runs pure vanilla and only the Counter-Strike soldier lives in it. 0 = the mod as usual\r\n"
+    "CleanSA=0\r\n";
 
 // settings added by newer versions are appended to an existing ini so they can be found and changed
 static void EnsureKey(const char* key, const char* value, const std::string& path, const char* section = "Settings") {
@@ -188,7 +191,11 @@ void LoadConfig() {
     c.maxAnimals = std::clamp(ReadInt("Settings", "MaxAnimals", c.maxAnimals, path), 0, 40);
     c.monsters = ReadInt("Settings", "Monsters", c.monsters, path) != 0;
     c.maxMonsters = std::clamp(ReadInt("Settings", "MaxMonsters", c.maxMonsters, path), 0, 20);
+    EnsureKey("CleanSA", "0", path);
+    c.cleanSA = ReadInt("Settings", "CleanSA", c.cleanSA, path) != 0;
     Log("Config loaded: guiScale=%d renderDist=%.0f colRadius=%.0f", c.guiScale, c.renderDistance, c.collisionRadius);
+    if (c.cleanSA)
+        Log("CleanSA mode: the Minecraft world layer is off - San Andreas stays San Andreas");
 }
 
 void SaveConfigValue(const char* section, const char* key, const char* value) {

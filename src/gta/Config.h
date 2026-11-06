@@ -37,6 +37,11 @@ struct Config {
     bool npcArrows = true;     // police / gang guns and the helicopter shoot arrows
     bool minecraftPhysics = true; // our own walking / jumping / falling instead of GTA's
     bool minecraftMenu = true;  // title screen, world list and pause menu drawn the Minecraft way
+    // CleanSA mode: the whole Minecraft world layer stays off for the session -
+    // San Andreas runs pure vanilla (its own HUD, physics, peds and missions)
+    // and only the Counter-Strike soldier (model, brain, voice, proxy) lives in
+    // it. Off by default; the canter copy's ini turns it on.
+    bool cleanSA = false;
     bool breakBuildings = true; // GTA buildings can be broken into, block by block
     bool groundHoles = true;   // dug holes are drawn into the GTA ground (needs a stencil buffer)
     float soundVolume = 1.0f;  // the Minecraft sounds (on top of GTA's own effects volume)

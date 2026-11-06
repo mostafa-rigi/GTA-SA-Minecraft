@@ -467,6 +467,11 @@ void BuildHud(const HudFacts& f, std::vector<HudPiece>& out) {
         if (gGame.deathTime >= 0.0f)
             DeathScreen(P, f);
     }
+    // CleanSA: San Andreas draws its own HUD; the only Minecraft surface that
+    // still exists is the chat, because the soldier's commands are typed into
+    // it. (The action-bar message below draws either way, as before.)
+    if (!f.shown && f.chatShown)
+        ChatPieces(P, f);
     if (gGame.messageTimer > 0.0f && !gGame.message.empty()) {
         int a = (int)Clamp(gGame.messageTimer * 255.0f, 0.0f, 255.0f);
         P.Text(AT_TOP, gGame.message, 0, 40, Argb(255, 255, 85, a), true, 1);

@@ -17,6 +17,7 @@
 #include "ePedType.h"
 
 #include "BossTest.h"
+#include "Config.h"
 #include "Draw3D.h"
 #include "Game.h"
 #include "GtaWorld.h"
@@ -434,7 +435,9 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     if (dt <= 0.0f || !player)
         return; // (no player for a moment must not make every animal "too far away")
     const CVector playerPos = player->GetPosition();
-    if (gGta.enabled)
+    // natural spawns are the Minecraft world's; CleanSA has none (the core's
+    // own spawn gates refuse them too - this just never asks)
+    if (gGta.enabled && !gConfig.cleanSA)
         MobsSpawnTick(dt, playerPos);
     CarsHitMobs();
     std::vector<BeingInfo> beings; // the people around the player: the monsters may go for them too

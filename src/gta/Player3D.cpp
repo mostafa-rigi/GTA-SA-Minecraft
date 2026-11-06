@@ -11,6 +11,7 @@
 #include "ePedBones.h"
 
 #include "Beds.h"
+#include "Config.h"
 #include "Draw3D.h"
 #include "Game.h"
 #include "Inventory.h"
@@ -59,7 +60,8 @@ void UpdatePlayerAnimation(float dt) {
 
 static void RenderPlayer(float light, bool vehiclePass) {
     CPlayerPed* ped = FindPlayerPed();
-    if (!gGta.enabled || !gGta.inWorld || !ped || !gEntityTex.tex)
+    // CleanSA: CJ is CJ - no Minecraft player model is ever laid over him
+    if (gConfig.cleanSA || !gGta.enabled || !gGta.inWorld || !ped || !gEntityTex.tex)
         return;
     if (gGame.cameraMode == CAM_FIRST)
         return;
@@ -181,7 +183,7 @@ void RenderPlayerInVehicle(float light) { RenderPlayer(light, true); }
 
 void RenderFirstPersonHand() {
     CPlayerPed* ped = FindPlayerPed();
-    if (!gGta.enabled || !gGta.inWorld || !ped || gGame.cameraMode != CAM_FIRST || !gEntityTex.tex ||
+    if (gConfig.cleanSA || !gGta.enabled || !gGta.inWorld || !ped || gGame.cameraMode != CAM_FIRST || !gEntityTex.tex ||
         ped->m_fHealth <= 0.0f || gGame.spyglass || gGame.hideHud)
         return;
     // clear the depth buffer so the hand never pokes into walls (the world is already drawn)

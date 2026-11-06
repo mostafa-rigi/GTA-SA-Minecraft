@@ -2474,6 +2474,11 @@ void MobsClear() {
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     if (kind < 0 || kind >= MOB_KIND_COUNT || gMobs.size() >= 96)
         return -1;
+    // CleanSA: San Andreas has no Minecraft mobs in it - every spawn path in the
+    // core (natural spawns, eggs, breeding, zombie reinforcements) funnels
+    // through this one door, and only the soldier may pass.
+    if (gRules.cleanSA && kind != MOB_SOLDIER)
+        return -1;
     if (kind == MOB_SOLDIER && !SoldierModelReady()) {
         // The user's law for this soldier: Counter-Strike's real model or nothing -
         // no box stand-in wearing his name. The loader already said why in the log.
@@ -2847,6 +2852,10 @@ bool MobInteract(int index, bool playerOnFoot) {
 }
 
 void MobsSpawnTick(float dt, const Vec3& playerPos) {
+    // CleanSA has no natural spawns at all (the bridge does not call this in
+    // that mode either; this is the core's own belt to the bridge's braces).
+    if (gRules.cleanSA)
+        return;
     gSpawnTimer -= dt;
     if (gSpawnTimer <= 0.0f) {
         gSpawnTimer = 1.5f;
@@ -2893,7 +2902,9 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
     // zombie reinforcements called for since the last tick are answered here, before any Mob& is held: one new
     // zombie on real ground 10 to 20 m from the one that called, through the same SpawnMob as every other spawn.
     // The ceiling is sane: never more monsters than twice the night-spawn limit (and SpawnMob's own cap besides).
-    if (!gReinforceCalls.empty()) {
+    // In CleanSA the queue is dropped unread: no zombie exists to call, and the
+    // SpawnMob gate would refuse the answer anyway.
+    if (!gReinforceCalls.empty() && !gRules.cleanSA) {
         std::vector<Vec3> calls;
         calls.swap(gReinforceCalls);
         for (const Vec3& at : calls) {

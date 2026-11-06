@@ -95,6 +95,14 @@ float MasterVolume() {
 void PlaySfx(SoundEvent ev, const Vec3* pos, float volume, float pitch) {
     if (ev >= SND_COUNT || !Ready())
         return;
+    // CleanSA: the Minecraft world's sounds stay silent. Only the soldier's own
+    // sounds play - the appended Counter-Strike block at the end of the event
+    // table (his rifle and pistol, steps, hurt, voice) - and an explosion,
+    // which in this mode can only be his grenade's: every Minecraft source of
+    // one (creepers, TNT) is gated off. The block is append-only by the table's
+    // own law, so "from SND_M4A1_SHOOT on" stays exactly the soldier's set.
+    if (gConfig.cleanSA && ev < SND_M4A1_SHOOT && ev != SND_EXPLODE)
+        return;
     const SoundEventDef& e = kSoundEvents[ev];
     if (e.count == 0)
         return;
@@ -132,6 +140,8 @@ void PlaySfx(SoundEvent ev, const Vec3* pos, float volume, float pitch) {
 void SetLoopSfx(SoundEvent ev, bool on, float volume) {
     if (!Ready())
         return;
+    if (on && gConfig.cleanSA)
+        return; // the only loop is the elytra wind - a CleanSA sky has none (stopping still works)
     if (!on) {
         if (gLoopChan)
             B.Stop(gLoopChan);

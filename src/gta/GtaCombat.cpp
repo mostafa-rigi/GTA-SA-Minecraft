@@ -532,7 +532,8 @@ namespace {
 SafetyHookInline gFireHook;
 SafetyHookInline gRoundHook;
 
-bool NpcArrowsActive() { return gGta.enabled && gConfig.pedSkins && gConfig.npcArrows; }
+// CleanSA: San Andreas guns stay guns - nobody's weapon becomes a bow here
+bool NpcArrowsActive() { return gGta.enabled && !gConfig.cleanSA && gConfig.pedSkins && gConfig.npcArrows; }
 
 bool IsGun(int w) { return w >= WEAPONTYPE_PISTOL && w <= WEAPONTYPE_SNIPERRIFLE || w == WEAPONTYPE_MINIGUN; }
 

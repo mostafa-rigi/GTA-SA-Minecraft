@@ -301,6 +301,11 @@ void CmdSummon(const Args& a) {
     const int kind = MobByName(a[1]);
     if (kind < 0)
         return Fail(Fmt(Tr("Unknown entity: %s", "Bilinmeyen varlık: %s"), a[1].c_str()));
+    // CleanSA: the soldier is the only creature this San Andreas has; the
+    // refusal names the mode so the chat itself explains the empty result.
+    if (gRules.cleanSA && kind != MOB_SOLDIER)
+        return Fail(Tr("CleanSA mode: only the soldier lives in San Andreas",
+                       "CleanSA modu: San Andreas'ta yalnızca asker yaşar"));
     Vec3 at;
     if (a.size() >= 5) {
         if (!ParsePos(a, 2, &at))
@@ -499,6 +504,20 @@ void RunCommand(const std::string& line) {
     for (const Command& c : kCommands)
         if (name == c.name || (name == "teleport" && std::string(c.name) == "tp") ||
             (name == "experience" && std::string(c.name) == "xp")) {
+            // CleanSA: commands that edit the Minecraft world or the player's
+            // Minecraft state have nothing to act on here - there is no voxel
+            // world, no inventory and no game mode in a vanilla San Andreas
+            // (and /gamemode creative would arm the creative proofs, which a
+            // clean San Andreas must never see). The commands that speak to
+            // the game itself (summon, bosstest, tp, time, weather, wanted,
+            // kill, say, help) stay live.
+            static const char* const kCleanSABlocked[] = { "clear", "effect", "fill", "gamemode",
+                                                           "gamerule", "give", "setblock", "xp" };
+            if (gRules.cleanSA)
+                for (const char* b : kCleanSABlocked)
+                    if (std::string(c.name) == b)
+                        return Fail(Tr("CleanSA mode: that command belongs to the Minecraft world",
+                                       "CleanSA modu: bu komut Minecraft dünyasına ait"));
             c.run(a);
             return;
         }

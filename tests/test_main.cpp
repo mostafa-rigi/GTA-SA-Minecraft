@@ -6283,6 +6283,55 @@ static void TestBossDeathReset() {
     gGame.deathTime = -1.0f;
 }
 
+// CleanSA mode, the core's side of the gate: with the flag off nothing changes;
+// with it on, no mob but the soldier may come into existence through any door -
+// direct spawn, the natural spawn tick, or the /summon command - the refusal
+// names the mode, and the Minecraft-world commands are refused while the
+// soldier's own commands stay live.
+static void TestCleanSA() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the CleanSA proofs meet his real model");
+    WideStage(); // resets rules, game and mobs: the flag starts OFF
+    CHECK(!gRules.cleanSA, "CleanSA starts off");
+    CHECK(SpawnMob(MOB_ZOMBIE, Vec3(2.5f, 0.5f, 10.0f), true) >= 0, "with the flag off a zombie still spawns");
+    MobsClear();
+
+    gRules.cleanSA = true;
+    CHECK(SpawnMob(MOB_ZOMBIE, Vec3(2.5f, 0.5f, 10.0f), true) < 0, "CleanSA refuses a zombie");
+    CHECK(SpawnMob(MOB_COW, Vec3(2.5f, 0.5f, 10.0f), true) < 0, "CleanSA refuses an animal");
+    CHECK(SpawnMob(MOB_CREEPER, Vec3(2.5f, 0.5f, 10.0f), true) < 0, "CleanSA refuses a creeper");
+    CHECK(SpawnMob(MOB_SKELETON, Vec3(2.5f, 0.5f, 10.0f), true) < 0, "CleanSA refuses a skeleton");
+    CHECK(gMobs.empty(), "no Minecraft mob exists in CleanSA");
+    CHECK(SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true) >= 0, "the soldier still spawns in CleanSA");
+    MobsClear();
+
+    MobsSpawnTick(2.0f, Vec3(0.5f, 0.5f, 10.0f)); // the tick itself refuses (the bridge never calls it here)
+    CHECK(gMobs.empty(), "the natural spawn tick brings nothing in CleanSA");
+
+    gChatLines.clear();
+    RunCommand("summon zombie 3 0 10");
+    CHECK(!gChatLines.empty() && gChatLines.back().color == kChatError &&
+              gChatLines.back().text.find("CleanSA") != std::string::npos,
+          "/summon zombie is refused and the refusal names CleanSA");
+    CHECK(gMobs.empty(), "and no zombie came from the refused summon");
+    RunCommand("summon soldier 3 0 10");
+    CHECK(gMobs.size() == 1 && gMobs[0].kind == MOB_SOLDIER, "/summon soldier still works in CleanSA");
+    MobsClear();
+    RunCommand("gamemode creative");
+    CHECK(!gChatLines.empty() && gChatLines.back().color == kChatError &&
+              gChatLines.back().text.find("CleanSA") != std::string::npos && gGame.gameMode == MODE_SURVIVAL,
+          "/gamemode is refused in CleanSA and the mode never flips");
+    RunCommand("give diamond 1");
+    CHECK(gChatLines.back().color == kChatError, "/give is refused in CleanSA");
+
+    gRules = GameRules(); // flag off again: nothing about the gate is sticky
+    CHECK(SpawnMob(MOB_ZOMBIE, Vec3(2.5f, 0.5f, 10.0f), true) >= 0, "with the flag off again a zombie spawns again");
+    MobsClear();
+    gRules = GameRules();
+}
+
 static void TestBoss() {
     TestHost host;
     SetHost(&host);
@@ -6963,6 +7012,7 @@ int main(int argc, char** argv) {
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
     TestBossDeathReset();
+    TestCleanSA();
     TestPlayerAnim();
     TestRenderers();
     TestSave();

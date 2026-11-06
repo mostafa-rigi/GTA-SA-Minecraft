@@ -470,6 +470,20 @@ void Render3D() {
     d3::StateOpaque();
 
     gShadows.clear();
+    if (gConfig.cleanSA) {
+        // CleanSA: none of the Minecraft world is drawn - no chunks, no dug
+        // ground or carved holes, no drops, orbs, particles or player model.
+        // What is ours in a vanilla San Andreas is only the soldier, his shots
+        // and the shadow he stands on (his shadow is queued inside MobsRender).
+        const auto renderT0 = std::chrono::steady_clock::now();
+        MobsRender(light);
+        BossTestNoteRenderMs(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - renderT0).count());
+        RenderShotFx();
+        RenderShadows();
+        d3::Flush();
+        return;
+    }
     CollectChunks();
     const CVector cam = TheCamera.GetPosition();
     const bool underground = TerrainCameraUnderground(cam) || CarveInside(cam);
