@@ -12,6 +12,8 @@ namespace {
 std::vector<Vec3> gNodes;
 std::vector<uint32_t> gRow; // CSR offsets, nodeCount + 1
 std::vector<uint32_t> gTargets;
+int gLastExpanded = 0;  // diag: nodes the last route search closed
+int gRouteAttempts = 0; // diag: route searches since the graph loaded
 
 struct Reader {
     const unsigned char* p = nullptr;
@@ -112,6 +114,8 @@ void UnloadNavGraph() {
     gNodes.clear();
     gRow.clear();
     gTargets.clear();
+    gLastExpanded = 0;
+    gRouteAttempts = 0;
 }
 
 bool NavReady() { return !gNodes.empty(); }
@@ -148,9 +152,18 @@ bool NavNodePos(int node, Vec3* out) {
 }
 
 bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out) {
+    return NavRouteBudget(from, to, out, 1 << 29, -1); // the unbounded original, for calm callers
+}
+
+int NavLastRouteExpanded() { return gLastExpanded; }
+int NavRouteAttempts() { return gRouteAttempts; }
+
+bool NavRouteBudget(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, int maxExpand, int avoidNode) {
     if (!out || gNodes.empty())
         return false;
     out->clear();
+    ++gRouteAttempts;
+    gLastExpanded = 0;
     const int start = NavNearest(from, 60.0f);
     const int goal = NavNearest(to, 60.0f);
     if (start < 0 || goal < 0)
@@ -159,6 +172,8 @@ bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out) {
         out->push_back(gNodes[goal]);
         return true;
     }
+    if (avoidNode == start || avoidNode == goal)
+        avoidNode = -1; // a route's own ends are never banned
     const int n = (int)gNodes.size();
     std::vector<float> g(n, 1e18f);
     std::vector<int> came(n, -1);
@@ -174,10 +189,15 @@ bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out) {
         if (closed[u])
             continue;
         closed[u] = 1;
+        ++gLastExpanded;
         if (u == goal)
             break;
+        if (gLastExpanded >= maxExpand)
+            return false; // the budget is a wall, not a suggestion: the caller falls back to probe steering
         for (uint32_t e = gRow[u]; e < gRow[u + 1]; ++e) {
             const int v = (int)gTargets[e];
+            if (v == avoidNode)
+                continue; // the pocket he just stalled in does not get a second chance this repath
             const float w = (gNodes[v] - gNodes[u]).Length();
             if (g[u] + w < g[v]) {
                 g[v] = g[u] + w;

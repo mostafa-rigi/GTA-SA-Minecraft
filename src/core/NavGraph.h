@@ -40,6 +40,17 @@ bool NavNodePos(int node, Vec3* out);
 // exists (or the graph is not ready). A route whose ends snap to the same node
 // yields that single node.
 bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out);
+// The same route with a hard budget on A* node expansions: past the budget the
+// search stops and the call fails, so a caller on a weak machine can bound what
+// one repath may cost (the boss's combat navigation lives on this). avoidNode,
+// when a valid node index, is never expanded or stepped onto (unless it is one
+// of the route's own ends): the stuck-break escape hatch, so a repath after a
+// stall does not walk straight back into the same pocket.
+bool NavRouteBudget(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, int maxExpand, int avoidNode = -1);
+// Diagnostics for tests and the perf ledger: how many nodes the last route
+// search expanded, and how many route searches have run since the graph loaded.
+int NavLastRouteExpanded();
+int NavRouteAttempts();
 // The length of a route NavRoute produced, in metres.
 float NavRouteLength(const std::vector<Vec3>& route);
 

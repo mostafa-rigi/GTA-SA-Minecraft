@@ -2,6 +2,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <initializer_list>
+#include <map>
 
 #include "Audio.h"
 #include "BlockRules.h"
@@ -601,6 +602,37 @@ struct TestHost : Host {
             h.point = from + dir * h.dist;
             h.vehicle = kCarNumber;
         }
+        if (vehBoxOn) {
+            // the scripted vehicle body: a ray/slab test in the vehicle's own
+            // frame (along its forward, across, up), the way the game's own
+            // collision would answer
+            const Vec3 f = vehBoxFwd;
+            const Vec3 r(f.y, -f.x, 0.0f);
+            const Vec3 oc = from - vehBoxCentre;
+            const float o[3] = { oc.Dot(f), oc.Dot(r), oc.z };
+            const float d[3] = { dir.Dot(f), dir.Dot(r), dir.z };
+            const float hh[3] = { vehBoxHalf.x, vehBoxHalf.y, vehBoxHalf.z };
+            float t0 = 0.0f, t1 = len;
+            bool ok = true;
+            for (int i = 0; i < 3 && ok; ++i) {
+                if (std::fabs(d[i]) < 1e-8f) {
+                    ok = o[i] >= -hh[i] && o[i] <= hh[i];
+                } else {
+                    float ta = (-hh[i] - o[i]) / d[i], tb = (hh[i] - o[i]) / d[i];
+                    if (ta > tb)
+                        std::swap(ta, tb);
+                    t0 = std::max(t0, ta);
+                    t1 = std::min(t1, tb);
+                    ok = t0 <= t1;
+                }
+            }
+            if (ok && t0 > 0.0f && t0 < h.dist) {
+                h.hit = true;
+                h.dist = t0;
+                h.point = from + dir * t0;
+                h.vehicle = vehBoxNum;
+            }
+        }
         auto ball = [&](const Vec3& c, float r, int number) {
             const Vec3 oc = c - from;
             const float along = oc.Dot(dir), off2 = oc.Dot(oc) - along * along;
@@ -635,13 +667,39 @@ struct TestHost : Host {
         *velocity = vehVel;
         return true;
     }
+    // ---- a scripted vehicle body for traced shots (the smart pack): an
+    // oriented box ShotTrace can actually hit, where the carX plane above was
+    // a convenience of the arrow days. Its host number is vehBoxNum.
+    bool vehBoxOn = false;
+    int vehBoxNum = 78;
+    Vec3 vehBoxCentre, vehBoxFwd{ 0, 1, 0 }, vehBoxHalf{ 2.3f, 1.0f, 0.85f };
+    std::map<int, float> vehHurt;    // vehicle damage taken, per host number
+    std::map<int, int> vehTyrePops;  // tyres burst, per host number
+    // a fully scripted trace answer, for pinning the boss's shot resolution
+    // itself (the geometry belongs to the bridge; the decision is the core's)
+    bool traceScriptOn = false;
+    HostHit traceScript;
     int tyrePops = 0;
     Vec3 lastTyrePoint;
-    void VehicleShotEffect(int, const Vec3& hitPoint, int effect) override {
+    void VehicleShotEffect(int veh, const Vec3& hitPoint, int effect) override {
         if (effect == 1) {
             ++tyrePops;
+            ++vehTyrePops[veh];
             lastTyrePoint = hitPoint;
         }
+    }
+    bool VehiclePose(int veh, Vec3* centre, Vec3* forward) override {
+        if (vehBoxOn && veh == vehBoxNum) {
+            *centre = vehBoxCentre;
+            *forward = vehBoxFwd;
+            return true;
+        }
+        if (vehPoseOn && veh == vehicle) {
+            *centre = vehCentre;
+            *forward = vehFwd;
+            return true;
+        }
+        return false;
     }
     bool aimingAtHim = false;
     bool PlayerAimingAt(const Vec3&, float) override { return aimingAtHim; }
@@ -658,6 +716,8 @@ struct TestHost : Host {
     HostHit BlowTrace(const Vec3& origin, const Vec3& dir, float reach) override { return Trace(origin, dir, reach, false); }
     HostHit ShotTrace(const Vec3& from, const Vec3& dir, float len, const ShotOwner& by) override {
         shotVehicle = by.vehicle;
+        if (traceScriptOn)
+            return traceScript;
         return Trace(from, dir, len, by.hostile);
     }
     void HurtBeing(int being, float halfHearts, int how, const ShotOwner* by) override {
@@ -715,6 +775,7 @@ struct TestHost : Host {
         return true;
     }
     void HurtVehicle(int number, float halfHearts) override {
+        vehHurt[number] += halfHearts;
         if (number == kCarNumber)
             carHurt += halfHearts;
     }
@@ -2233,7 +2294,7 @@ static void TestSoldier() {
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
-        CHECK(s >= 0 && gMobs[s].health == 2400.0f && gMobs[s].armor == 800.0f, "the boss: 2400 health and 800 kevlar in half hearts - a full magazine of solid hits cannot kill him, about three can");
+        CHECK(s >= 0 && gMobs[s].health == 4000.0f && gMobs[s].armor == 1200.0f, "the boss: 4000 health and 1200 kevlar in half hearts - a full magazine of solid hits cannot kill him, about four can");
         CHECK(gMobs[s].team == TEAM_COUNTER && IsMonster(MOB_SOLDIER), "he fights for the counter-terrorists");
         CHECK(gMobs[s].mag == 30 && Near(MobHeight(gMobs[s]), 1.8f), "a full M4A1 magazine and a man's height");
         CHECK(TEAM_TERRORIST != TEAM_COUNTER && TEAM_NONE != TEAM_COUNTER, "the two sides of the war are kept apart");
@@ -2243,11 +2304,11 @@ static void TestSoldier() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 2395.0f) && Near(gMobs[s].armor, 795.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
+        CHECK(Near(gMobs[s].health, 3995.0f) && Near(gMobs[s].armor, 1195.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
         gMobs[s].hurt = 0.0f;
         gMobs[s].armor = 0.0f;
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 2385.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
+        CHECK(Near(gMobs[s].health, 3985.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
         CHECK(gMobs[s].alerted && gMobs[s].bossState == 2, "and being shot at puts him in combat at once (state %d)", gMobs[s].bossState);
     }
     // the street is not his war: a man of the host's people at his nose is never his target
@@ -6479,13 +6540,13 @@ static void TestBoss() {
             gMobs[s].hurt = 0.0f;
             MobHurt(s, 44.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
         }
-        CHECK(gMobs[s].death < 0.0f && Near(gMobs[s].health, 1740.0f, 2.0f),
+        CHECK(gMobs[s].death < 0.0f && Near(gMobs[s].health, 3340.0f, 2.0f),
               "thirty solid hits leave him standing (health %.0f)", gMobs[s].health);
-        for (int i = 0; i < 60; ++i) {
+        for (int i = 0; i < 90; ++i) {
             gMobs[s].hurt = 0.0f;
             MobHurt(s, 44.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
         }
-        CHECK(gMobs[s].death >= 0.0f || gMobs[s].health <= 0.0f, "about three magazines do finish him - hard to kill, not unkillable");
+        CHECK(gMobs[s].death >= 0.0f || gMobs[s].health <= 0.0f, "about four magazines do finish him - hard to kill, not unkillable");
     }
     // ---- F: an empty rifle at arm's length is a pistol; at range, a reload
     {
@@ -6533,7 +6594,7 @@ static void TestBoss() {
         FaceMob(s, 0.0f);
         gMobs[s].negotiated = true;
         RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), nullptr); // seen, fighting
-        MobHurt(s, 2400.0f, Vec3(0.5f, 20.5f, 10.0f), 0.0f); // badly wounded: he fights from cover now
+        MobHurt(s, 2700.0f, Vec3(0.5f, 20.5f, 10.0f), 0.0f); // badly wounded (under the 35% line of the bigger pool): he fights from cover now
         gMobs[s].hurt = 0.0f;
         host.wall = true;
         host.wallC = Vec3(0.5f, 10.5f, 10.0f);
@@ -6656,44 +6717,49 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobProxyDamage(s, 10000.0f, Vec3(0.5f, 0.5f, 10.0f), -1); // a whole street's volley in one event
-        const float poolLoss = (2400.0f - gMobs[s].health) + (800.0f - gMobs[s].armor);
-        CHECK(Near(poolLoss, 240.0f, 1.0f), "one proxy event can never cost more than a tenth of him (lost %.0f)", poolLoss);
+        const float poolLoss = (4000.0f - gMobs[s].health) + (1200.0f - gMobs[s].armor);
+        CHECK(Near(poolLoss, 400.0f, 1.0f), "one proxy event can never cost more than a tenth of him (lost %.0f)", poolLoss);
         WideStage();
         const int s2 = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobVehicleHit(s2, 25.0f, Vec3(0.5f, 0.5f, 10.0f), true); // a car at full tilt
-        const float ramLoss = (2400.0f - gMobs[s2].health) + (800.0f - gMobs[s2].armor);
-        CHECK(Near(ramLoss, 840.0f, 2.0f) && gMobs[s2].death < 0.0f,
+        const float ramLoss = (4000.0f - gMobs[s2].health) + (1200.0f - gMobs[s2].armor);
+        CHECK(Near(ramLoss, 1400.0f, 2.0f) && gMobs[s2].death < 0.0f,
               "a full-speed ram costs at most 35%% of him and never kills outright (lost %.0f)", ramLoss);
         CHECK(gMobs[s2].bossState == 2 && gMobs[s2].detect >= 1.0f, "and he is up and fighting the driver at once");
     }
-    // ---- L: the driver is a target, and the car is a body that takes damage
+    // ---- L: the driver is a target, and the car is a body that takes damage.
+    // The smart pack restaged this on the traced world: the host now answers
+    // ShotTrace with a real vehicle box (the nose toward him - the engine bay
+    // faces his muzzle), and his rounds resolve on the first thing the line
+    // meets. Driver hits still go through the glass; the rounds that miss the
+    // man land on the car at the traced point and pay the zone price there.
+    // (Tyres are pinned exactly in TestSmartPack: from a chest aim at this
+    // range the traced crossings honestly land on the upper body, and the old
+    // staging's pops were an artifact of the deleted closest-approach box.)
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         gMobs[s].negotiated = true;
-        host.vehicle = TestHost::kCarNumber;
+        host.vehicle = host.vehBoxNum;
         host.vehPoseOn = true;
-        // a low car, close enough that he fights it from the strafe band: the
-        // tyre branch lives below the body line's 0.45, and from the old
-        // staging (a seat 0.85 over the centre, settled spread) his aim line
-        // could not physically reach that low - pops came only from the dice
-        // of his opening steps, about one run in four. Here his spread while
-        // strafing honestly crosses the wheel line, and 360 ticks covers the
-        // slowest of twenty measured dice streams (first pop at tick 268).
-        host.vehCentre = Vec3(0.5f, 14.5f, 10.5f);
-        host.vehFwd = Vec3(0, -1, 0);
+        host.vehBoxOn = true;
+        host.vehBoxCentre = Vec3(0.5f, 14.5f, 10.5f);
+        host.vehBoxFwd = Vec3(0, -1, 0);
+        host.vehCentre = host.vehBoxCentre;
+        host.vehFwd = host.vehBoxFwd;
         host.vehSeat = Vec3(0.5f, 13.6f, 10.95f);
         host.vehVel = Vec3();
         host.playerHurt = 0.0f;
-        host.carHurt = 0.0f;
-        host.tyrePops = 0;
+        host.vehHurt.clear();
+        host.vehTyrePops.clear();
         for (int i = 0; i < 360; ++i)
             MobsTick(0.05f, Vec3(0.5f, 13.6f, 10.95f), 0, false, &none);
         CHECK(host.playerHurt > 0.0f, "the driver is hit through his own windshield (%.1f half hearts)", host.playerHurt);
-        CHECK(host.carHurt > 0.0f, "and the car itself takes his fire (%.1f)", host.carHurt);
-        CHECK(host.tyrePops >= 1, "low hits pop tyres through the bridge effect (%d)", host.tyrePops);
+        CHECK(host.vehHurt[host.vehBoxNum] > 0.0f, "and the car itself takes his fire on the traced line (%.1f half hearts)",
+              host.vehHurt[host.vehBoxNum]);
         host.vehPoseOn = false;
+        host.vehBoxOn = false;
         host.vehicle = -1;
     }
     // ---- H: his voice answers his states
@@ -6845,7 +6911,408 @@ static void TestBoss() {
     }
 }
 
-// mc_tests <world file>: reads a world file the way the game does and says what is in it (the file is not changed)
+// =====================================================================
+// THE SMART PACK (2026-11-06): combat navigation on the graph, the relentless
+// pursuit, the chase sprint, the deeper pool, vehicle damage his eye can see,
+// and the Counter-Strike polish - each pinned where it can be proven here.
+// What only the game can prove is listed in CS-BOSS-fa.md's acceptance script.
+static void TestSmartPack() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // ---- the vehicle zones, priced exactly (the numbers the bridge will pay
+    // onto the game's 1000-point vehicle health at x4: 36 / 72 / 18 a hit)
+    {
+        const Vec3 centre(0.5f, 0.5f, 10.6f), fwd(0, 1, 0); // nose north
+        const BossVehZone body = BossVehicleZone(Vec3(0.2f, 0.4f, 11.0f), centre, fwd, 9.0f);
+        CHECK(Near(body.dmg, 9.0f, 0.01f) && !body.tyre, "a plain body hit pays the base vehicle price (%.2f)", body.dmg);
+        const BossVehZone engine = BossVehicleZone(Vec3(0.5f, 1.9f, 11.0f), centre, fwd, 9.0f);
+        CHECK(Near(engine.dmg, 18.0f, 0.01f) && !engine.tyre, "an engine-bay hit pays double (%.2f)", engine.dmg);
+        const BossVehZone wheel = BossVehicleZone(Vec3(0.9f, 1.9f, 10.2f), centre, fwd, 9.0f);
+        CHECK(Near(wheel.dmg, 4.5f, 0.01f) && wheel.tyre,
+              "a wheel-band hit pays half and bursts the tyre - even at the nose, the low band wins (%.2f)", wheel.dmg);
+        const BossVehZone rear = BossVehicleZone(Vec3(0.5f, -1.4f, 11.0f), centre, fwd, 9.0f);
+        CHECK(Near(rear.dmg, 9.0f, 0.01f) && !rear.tyre, "the rear is bodywork, not an engine (%.2f)", rear.dmg);
+        const BossVehZone usp = BossVehicleZone(Vec3(0.2f, 0.4f, 11.0f), centre, fwd, 9.0f * (3.4f / 6.0f));
+        CHECK(Near(usp.dmg, 5.1f, 0.01f), "the USP's vehicle price scales with the pistol (%.2f)", usp.dmg);
+    }
+    // ---- the shot resolution, end to end: a scripted trace (the geometry is
+    // the bridge's; the DECISION is the core's, and it is what is pinned here)
+    {
+        // a car standing in his line shields the man behind it, at wheel height
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none); // the fight is on
+        const float hurt0 = host.playerHurt;
+        host.vehBoxOn = true;
+        host.vehBoxCentre = Vec3(0.5f, 8.5f, 10.4f);
+        host.vehBoxFwd = Vec3(0, 1, 0);
+        host.traceScriptOn = true;
+        host.traceScript = HostHit();
+        host.traceScript.hit = true;
+        host.traceScript.dist = 3.0f;
+        host.traceScript.vehicle = host.vehBoxNum;
+        host.traceScript.point = Vec3(0.5f, 8.5f, 10.1f); // below the centre line: the wheel band
+        host.vehHurt.clear();
+        host.vehTyrePops.clear();
+        RunMobsB(6.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        CHECK(host.playerHurt == hurt0, "a vehicle in the line takes every round - the man behind it is untouched");
+        const float paid = host.vehHurt[host.vehBoxNum];
+        CHECK(paid > 0.0f && Near(std::fmod(paid, 4.5f), 0.0f, 0.01f),
+              "and every shielded round paid the wheel price of 4.5 (total %.1f)", paid);
+        CHECK(host.vehTyrePops[host.vehBoxNum] >= 1, "wheel-band hits burst tyres through the bridge effect (%d)",
+              host.vehTyrePops[host.vehBoxNum]);
+        host.traceScriptOn = false;
+        host.vehBoxOn = false;
+    }
+    {
+        // the same car, struck on the engine bay: double price, no bursts
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none);
+        host.vehBoxOn = true;
+        host.vehBoxCentre = Vec3(0.5f, 8.5f, 10.4f);
+        host.vehBoxFwd = Vec3(0, -1, 0); // the nose points at him: the front face is the engine bay
+        host.traceScriptOn = true;
+        host.traceScript = HostHit();
+        host.traceScript.hit = true;
+        host.traceScript.dist = 3.0f;
+        host.traceScript.vehicle = host.vehBoxNum;
+        host.traceScript.point = Vec3(0.5f, 7.0f, 11.0f); // on the nose, above the wheel band
+        host.vehHurt.clear();
+        host.vehTyrePops.clear();
+        RunMobsB(6.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        const float paid = host.vehHurt[host.vehBoxNum];
+        CHECK(paid > 0.0f && Near(std::fmod(paid, 18.0f), 0.0f, 0.05f),
+              "engine-bay rounds pay 18 each through the whole shot path (total %.1f)", paid);
+        CHECK(host.vehTyrePops[host.vehBoxNum] == 0, "and no tyre bursts from the engine bay");
+        host.traceScriptOn = false;
+        host.vehBoxOn = false;
+    }
+    {
+        // a wall on the line: the round dies there, whatever his point tests say
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none);
+        const float hurt0 = host.playerHurt;
+        host.traceScriptOn = true;
+        host.traceScript = HostHit();
+        host.traceScript.hit = true;
+        host.traceScript.dist = 3.0f;
+        host.traceScript.point = Vec3(0.5f, 8.5f, 11.0f); // a wall, no vehicle, nobody on its surface
+        host.vehHurt.clear();
+        RunMobsB(6.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        CHECK(host.playerHurt == hurt0 && host.vehHurt.empty(),
+              "a traced wall stops his rounds cold - no damage leaks through it");
+        host.traceScriptOn = false;
+    }
+    // ---- the A* budget: a hard wall on cost, respected to the node
+    {
+        CHECK(LoadNavGraphFromRepo(), "the real city graph loads for the budget proofs");
+        std::vector<Vec3> route;
+        CHECK(!NavRouteBudget(Vec3(2480, -1660, 13), Vec3(1240, -1330, 13), &route, 100),
+              "a 100-node budget cannot cross the city, and says so");
+        CHECK(NavLastRouteExpanded() <= 100, "the search stopped at the budget, not past it (%d)", NavLastRouteExpanded());
+        CHECK(NavRouteBudget(Vec3(2480, -1660, 13), Vec3(2030, -1410, 13), &route, 6000),
+              "Grove to County General routes inside the combat budget");
+        CHECK(NavLastRouteExpanded() > 100 && NavLastRouteExpanded() <= 6000,
+              "it expanded %d nodes doing it", NavLastRouteExpanded());
+        CHECK(NavRouteBudget(Vec3(2480, -1660, 13), Vec3(1240, -1330, 13), &route, 6000),
+              "and Grove to All Saints - the longest measured chase route - fits the budget too (%d expanded)",
+              NavLastRouteExpanded());
+        UnloadNavGraph();
+    }
+    // ---- no idling mid-combat, and a reload is walked, never stood for
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        float idleRun = 0.0f, idleWorst = 0.0f;
+        for (int i = 0; i < 240; ++i) { // 12 s against a man standing his ground at 30 m
+            MobsTick(0.05f, Vec3(0.5f, 30.5f, 11.0f), 0, true, none);
+            if (gMobs[s].bossState == 2) {
+                const bool inactive = !gMobs[s].moving && gMobs[s].burstShots == 0 && gMobs[s].reloadT <= 0.0f &&
+                                      gMobs[s].firePlantT <= 0.0f && gMobs[s].dodgeT <= 0.0f;
+                idleRun = inactive ? idleRun + 0.05f : 0.0f;
+                idleWorst = std::max(idleWorst, idleRun);
+            }
+        }
+        CHECK(idleWorst < 1.6f, "in an open fight he is never simply standing there (worst idle %.2f s)", idleWorst);
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 30.5f, 11.0f), none); // engaged at 30 m
+        gMobs[s].mag = 0;
+        gMobs[s].burstShots = 0;
+        gMobs[s].burstPause = 0.1f;
+        bool sawReload = false, refilled = false;
+        Vec3 reloadStart;
+        float reloadTravel = 0.0f;
+        Vec3 prev = gMobs[s].pos;
+        for (int i = 0; i < 160 && !refilled; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 30.5f, 11.0f), 0, true, none);
+            if (gMobs[s].reloadT > 0.0f) {
+                if (!sawReload) {
+                    sawReload = true;
+                    reloadStart = gMobs[s].pos;
+                }
+                reloadTravel = (gMobs[s].pos - reloadStart).Length();
+            } else if (sawReload && gMobs[s].mag == 30) {
+                refilled = true;
+            }
+            prev = gMobs[s].pos;
+        }
+        (void)prev;
+        CHECK(sawReload && refilled, "the empty rifle is reloaded at range (not the pistol - that is for arm's length)");
+        CHECK(reloadTravel > 3.0f, "and he walks the reload - %.1f m covered while the magazine was out", reloadTravel);
+    }
+    // ---- the graph sims: a two-row street of nodes, a wall across the middle
+    auto buildGraph = [&]() {
+        const Vec3 nodes[9] = { Vec3(0, 0, 10), Vec3(10, 0, 10), Vec3(20, 0, 10), Vec3(30, 0, 10),
+                                Vec3(0, 20, 10), Vec3(10, 20, 10), Vec3(20, 20, 10), Vec3(30, 20, 10),
+                                Vec3(0, -14, 10) };
+        const int edges[][2] = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 4, 5 }, { 5, 6 },
+                                 { 6, 7 }, { 0, 4 }, { 3, 7 }, { 0, 8 } };
+        std::vector<std::vector<uint32_t>> adj(9);
+        for (auto& e : edges) {
+            adj[e[0]].push_back((uint32_t)e[1]);
+            adj[e[1]].push_back((uint32_t)e[0]);
+        }
+        std::vector<unsigned char> g;
+        auto put = [&](const void* d, size_t n) { const unsigned char* c = (const unsigned char*)d; g.insert(g.end(), c, c + n); };
+        auto u32 = [&](uint32_t v) { put(&v, 4); };
+        auto f32 = [&](float v) { put(&v, 4); };
+        put("MCNAV1", 6);
+        u32(9);
+        uint32_t total = 0;
+        for (auto& a : adj)
+            total += (uint32_t)a.size();
+        u32(total);
+        for (auto& n : nodes) { f32(n.x); f32(n.y); f32(n.z); }
+        uint32_t off = 0;
+        u32(0);
+        for (auto& a : adj) { off += (uint32_t)a.size(); u32(off); }
+        for (auto& a : adj)
+            for (uint32_t t : a)
+                u32(t);
+        uint32_t sum = 0;
+        for (unsigned char c : g)
+            sum += c;
+        u32(sum);
+        return LoadNavGraph(g.data(), g.size());
+    };
+    auto extendFloor = [&]() {
+        for (int x = -12; x <= 36; ++x)
+            for (int y = 15; y <= 26; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+    };
+    // ---- the chase: a fleeing man, a wall between the streets, contact -
+    // around a graph column, with no stall and a bounded count of repaths
+    {
+        WideStage();
+        extendFloor();
+        CHECK(buildGraph(), "the two-street graph loads");
+        host.wall = true;
+        host.wallC = Vec3(15, 10, 10);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 10.0f; // the wall spans x 5..25: its ends are NOT the columns
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(15.0f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(20.0f, 4.5f, 11.0f), none); // seen south of the wall: the fight is on
+        CHECK(gMobs[s].bossState == 2, "the chase starts as a fight (state %d)", gMobs[s].bossState);
+        // the man breaks away to the north street and runs west, shooting as he goes
+        float px = 25.0f;
+        host.velocity = Vec3(-3.5f, 0, 0);
+        NotePlayerShot(Vec3(px, 20.0f, 11.0f), 70.0f);
+        const float hurtPhase2 = host.playerHurt;
+        const int attempts0 = NavRouteAttempts();
+        float simT = 0.0f, stimT = 0.0f, stallRun = 0.0f, stallWorst = 0.0f;
+        float crossX = 1e9f, caughtT = -1.0f;
+        Vec3 prevPos = gMobs[s].pos;
+        for (int i = 0; i < 1300; ++i) {
+            const float dt = 0.05f;
+            simT += dt;
+            stimT += dt;
+            if (px > -8.0f)
+                px -= 3.5f * dt;
+            else
+                host.velocity = Vec3();
+            if (stimT > 2.0f) {
+                stimT = 0.0f;
+                NotePlayerShot(Vec3(px, 20.0f, 11.0f), 70.0f);
+            }
+            MobsTick(dt, Vec3(px, 20.0f, 11.0f), 0, true, none);
+            const Vec3 p = gMobs[s].pos;
+            if (crossX > 1e8f && p.y > 10.0f)
+                crossX = p.x; // where he crossed the wall's line says HOW he got north
+            const float speed = (p - prevPos).Length() / dt;
+            prevPos = p;
+            const float dFlat = std::sqrt((p.x - px) * (p.x - px) + (p.y - 20.0f) * (p.y - 20.0f));
+            const bool deliberate = gMobs[s].burstShots > 0 || gMobs[s].firePlantT > 0.0f || gMobs[s].reloadT > 0.0f;
+            if ((gMobs[s].bossState == 2 || gMobs[s].bossState == 3) && dFlat > 4.0f && speed < 0.4f && !deliberate) {
+                stallRun += dt;
+                stallWorst = std::max(stallWorst, stallRun);
+            } else {
+                stallRun = 0.0f;
+            }
+            // contact, for a rifleman: he has run the fleeing man down into his
+            // own fighting band and is holding him there in plain sight - the
+            // rest of the loop just confirms he never lets the range open again
+            if (caughtT < 0.0f && dFlat < 13.5f && gMobs[s].lostT < 0.05f)
+                caughtT = simT;
+            if (caughtT > 0.0f && simT > caughtT + 10.0f)
+                break; // ten seconds of held contact is the proof; do not run the clock out
+        }
+        const int attempts = NavRouteAttempts() - attempts0;
+        CHECK(caughtT > 0.0f, "the fleeing man is run down to fighting distance across the wall's street (caught at %.1f s)",
+              caughtT);
+        CHECK(host.playerHurt > hurtPhase2 + 1.0f,
+              "and the man he ran down is being hit, not just followed (%.1f half hearts)", host.playerHurt - hurtPhase2);
+        CHECK(crossX < 2.5f || crossX > 27.5f,
+              "he crossed the wall's line at a graph column (x %.1f) - routed around, not walked through", crossX);
+        CHECK(stallWorst < 1.7f, "no stall outlasts the repath budget (worst %.2f s)", stallWorst);
+        CHECK(attempts <= (int)(simT * 1.6f) + 6,
+              "repaths stayed throttled through a zigzag chase (%d in %.0f s)", attempts, simT);
+        host.wall = false;
+        host.velocity = Vec3();
+    }
+    // ---- the repath throttle under a direction-changing target: the man
+    // reverses every second; the navigator may re-aim, but it may not
+    // re-plan faster than its own throttle, and no single plan may expand
+    // past the hard budget
+    if (NavReady()) {
+        WideStage();
+        extendFloor();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(20.0f, 4.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        float px = 15.0f;
+        host.velocity = Vec3(3.5f, 0, 0);
+        RunMobsB(0.6f, Vec3(px, 20.0f, 11.0f), none);
+        NotePlayerShot(Vec3(px, 20.0f, 11.0f), 70.0f);
+        const int attempts0 = NavRouteAttempts();
+        int maxExpanded = 0;
+        float flipT = 0.0f, stimT = 0.0f, dirSign = 1.0f;
+        for (int i = 0; i < 400; ++i) { // 20 s of zigzag
+            const float dt = 0.05f;
+            flipT += dt;
+            stimT += dt;
+            if (flipT >= 1.0f) {
+                flipT = 0.0f;
+                dirSign = -dirSign;
+                host.velocity = Vec3(3.5f * dirSign, 0, 0);
+            }
+            px += 3.5f * dirSign * dt;
+            if (px > 28.0f) px = 28.0f;
+            if (px < 2.0f) px = 2.0f;
+            if (stimT > 2.0f) {
+                stimT = 0.0f;
+                NotePlayerShot(Vec3(px, 20.0f, 11.0f), 70.0f);
+            }
+            MobsTick(dt, Vec3(px, 20.0f, 11.0f), 0, true, none);
+            maxExpanded = std::max(maxExpanded, NavLastRouteExpanded());
+        }
+        const int attempts = NavRouteAttempts() - attempts0;
+        CHECK(attempts <= (int)(20.0f * 1.6f) + 6,
+              "a target reversing every second cannot stampede the planner (%d repaths in 20 s)", attempts);
+        CHECK(maxExpanded <= 6000, "no repath ever expanded past the hard budget (worst %d)", maxExpanded);
+        CHECK(gMobs[s].bossState == 2 || gMobs[s].bossState == 3,
+              "and he is still on the man after 20 s of zigzag (state %d)", gMobs[s].bossState);
+        host.velocity = Vec3();
+    }
+    // ---- the retreat: a wounded man falls back ONTO a graph node behind him
+    {
+        WideStage();
+        extendFloor();
+        CHECK(NavReady(), "the graph is still loaded for the retreat");
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.4f, Vec3(0.5f, 24.5f, 11.0f), none); // seen far north: lastSeen is the north street
+        gMobs[s].health = 1200.0f; // under the wounded line of the deeper pool
+        gMobs[s].hurt = 0.0f;
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 14, 10);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 7.0f; // the man is behind it now, unreachable
+        bool snapped = false;
+        float bestD = 1e9f, maxY = -1e9f;
+        for (int i = 0; i < 140; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 24.5f, 11.0f), 0, true, none);
+            if ((gMobs[s].chaseDest - Vec3(0, -14, 10)).Length() < 0.6f)
+                snapped = true;
+            bestD = std::min(bestD, (gMobs[s].pos - Vec3(0, -14, 10)).Length());
+            maxY = std::max(maxY, gMobs[s].pos.y);
+        }
+        CHECK(snapped, "the fallback he retreats to is the graph node behind him, not a blind backward line");
+        CHECK(bestD < 2.0f, "and he arrives on it (closest %.1f m)", bestD);
+        // his prime momentum may slide him a couple of metres north on the
+        // first second; what must never happen is a deliberate walk back
+        // toward the threat (the old hunt flip carried him to y=13.6)
+        CHECK(maxY < 6.5f, "he never walks back toward the threat while falling back (max y %.1f)", maxY);
+        host.wall = false;
+        UnloadNavGraph();
+    }
+    // ---- the relentless hunt: clues renew it past its own clock; a cold
+    // trail still ends it - he is relentless, not undead
+    {
+        WideStage();
+        extendFloor(); // the hunt walks the north street too: it needs its floor
+        // ...and its search legs reach a full block past the street in every
+        // direction - they need theirs too, or the hunter walks off the world
+        for (int x = -40; x < 40; ++x)
+            for (int y = 15; y < 48; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none); // seen: the fight is on
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 10.5f, 10);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        int stateAt50 = -1;
+        float stimT = 0.0f;
+        for (int i = 0; i < 1100; ++i) { // 55 s of a hidden man who keeps shooting
+            const float dt = 0.05f;
+            stimT += dt;
+            if (stimT > 3.0f) {
+                stimT = 0.0f;
+                NotePlayerShot(Vec3(0.5f, 20.5f, 11.0f), 70.0f);
+            }
+            MobsTick(dt, Vec3(0.5f, 20.5f, 10.2f), 0, true, none);
+            if (i == 1000)
+                stateAt50 = gMobs[s].bossState;
+        }
+        CHECK(stateAt50 == 2 || stateAt50 == 3,
+              "past the hunt's own 45 s he is still on the man while the shots keep coming (state %d)", stateAt50);
+        // the trail goes cold: the man is simply gone, and stays gone. The
+        // window is long on purpose: the last real gunshot is a fresh clue
+        // when the cold starts, so one more hunt cycle may legitimately run
+        // before the trail honestly dies - what matters is that it DOES die.
+        for (int i = 0; i < 4000; ++i)
+            MobsTick(0.05f, Vec3(0.5f, 220.5f, 11.0f), 0, true, none);
+        CHECK(gMobs[s].bossState == 4 || gMobs[s].bossState == 0,
+              "on a cold trail he stands down - primed suspicion, then calm as even that fades (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].pos.y < 60.0f, "and he never marched off after a man who was not there (y %.0f)", gMobs[s].pos.y);
+        host.wall = false;
+    }
+}
+
 static int InspectWorldFile(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -7009,6 +7476,7 @@ int main(int argc, char** argv) {
     TestSoldierModel();
     TestSoldierAimFix();
     TestBoss();
+    TestSmartPack();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
     TestBossDeathReset();

@@ -105,7 +105,14 @@ struct Host {
     // chest position, velocity. False when he is on foot. The seat position is the
     // bridge's best knowledge of where the driver actually sits.
     virtual bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) { return false; }
-    // One aimed shot's effect on the player's vehicle at a world hit point:
+    // Any vehicle described for aimed fire: centre and forward, by its host
+    // number (the same numbers ShotTrace and HurtVehicle trade in). The boss
+    // reads a hit's zone (wheel band, engine bay, body) off this frame when one
+    // of his rounds lands on a vehicle that is not the player's own - a parked
+    // car in his line, a bike shielding the man he is shooting at. False when
+    // the number names nothing the host still has.
+    virtual bool VehiclePose(int vehicle, Vec3* centre, Vec3* forward) { return false; }
+    // One aimed shot's effect on a vehicle at a world hit point:
     // effect 1 = burst the tyre nearest that point; effect 0 = nothing extra (the
     // body damage itself goes through HurtVehicle). Native thresholds (smoke,
     // fire, immobilisation) are the game's own business.

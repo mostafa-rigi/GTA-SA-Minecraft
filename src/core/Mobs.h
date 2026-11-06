@@ -143,10 +143,26 @@ struct Mob {
     int routeIdx = 0;          // boss: the waypoint he is walking to
     float routeT = 0.0f;       // boss: seconds before the route is recomputed regardless
     Vec3 routeGoal{ 0, 0, 0 }; // boss: the destination the route was built for
+    // ---- the smart pack: combat navigation on the graph, the settle, the lock
+    float repathT = 0.0f;      // boss: seconds before combat navigation may repath again (the ~1 s throttle)
+    Vec3 chaseDest{ 0, 0, 0 }; // boss: the point combat navigation is steering to (intercept or fallback)
+    float navProgT = 0.0f;     // boss: seconds since his position last moved 1.2 m while a move was wanted
+    Vec3 navProgPos{ 0, 0, 0 }; // boss: where that last progress was made
+    int navStuckCount = 0;     // boss: consecutive stall breaks near navStuckPos (the second one bans the pocket's node)
+    Vec3 navStuckPos{ 0, 0, 0 }; // boss: where the last stall broke
+    float settleT = 0.0f;      // boss: seconds his speed has stayed under the settled line (Counter-Strike's stop-shoot recovery)
+    float firePlantT = 0.0f;   // boss: seconds he stays planted to finish a burst at range (set by fire control)
+    Vec3 reposAt{ 0, 0, 0 };   // boss: where the target last broke his line at a NEW hiding place
+    float reposT = 0.0f;       // boss: seconds that repositioning still reads as fresh (the early grenade)
+    int tgtLockBeing = -2;     // boss: the target his lock holds (-2 none yet, -1 the player, >= 0 a being)
+    float tgtLockT = 0.0f;     // boss: seconds before the target lock is re-evaluated (and its minimum hold)
     std::vector<Vec3> patrolPts; // boss: his Grove Street posts (graph nodes when loaded)
     float idleVoiceT = 30.0f;  // boss: seconds to his next idle radio line
     float scanClock = 0.0f;    // boss: his head-scan clock on post
     Vec3 coverPoint{ 0, 0, 0 }; // boss: the cover he is using
+    Vec3 fallbackPoint{ 0, 0, 0 }; // smart pack: the wounded retreat's chosen ground, kept until reached
+    bool hasFallback = false;
+    float fallbackBanT = 0.0f; // after a fallback proves unreachable, no new one for a while
     Vec3 peekPoint{ 0, 0, 0 }; // boss: the half-step out of it he fires from
     bool hasCover = false;     // boss: a cover point is currently valid
     bool peekPhase = false;    // boss: true while stepped out of cover to fire
@@ -208,6 +224,18 @@ MobHit MobsRaycast(const Vec3& origin, const Vec3& dir, float maxDist);
 void MobHurt(int index, float halfHearts, const Vec3& from, float knock);
 
 // ---- the boss's doors in from the bridge (workstreams K and L)
+// One of his rounds has landed on a vehicle at world `point`: which zone of
+// the vehicle it is, priced in half hearts of vehicle damage - the wheel band
+// (below the body's own centre line) also bursts the tyre nearest the point
+// through Host::VehicleShotEffect, the engine bay (the front of the frame)
+// takes double, the plain body takes the base. Pure geometry on the vehicle's
+// own frame (centre + forward from Host::VehiclePose / the player's pose), so
+// the numbers can be pinned in tests exactly as the game will pay them.
+struct BossVehZone {
+    float dmg = 0.0f;  // half hearts of vehicle damage for this hit
+    bool tyre = false; // the hit is at wheel height: burst the nearest tyre too
+};
+BossVehZone BossVehicleZone(const Vec3& point, const Vec3& centre, const Vec3& fwd, float baseDmg);
 // The street provoked him: this being attacked him, and he may fight back.
 void MobProvoked(int index, int being, const Vec3& from);
 // Hurt that landed on his perception body in the host (the invisible proxy the

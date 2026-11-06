@@ -158,6 +158,17 @@ struct GtaHost : Host {
         *velocity = veh->m_vecMoveSpeed * 50.0f; // per-frame at 50 fps -> per second
         return true;
     }
+    // smart pack: any vehicle's frame, for the boss's zoned vehicle damage -
+    // the same matrix the player-car pose reads, resolved from the pool ref
+    bool VehiclePose(int vehicle, Vec3* centre, Vec3* forward) override {
+        CVehicle* veh = CPools::ms_pVehiclePool ? CPools::ms_pVehiclePool->GetAtRef(vehicle) : nullptr;
+        if (!veh)
+            return false;
+        CMatrix& mx = veh->GetMatrix();
+        *centre = mx.pos;
+        *forward = mx.at;
+        return true;
+    }
     void VehicleShotEffect(int vehicle, const Vec3& hitPoint, int effect) override {
         if (effect != 1)
             return; // 1 is the only effect: burst the tyre nearest the hit
@@ -168,6 +179,12 @@ struct GtaHost : Host {
         const Vec3 d = hitPoint - Vec3(mx.pos);
         const float along = d.Dot(Vec3(mx.at));    // > 0: the front half
         const float side = d.Dot(Vec3(mx.right));  // > 0: the car's own right
+        // a bike has two wheels, not four corners: 0 front, 1 rear in the
+        // game's own component ids (appearance 2 is the bike family)
+        if (veh->GetVehicleAppearance() == 2) {
+            veh->BurstTyre((unsigned char)(along > 0.0f ? 0 : 1), true);
+            return;
+        }
         // SA's wheel component ids for BurstTyre: 0 front-left, 1 rear-left,
         // 2 front-right, 3 rear-right
         const int id = along > 0.0f ? (side < 0.0f ? 0 : 2) : (side < 0.0f ? 1 : 3);
