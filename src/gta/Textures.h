@@ -20,6 +20,8 @@ extern Tex gGuiTex;   // hotbar, windows, icons
 extern Tex gFontTex;  // pixel font
 extern Tex gEntityTex; // steve skin, elytra, arrow, shadow
 extern Tex gMenuTex;   // title screen: panorama, logo, buttons (optional)
+extern Tex gSoldierTex[3]; // the CS soldier's own textures: uniform, backpack, M4A1 (optional -
+                           // without them there is no soldier, and the spawn says so)
 
 // alpha channel of atlas.png kept on the CPU (item sprites get their extruded edges from it)
 extern std::vector<uint8_t> gAtlasAlpha;

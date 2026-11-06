@@ -19,6 +19,7 @@
 #include "Items.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "SoldierModel.h"
 #include "Screens.h"
 #include "Shapes.h"
 #include "Beds.h"
@@ -484,6 +485,21 @@ struct TestHost : Host {
     bool soil = false;     // its ground is everywhere, and it is earth
     bool blocking = false; // somebody stands in `blocked`
     Int3 blocked;
+    bool wall = false;  // a wall segment stands on the ground for the soldier's probe
+    Vec3 wallC;         // its centre
+    Vec3 wallDir;       // unit vector along it
+    float wallHalf = 0; // half its length
+    bool LineBlocked(const Vec3& a, const Vec3& b) override {
+        if (!wall)
+            return false;
+        const Vec3 w0 = wallC - wallDir * wallHalf, w1 = wallC + wallDir * wallHalf;
+        auto cross = [](const Vec3& p, const Vec3& q, const Vec3& r) {
+            return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+        };
+        const float d1 = cross(w0, w1, a), d2 = cross(w0, w1, b), d3 = cross(a, b, w0), d4 = cross(a, b, w1);
+        const bool seg = ((d1 > 0.0f) != (d2 > 0.0f)) && ((d3 > 0.0f) != (d4 > 0.0f));
+        return seg && std::min(a.z, b.z) < wallC.z + 3.0f && std::max(a.z, b.z) > wallC.z;
+    }
     bool thing = false;    // something of its own is in front of the player, two metres away
     bool Raining() override { return rain; }
     bool Outdoors() override { return outdoors; }
@@ -4288,8 +4304,9 @@ static void TestModels() {
 
     sink.Reset();
     DrawMob(MOB_SOLDIER, stand, MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
-    CHECK(sink.quads[0] >= 60 && sink.lo.z > -0.01f && sink.lo.z < 0.02f && sink.hi.z > 1.8f && sink.hi.z < 2.05f,
-          "a soldier: a man with a rifle, on his own feet (lowest point %.3f m, %.2f m tall, %d quads)", sink.lo.z, sink.hi.z, sink.quads[0]);
+    CHECK(sink.quads[0] == 1010 && sink.lo.z > -0.01f && sink.lo.z < 0.02f && sink.hi.z > 1.5f && sink.hi.z < 1.75f,
+          "a soldier: Counter-Strike's own model, every triangle of it, on his own feet (lowest point %.3f m, %.2f m tall in his idle, %d quads)",
+          sink.lo.z, sink.hi.z, sink.quads[0]);
 
     sink.Reset();
     HumanoidAnim a;
@@ -5508,6 +5525,109 @@ static void TestControls() {
     gControls = Controls();
 }
 
+// the soldier's real model, found in the repo next to the source (the game reads its
+// copy from the MinecraftSA folder; the tests read the converter's output)
+static const char* SoldierBinPath() {
+    static const char* paths[] = { "cs-soldier/cs_soldier.bin", "../cs-soldier/cs_soldier.bin",
+                                   "../../cs-soldier/cs_soldier.bin", "../../../cs-soldier/cs_soldier.bin" };
+    for (const char* p : paths) {
+        FILE* f = std::fopen(p, "rb");
+        if (f) {
+            std::fclose(f);
+            return p;
+        }
+    }
+    return nullptr;
+}
+
+static bool LoadSoldierBinFromRepo() {
+    const char* p = SoldierBinPath();
+    if (!p)
+        return false;
+    FILE* f = std::fopen(p, "rb");
+    std::fseek(f, 0, SEEK_END);
+    const long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes((size_t)std::max<long>(n, 0));
+    const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    std::fclose(f);
+    return ok && LoadSoldierModel(bytes.data(), bytes.size());
+}
+
+// the real-model round of the CS project: the file, the no-fake gate, the poses of
+// Counter-Strike's own sequences, and the wall probe in his brain
+static void TestSoldierModel() {
+    TestHost host;
+    SetHost(&host);
+    srand(31337);
+
+    // the law: no model file, no soldier - and no box wearing his name either
+    {
+        WideStage();
+        UnloadSoldierModel();
+        CHECK(!SoldierModelReady(), "the model can be unloaded");
+        CHECK(SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true) < 0,
+              "without cs_soldier.bin the soldier refuses to spawn");
+        RecordSink sink;
+        SetModelSink(&sink);
+        sink.Reset();
+        DrawMob(MOB_SOLDIER, EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
+                MobAnim(), 1.0f, 1.0f, 1.0f, 1.0f);
+        CHECK(sink.quads[0] == 0 && sink.quads[1] == 0, "and nothing at all is drawn for him (%d quads)", sink.quads[0]);
+        CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the model loads back from the repo file");
+    }
+
+    // the poses are the game's own numbers, measured off the converted file
+    {
+        float lo = 0, hi = 0;
+        CHECK(SoldierPoseSpan(SP_AIM, 0, 0.0f, &lo, &hi) && lo > -0.02f && lo < 0.02f && hi > 1.70f && hi < 1.85f,
+              "aim stance: feet on the ground, %.2f m tall (lowest %.3f)", hi, lo);
+        CHECK(SoldierPoseSpan(SP_IDLE, 0, 0.0f, &lo, &hi) && hi > 1.5f && hi < 1.7f, "his idle stands %.2f m", hi);
+        float lo2 = 0, hi2 = 0;
+        SoldierPoseSpan(SP_WALK, 0, 0.0f, &lo, &hi);
+        SoldierPoseSpan(SP_WALK, 0, 0.55f, &lo2, &hi2);
+        CHECK(std::fabs(hi - hi2) > 0.02f || std::fabs(lo - lo2) > 0.02f,
+              "the walk cycle really moves (%.3f/%.3f -> %.3f/%.3f)", lo, hi, lo2, hi2);
+        for (int v = 0; v < 3; ++v)
+            CHECK(SoldierPoseSpan(SP_DEATH, v, 99.0f, &lo, &hi) && hi < 0.7f && lo > -0.25f,
+                  "death %d ends lying on the ground (%.2f m tall, lowest %.3f)", v, hi, lo);
+        CHECK(SoldierPoseSpan(SP_SHOOT, 0, 0.1f, &lo, &hi) && hi > 1.85f,
+              "the shoot pose kicks his rifle up - the game's own recoil data (%.2f m at the muzzle)", hi);
+    }
+
+    // his wall probe: a wall across the patrol road bends his path around it; no wall, no bend
+    for (int trial = 0; trial < 2; ++trial) {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        CHECK(s >= 0, "a soldier spawns for the wall test");
+        const Vec3 anchor = gMobs[s].anchor;
+        const float a = (float)gMobs[s].patrolStep * 1.0472f + (float)(gMobs[s].id % 6) * 0.5f;
+        const Vec3 dir(std::cos(a), std::sin(a), 0.0f);
+        host.wall = trial == 0;
+        host.wallC = anchor + dir * 6.5f;
+        host.wallDir = Vec3(-dir.y, dir.x, 0.0f);
+        host.wallHalf = 2.2f;
+        const Vec3 far = anchor + dir * 200.0f + Vec3(0, 0, 1.0f);
+        const std::vector<BeingInfo> none;
+        const int step0 = gMobs[s].patrolStep;
+        float maxDev = 0.0f, maxAlong = 0.0f;
+        for (int i = 0; i < 180; ++i) { // one patrol leg only: the tracking stops when
+            MobsTick(0.05f, far, 0, true, &none); // he reaches the post and turns for the next
+            const Vec3 rel = gMobs[s].pos - anchor;
+            maxAlong = std::max(maxAlong, rel.x * dir.x + rel.y * dir.y);
+            maxDev = std::max(maxDev, std::fabs(rel.x * -dir.y + rel.y * dir.x));
+            if (gMobs[s].patrolStep != step0 || gMobs[s].patrolWait > 0.0f)
+                break;
+        }
+        if (trial == 0)
+            CHECK(maxDev > 1.6f && maxAlong > 7.5f,
+                  "a wall bends his patrol around it (deviation %.2f m, reached %.1f m along the road)", maxDev, maxAlong);
+        else
+            CHECK(maxDev < 0.5f, "no wall: he walks his post straight (deviation %.2f m)", maxDev);
+        host.wall = false;
+    }
+}
+
 // mc_tests <world file>: reads a world file the way the game does and says what is in it (the file is not changed)
 static int InspectWorldFile(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -5634,6 +5754,14 @@ int main(int argc, char** argv) {
     CHECK(inv.CountOf(ID_STONE) == 36 * 64, "count");
     CHECK(inv.Remove(ID_STONE, 100) && inv.CountOf(ID_STONE) == 36 * 64 - 100, "remove");
 
+    // the soldier exists only with his real model file: load it once, up front, so
+    // every soldier test below meets the same world as the game (SoldierBinPath is
+    // defined further up, with TestSoldierModel)
+    if (LoadSoldierBinFromRepo())
+        printf("soldier model loaded from %s\n", SoldierBinPath());
+    else
+        printf("WARNING: cs_soldier.bin not found from here - the soldier tests will fail loudly\n");
+
     TestPhysics();
     TestBlockRules();
     TestSurvival();
@@ -5660,6 +5788,7 @@ int main(int argc, char** argv) {
     TestChat();
     TestDebugScreen();
     TestModels();
+    TestSoldierModel();
     TestPlayerAnim();
     TestRenderers();
     TestSave();

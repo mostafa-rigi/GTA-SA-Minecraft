@@ -145,7 +145,14 @@ StateGuard::~StateGuard() {
 namespace {
 // the core's models (McModel.h) are drawn through here
 struct Im3DSink : ModelSink {
-    void Texture(int tex) override { SetRaster(tex == MT_ATLAS ? gAtlasTex.Raster() : gEntityTex.Raster()); }
+    void Texture(int tex) override {
+        if (tex == MT_ATLAS)
+            SetRaster(gAtlasTex.Raster());
+        else if (tex >= MT_SOLDIER && tex < MT_SOLDIER + 3 && gSoldierTex[tex - MT_SOLDIER].tex)
+            SetRaster(gSoldierTex[tex - MT_SOLDIER].Raster()); // the CS soldier's own files
+        else
+            SetRaster(gEntityTex.Raster());
+    }
     void Quad(const Vec3* p, const float* u, const float* v, uint32_t color) override {
         const CVector q[4] = { ToGta(p[0]), ToGta(p[1]), ToGta(p[2]), ToGta(p[3]) };
         QuadUV(q, u, v, color);

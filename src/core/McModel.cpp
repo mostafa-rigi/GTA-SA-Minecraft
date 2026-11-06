@@ -1,6 +1,7 @@
 #include <cstring>
 #include "McModel.h"
 
+#include "SoldierModel.h"
 #include "BlockMesh.h"
 #include "GameState.h"
 #include "Items.h"
@@ -866,33 +867,11 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
         break;
     }
     case MOB_SOLDIER: {
-        // The Counter-Strike soldier (the SEAL of the user's own CS 1.6): a man's frame drawn the way the
-        // other humanoids are, standing on the same feet plane (legs pivoting at y = 12 end at y = 24).
-        // His texture is cut out of the game's own model file and rearranged into this layout by
-        // tools/cs_soldier_texture.py - every pixel is the game's own, the way the spider's was. While he
-        // aims (a.attack) both arms come up and his M4A1 - plain dark boxes, the way the skeleton's bow is
-        // drawn - points where he points; at rest it rides in his right hand.
-        st.tex = ENT_SOLDIER;
-        const float aim = Clamp(a.attack * 2.0f, 0.0f, 1.0f);
-        const float armR = -kPi / 2.0f * aim + legB * (1.0f - aim);
-        const float armL = -kPi / 2.0f * aim + legA * (1.0f - aim);
-        McCube(Part(base, 0, 0, 0, a.headPitch, a.headYaw, 0), -4, -8, -4, 8, 8, 8, 0, 0, st);
-        McCube(Part(base, 0, 0, 0), -4, 0, -2, 8, 12, 4, 16, 16, st);
-        const Pose rArm = Part(base, -6, 2, 0, armR, 0, -0.06f + aim * 0.1f);
-        McCube(rArm, -2, -2, -2, 4, 12, 4, 40, 16, st);
-        McCube(Part(base, 6, 2, 0, armL, 0, 0.06f - aim * 0.35f), -2, -2, -2, 4, 12, 4, 40, 16, st, 0.0f, true);
-        McCube(Part(base, -2, 12, 0, legA, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st);
-        McCube(Part(base, 2, 12, 0, legB, 0, 0), -2, 0, -2, 4, 12, 4, 4, 16, st, 0.0f, true);
-        // the M4A1, in his right hand: receiver, barrel, magazine and stock, dark gunmetal
-        ModelStyle gun = st;
-        gun.untextured = true;
-        gun.r *= 0.16f; gun.g *= 0.17f; gun.b *= 0.20f;
-        const Pose grip = Part(rArm, 0, 10, -1);
-        McCube(grip, -1, -1.5f, -14, 2, 3, 13, 0, 0, gun);      // receiver and handguard
-        McCube(grip, -0.5f, -0.5f, -20, 1, 1.2f, 6, 0, 0, gun); // barrel and its silencer
-        McCube(Part(grip, 0, 1, -8, 0.35f, 0, 0), -0.7f, 0, -1.2f, 1.4f, 4, 2.4f, 0, 0, gun); // magazine, raked
-        McCube(grip, -0.8f, -1, 1, 1.6f, 2.2f, 5, 0, 0, gun);   // stock
-        McCube(grip, -0.4f, -2.6f, -9, 0.8f, 1.1f, 5, 0, 0, gun); // carrying handle / sight
+        // Counter-Strike's own SEAL model, skinned from cs_soldier.bin - not a box in
+        // his colours (the user's eye rejected that outright: "کلا مکعبی ماینکرافتیه").
+        // Without the model file he never spawns, so a soldier reaching this draw has
+        // his model; the call stays silent if the file ever failed to load.
+        DrawSoldierModel(base, a.soldierPose, a.soldierDeath, a.soldierPoseTime, light, r, g, b);
         break;
     }
     case MOB_PIG: {

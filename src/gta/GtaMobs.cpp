@@ -15,6 +15,7 @@
 #include "Inventory.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "SoldierModel.h"
 #include "PlayerAnim.h"
 #include "Render3D.h"
 #include "Textures.h"
@@ -105,12 +106,14 @@ void MobsRender(float light) {
         CVector up(0, 0, 1);
         CVector right(fwd.y, -fwd.x, 0.0f);
         float r = 1.0f, g = 1.0f, b = 1.0f;
-        if (m.death >= 0.0f) {
+        if (m.death >= 0.0f && m.kind != MOB_SOLDIER) {
             Vec3 r2 = right, u2 = up;
             DeathTilt(m.death, r2, u2); // the dead animal tips over onto its side
             right = ToGta(r2);
             up = ToGta(u2);
         }
+        // (the soldier falls with Counter-Strike's own death animation instead -
+        // SoldierModel poses it; a Minecraft tip-over on top of it would double the fall)
         if (m.hurt > 0.0f || m.death >= 0.0f) {
             g = 0.45f;
             b = 0.45f;
@@ -128,6 +131,9 @@ void MobsRender(float light) {
         a.attack = m.attackAnim;
         a.pulse = m.pulse;
         a.charge = m.boom;
+        a.soldierPose = m.death >= 0.0f ? SP_DEATH : m.soldierPose;
+        a.soldierPoseTime = m.death >= 0.0f ? m.death : m.soldierPoseTime;
+        a.soldierDeath = m.soldierDeath;
         DrawMob(m.kind, base, a, light, r, g, b);
         if (m.groundZ > -900.0f)
             AddShadow(CVector(m.pos.x, m.pos.y, m.groundZ), MobWidth(m) * 0.75f,

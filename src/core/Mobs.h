@@ -90,6 +90,11 @@ struct Mob {
     float strafeTime = 0.0f;   // soldier: seconds until he changes his sideways drift in a fight
     float strafeDir = 1.0f;    // soldier: which way he drifts while he holds his angle
     float stepAcc = 0.0f;      // soldier: metres walked since his last footstep sound
+    int soldierPose = 0;       // soldier: the SoldierPose category he is showing (SoldierModel.h)
+    float soldierPoseTime = 0; // soldier: seconds he has been in that pose
+    int soldierDeath = 0;      // soldier: which of the game's death sequences is his (set as he falls)
+    float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
+    Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

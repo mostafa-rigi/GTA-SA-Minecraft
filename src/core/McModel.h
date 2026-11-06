@@ -12,7 +12,7 @@
 namespace mc {
 
 // The host draws the models' quads, textured from entity.png (the ENT_* rectangles) or the block / item atlas.
-enum ModelTexture { MT_ENTITY = 0, MT_ATLAS };
+enum ModelTexture { MT_ENTITY = 0, MT_ATLAS, MT_SOLDIER }; // MT_SOLDIER + n: the CS soldier's own texture files
 struct ModelSink {
     virtual ~ModelSink() = default;
     virtual void Texture(int tex) = 0; // the next quads use this ModelTexture
@@ -137,6 +137,9 @@ struct MobAnim {
     float attack = 0.0f;   // warden: 1..0 as its arms come down on a blow
     float pulse = 0.0f;    // warden: 1..0 after a heartbeat (its tendrils twitch)
     float charge = -1.0f;  // warden: seconds into a sonic boom, < 0 none
+    int soldierPose = 0;        // soldier: the SoldierPose category his brain chose
+    float soldierPoseTime = 0;  // soldier: seconds into that pose (his death time when dead)
+    int soldierDeath = 0;       // soldier: which of the death sequences is his
 };
 void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r, float g, float b);
 

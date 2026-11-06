@@ -13,6 +13,7 @@
 #include "Inventory.h"
 #include "Items.h"
 #include "Particles.h"
+#include "SoldierModel.h"
 
 namespace mc {
 
@@ -839,6 +840,34 @@ void SoldierShoot(Mob& m, const Vec3& playerFeet, const Vec3& playerMid, float d
 // He patrols his post, checks the angles at every stop, and fights the way he was tuned: see, react,
 // burst, hold or close, fall back when he is hurt, hunt what he lost, and reload like a man who knows
 // an empty rifle is a death sentence - on the move, never standing in the open.
+// ---- his one piece of real navigation: a sight-line probe ahead of his body. He
+// asks the bridge what stands in front of him (the bridge's line of sight counts the
+// city's own buildings, vehicles and objects) and, when his road is blocked, walks
+// around the blockage at the first open angle instead of pressing into the wall.
+// What this probe cannot do is stated plainly in CS-REALMODEL-fa.md: it looks 2.4 m
+// ahead at chest height and nothing more - no stairs, no low fences, no route
+// planning across a street. It is a detour reflex, not a pathfinder.
+Vec3 SoldierAdvance(Mob& m, const Vec3& want, float dt) {
+    if (m.steerTime > 0.0f) {
+        m.steerTime -= dt;
+        return m.steerDir;
+    }
+    const Vec3 from = m.pos + Vec3(0, 0, 1.1f);
+    if (!TheHost().LineBlocked(from, from + want * 2.4f))
+        return want;
+    static const float kTry[6] = { 0.61f, -0.61f, 1.22f, -1.22f, 1.92f, -1.92f }; // 35, 70, 110 degrees
+    for (float a : kTry) {
+        const float c = std::cos(a), s = std::sin(a);
+        const Vec3 cand(want.x * c - want.y * s, want.x * s + want.y * c, 0.0f);
+        if (!TheHost().LineBlocked(from, from + cand * 2.4f)) {
+            m.steerDir = cand;
+            m.steerTime = 0.6f;
+            return cand;
+        }
+    }
+    return want; // walled in on every side he can reach: he pushes on, and physics stops him
+}
+
 bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
                   const std::vector<BeingInfo>* beings) {
     (void)beings; // the street is not his war
@@ -939,15 +968,15 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     if (see) {
         const bool hurt = m.health < maxHealth * kSoldier.retreatUnder;
         if (hurt && dist < 30.0f) {
-            m.goal = dir * -1.0f; // falling back, still facing the fight (Think keeps his body on the enemy)
+            m.goal = SoldierAdvance(m, dir * -1.0f, dt); // falling back, still facing the fight
             m.moving = true;
             *speed = t.run * 0.8f;
         } else if (dist > 26.0f) {
-            m.goal = dir;
+            m.goal = SoldierAdvance(m, dir, dt);
             m.moving = true;
             *speed = t.run;
         } else if (dist < 6.0f) {
-            m.goal = dir * -1.0f;
+            m.goal = SoldierAdvance(m, dir * -1.0f, dt);
             m.moving = true;
             *speed = kSoldier.strafeSpeed;
         } else {
@@ -967,7 +996,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         Vec3 toSeen = m.lastSeen - m.pos;
         toSeen.z = 0.0f;
         if (toSeen.Length() > 1.8f) {
-            m.goal = Flat(toSeen);
+            m.goal = SoldierAdvance(m, Flat(toSeen), dt);
             m.moving = true;
             *speed = t.run * 0.75f; // he advances on a lost enemy like a man clearing a street: fast, not charging
             m.scanTime = 0.0f;
@@ -1003,11 +1032,31 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 m.patrolWait = 1.2f + Rand01() * 1.2f; // (a leg that takes too long is given up, post reached or not)
                 m.moving = false;
             } else {
-                m.goal = Flat(toPost);
+                m.goal = SoldierAdvance(m, Flat(toPost), dt);
                 m.moving = true;
                 *speed = t.walk;
             }
         }
+    }
+
+    // ---- what his body shows: the brain's state IS the animation state, the way the
+    // game itself layers it (SoldierModel.h). Firing plants his feet for the burst;
+    // a moving man walks or runs under the same aim layer; a still man with his
+    // rifle up stands in the aim pose; the rest is the patrolman's idle.
+    int pose = SP_IDLE;
+    if (m.reloadT > 0.0f)
+        pose = SP_RELOAD;
+    else if (m.burstShots > 0)
+        pose = SP_SHOOT;
+    else if (m.moving)
+        pose = *speed > 4.0f ? SP_RUN : SP_WALK;
+    else if (see || m.attackAnim > 0.3f)
+        pose = SP_AIM;
+    if (pose != m.soldierPose) {
+        m.soldierPose = pose;
+        m.soldierPoseTime = 0.0f;
+    } else {
+        m.soldierPoseTime += dt;
     }
 
     // ---- his steps, on his stride, the game's own footstep sounds
@@ -1154,6 +1203,8 @@ void Kill(Mob& m) {
         return;
     m.death = 0.0f;
     m.health = 0.0f;
+    if (m.kind == MOB_SOLDIER)
+        m.soldierDeath = (int)(Rand01() * 2.99f); // one of the game's three falls, his own
     m.moving = false;
     Vec3 c = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
     PlaySfx(kTypes[m.kind].death, &c, 1.0f, m.baby > 0.0f ? 1.5f : 0.9f + Rand01() * 0.2f);
@@ -1247,6 +1298,12 @@ void MobsClear() {
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     if (kind < 0 || kind >= MOB_KIND_COUNT || gMobs.size() >= 96)
         return -1;
+    if (kind == MOB_SOLDIER && !SoldierModelReady()) {
+        // The user's law for this soldier: Counter-Strike's real model or nothing -
+        // no box stand-in wearing his name. The loader already said why in the log.
+        Log("summon soldier refused: cs_soldier.bin is not loaded, and a fake soldier is not an option");
+        return -1;
+    }
     Mob m;
     m.kind = kind;
     m.pos = feet;

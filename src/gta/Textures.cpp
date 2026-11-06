@@ -1,12 +1,16 @@
 #include "Textures.h"
 
+#include <cstdio>
+
 #include "Image.h"
 #include "Other.h"
 #include "RenderWare.h"
+#include "SoldierModel.h"
 
 namespace mc {
 
 Tex gAtlasTex, gGuiTex, gFontTex, gEntityTex, gMenuTex;
+Tex gSoldierTex[3];
 
 RwRaster* Tex::Raster() const { return tex ? RwTextureGetRaster(tex) : nullptr; }
 
@@ -66,12 +70,41 @@ static bool LoadPng(const char* file, Tex& out, std::vector<uint8_t>* alphaOut =
     return out.tex != nullptr;
 }
 
+// The Counter-Strike soldier's model file, read whole and handed to the core (the
+// core never touches the disk). A missing or broken file is not fatal to the mod -
+// it only means there is no soldier, and the core's loader has already shouted why.
+static void LoadSoldierFiles() {
+    char name[32];
+    for (int i = 0; i < 3; ++i) {
+        std::snprintf(name, sizeof(name), "cs_soldier_tex%d.png", i);
+        LoadPng(name, gSoldierTex[i]);
+    }
+    const std::string path = ModPath("cs_soldier.bin");
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        Log("ERROR: could not load %s - the Counter-Strike soldier cannot appear without his model file", path.c_str());
+        return;
+    }
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes(size > 0 ? (size_t)size : 0);
+    if (size <= 0 || std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size()) {
+        Log("ERROR: could not read %s - the Counter-Strike soldier cannot appear", path.c_str());
+        std::fclose(f);
+        return;
+    }
+    std::fclose(f);
+    LoadSoldierModel(bytes.data(), bytes.size());
+}
+
 bool LoadTextures() {
     bool ok = LoadPng("atlas.png", gAtlasTex, &gAtlasAlpha);
     ok &= LoadPng("gui.png", gGuiTex);
     ok &= LoadPng("font.png", gFontTex);
     ok &= LoadPng("entity.png", gEntityTex);
     LoadPng("menu.png", gMenuTex); // without it GTA's own menu stays
+    LoadSoldierFiles();           // the soldier is an extra, never a reason to fail the mod
     return ok;
 }
 
@@ -88,6 +121,9 @@ void UnloadTextures() {
     Free(gFontTex);
     Free(gEntityTex);
     Free(gMenuTex);
+    for (auto& t : gSoldierTex)
+        Free(t);
+    UnloadSoldierModel();
 }
 
 } // namespace mc
