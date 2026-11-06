@@ -4,6 +4,7 @@
 // a herd appear (Host::SpawnGround).
 
 #include "Core.h"
+#include "SoldierModel.h" // SoldierDrawState rides in the soldier's Mob
 
 namespace mc {
 
@@ -90,17 +91,74 @@ struct Mob {
     float strafeTime = 0.0f;   // soldier: seconds until he changes his sideways drift in a fight
     float strafeDir = 1.0f;    // soldier: which way he drifts while he holds his angle
     float stepAcc = 0.0f;      // soldier: metres walked since his last footstep sound
-    int soldierPose = 0;       // soldier: the SoldierPose category he is showing (SoldierModel.h)
-    float soldierPoseTime = 0; // soldier: seconds he has been in that pose
     int soldierDeath = 0;      // soldier: which of the game's death sequences is his (set as he falls)
-    float soldierGait = 0.0f;  // soldier: gait cycles he has travelled (his walk/run phase rides on it, so his feet keep the ground)
-    int soldierVariant = 0;    // soldier: variant of his pose (the shoot pose: 0 standing, 1 walking, 2 running)
-    int soldierPrevPose = -1;  // soldier: the pose he is cross-fading out of, < 0: no fade running
-    int soldierPrevVariant = 0; // soldier: the fading pose's variant
-    float soldierPrevTime = 0; // soldier: the fading pose's own clock, still running while it fades
-    float soldierPrevGait = 0; // soldier: the fading pose's gait cycles
-    float soldierFade = 1.0f;  // soldier: 0..1, how far the cross-fade out of the previous pose has run
     float shootShow = 0.0f;    // soldier: seconds the shoot pose still holds after a shot (a burst must read as firing)
+    // ---- the boss (the solo soldier, finished): his draw state is composed by
+    // his brain every tick (SoldierModel's two layers), the rest is his craft
+    SoldierDrawState draw;     // boss: the layered pose the renderer draws
+    int bossState = 0;         // boss: 0 calm, 1 command, 2 combat, 3 hunt, 4 suspicious
+    float detect = 0.0f;       // boss: the detection meter, 0..1 (fills by visible fraction)
+    float primedT = 0.0f;      // boss: seconds his detection still runs primed (x2)
+    bool negotiated = false;   // boss: this encounter already had its one talk-first chance
+    bool fightStarted = false; // boss: a fight is (or was) in progress this encounter - the gate on talk-first (G): commands belong to the guard context only; summoned into a fight or already engaged, he fights at once and gives no orders
+    float loudT = 99.0f;       // boss: seconds since a gunshot-class sound was last heard (the same gate)
+    float heardT = 0.0f;       // boss: seconds a heard direction stays worth looking at
+    Vec3 heardDir{ 0, 1, 0 };  // boss: where the last heard sound came from
+    float coverT = 0.0f;       // boss: seconds before cover is re-judged
+    float playerHostileT = 0.0f; // boss: seconds the player still counts as the one fighting him
+    int attackerBeing = -1;    // boss: the street being who attacked him (K1), -1 none
+    float attackerFresh = 0.0f; // boss: seconds that provocation stays fresh
+    bool proxyHit = false;     // boss: the pending MobHurt came through his perception body (bridge sets it)
+    int proxyAttacker = -1;    // boss: ...and this being is the one who dealt it
+    int lastVoiceEv = -1;      // boss: the last voice line event he played (never twice in a row)
+    float voiceCd = 0.0f;      // boss: seconds before he speaks again
+    float hurtSayT = 0.0f;     // boss: hurt-voice throttle
+    float flinchT = 0.0f;      // boss: seconds his damage flinch still shows
+    bool hurtHigh = false;     // boss: the last hit came in high (head flinch, not gut)
+    float aimYaw = 0.0f;       // boss: where his torso and rifle point
+    float legYaw = 0.0f;       // boss: where his legs face (his mob yaw follows it)
+    int pitchIdx = 0;          // boss: the aim grid's pitch row (0 level, 1 up, 2 down)
+    bool crouch = false;       // boss: crouched to shoot at range
+    float airT = 0.0f;         // boss: seconds airborne (the jump legs read it)
+    float jumpCd = 0.0f;       // boss: seconds before he may jump again
+    float dodgeT = 0.0f;       // boss: seconds his dodge still runs
+    Vec3 dodgeDir{ 0, 1, 0 };  // boss: the dodge's direction
+    float ramT = 0.0f;         // boss: seconds he is still getting up from a vehicle hit
+    int pistolMag = 15;        // boss: USP rounds left
+    bool pistolOut = false;    // boss: the USP is in his hand instead of the rifle
+    int nades = 2;             // boss: HE grenades left this fight
+    float nadeCd = 0.0f;       // boss: seconds before another grenade
+    float coverHeldT = 0.0f;   // boss: seconds the target has sat unseen in cover
+    float lostT = 0.0f;        // boss: seconds since the target was last visible
+    float targetVisT = 0.0f;   // boss: seconds the target has been continuously visible
+    Vec3 preyVel{ 0, 0, 0 };   // boss: the target's tracked velocity (interception)
+    float huntT = 0.0f;        // boss: seconds this hunt has run
+    int huntPhase = 0;         // boss: 0 to the intercept point, 1 working the search points
+    Vec3 huntDest{ 0, 0, 0 };  // boss: the intercept point
+    std::vector<Vec3> searchPts; // boss: the hunt's search points, nearest first
+    int searchIdx = 0;         // boss: which search point he is on
+    float scanT = 0.0f;        // boss: seconds he has been slicing this corner
+    std::vector<Vec3> route;   // boss: his current map route (waypoints)
+    int routeIdx = 0;          // boss: the waypoint he is walking to
+    float routeT = 0.0f;       // boss: seconds before the route is recomputed regardless
+    Vec3 routeGoal{ 0, 0, 0 }; // boss: the destination the route was built for
+    std::vector<Vec3> patrolPts; // boss: his Grove Street posts (graph nodes when loaded)
+    float idleVoiceT = 30.0f;  // boss: seconds to his next idle radio line
+    float scanClock = 0.0f;    // boss: his head-scan clock on post
+    Vec3 coverPoint{ 0, 0, 0 }; // boss: the cover he is using
+    Vec3 peekPoint{ 0, 0, 0 }; // boss: the half-step out of it he fires from
+    bool hasCover = false;     // boss: a cover point is currently valid
+    bool peekPhase = false;    // boss: true while stepped out of cover to fire
+    float peekT = 0.0f;        // boss: seconds left in this peek
+    float hideT = 0.0f;        // boss: seconds left hidden in cover
+    int cmdPhase = 0;          // boss: talk-first phase (0 window, 1 approach, 2 hold)
+    float cmdT = 0.0f;         // boss: the command window left
+    float holdT = 0.0f;        // boss: the stand-down hold left
+    float aimViolT = 0.0f;     // boss: seconds the player has been aiming at him during the talk
+    float shootClock = 0.0f;   // boss: seconds into the shoot upper (recoil cycles on it)
+    float moveSpeed = 0.0f;    // boss: the speed his movement chose this tick
+    Vec3 aimGoal{ 0, 0, 0 };   // boss: the point his eyes go to (states leave their wish here)
+    float aimRate = 4.0f;      // boss: how fast the aim turns toward aimGoal
     int groundBad = 0;         // soldier: consecutive ground samples his feet refused (see MoveMob)
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
@@ -140,6 +198,40 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby = false);
 MobHit MobsRaycast(const Vec3& origin, const Vec3& dir, float maxDist);
 // halfHearts of damage coming from `from`; knock = knockback strength (1 = a normal hit)
 void MobHurt(int index, float halfHearts, const Vec3& from, float knock);
+
+// ---- the boss's doors in from the bridge (workstreams K and L)
+// The street provoked him: this being attacked him, and he may fight back.
+void MobProvoked(int index, int being, const Vec3& from);
+// Hurt that landed on his perception body in the host (the invisible proxy the
+// gangs shoot at): relayed into his real health, per-event capped, never a
+// one-shot, and it names the attacker when the bridge knows him.
+void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerBeing);
+// A vehicle is charging him on a collision line: he dodges if there is room.
+void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel);
+// A vehicle actually hit him: heavy, capped, never fatal by itself, and the
+// driver is detected completely and at once.
+void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer);
+
+// ---- loud facts for his ears, reported by the parts of the core that make them
+void NotePlayerShot(const Vec3& at, float radius); // a weapon loosed (Combat)
+void NoteExplosion(const Vec3& at);                // a blast (Entities)
+
+// The boss's shared world state (defined in Mobs.cpp at mc:: scope): the loud
+// facts his hearing reads, his live thrown grenades, and where a hunted man
+// broke his line of sight this session.
+struct Stimulus {
+    Vec3 at;
+    float radius; // how far the sound honestly carries
+    float ttl;
+};
+extern std::vector<Stimulus> gStimuli;
+struct BossNade {
+    Vec3 pos, vel;
+    float fuse = 0.0f;
+};
+extern std::vector<BossNade> gBossNades;
+extern std::vector<Vec3> gHidingSpots;
+void NoteHidingSpot(const Vec3& at);
 void MobPush(int index, const Vec3& velocity); // m/s added to the animal
 // explosions and shock waves: damage and push fall off with the distance
 void MobsRadial(const Vec3& at, float radius, float halfHearts, float push);

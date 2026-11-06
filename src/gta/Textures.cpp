@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "Image.h"
+#include "NavGraph.h"
 #include "Other.h"
 #include "RenderWare.h"
 #include "SoldierModel.h"
@@ -96,6 +97,26 @@ static void LoadSoldierFiles() {
     }
     std::fclose(f);
     LoadSoldierModel(bytes.data(), bytes.size());
+    // his map of the city, the same road in: read whole, handed to the core. A
+    // missing file only costs him the map (he falls back to probe steering and
+    // the core's loader says so) - never the mod.
+    const std::string navPath = ModPath("nav_graph.bin");
+    FILE* nf = std::fopen(navPath.c_str(), "rb");
+    if (!nf) {
+        Log("nav_graph.bin not found in the MinecraftSA folder - the soldier will steer by probes only");
+        return;
+    }
+    std::fseek(nf, 0, SEEK_END);
+    long nsize = std::ftell(nf);
+    std::fseek(nf, 0, SEEK_SET);
+    std::vector<unsigned char> nbytes(nsize > 0 ? (size_t)nsize : 0);
+    if (nsize <= 0 || std::fread(nbytes.data(), 1, nbytes.size(), nf) != nbytes.size()) {
+        Log("ERROR: could not read %s - the soldier will steer by probes only", navPath.c_str());
+        std::fclose(nf);
+        return;
+    }
+    std::fclose(nf);
+    LoadNavGraph(nbytes.data(), nbytes.size());
 }
 
 bool LoadTextures() {

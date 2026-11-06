@@ -1,8 +1,15 @@
 // The Counter-Strike soldier's real model, posed and skinned in the core.
-// Data comes from cs_soldier.bin (tools/convert_cs_soldier.py): bone-local corner
-// vertices, per-bone baked animation tracks at 30 fps, and the model's own textures
-// as separate PNGs the bridge loads. Skinning is the GoldSrc way: a vertex hangs on
-// exactly one bone, and the bone's posed matrix is its whole transform.
+// Data comes from cs_soldier.bin format v3 (tools/convert_cs_soldier.py): bone-local
+// corner vertices, per-bone baked animation tracks at 30 fps stored as SEPARATE
+// gait and aim layers, and the model's own textures as separate PNGs the bridge
+// loads. Skinning is the GoldSrc way: a vertex hangs on exactly one bone, and the
+// bone's posed matrix is its whole transform.
+//
+// The two-layer compose (workstream M): the lower-body bones (root, pelvis, legs)
+// are sampled from the gait layer, the spine-up bones from the aim layer, and the
+// aim-vs-legs yaw difference is distributed over the three spine bones as a
+// world-space twist while the hierarchy is composed - hips face the movement,
+// shoulders face the target, exactly the read a real strafing soldier gives.
 
 #include "SoldierModel.h"
 
@@ -30,6 +37,7 @@ struct Reader {
 
 struct Seq {
     int category = 0;
+    int layer = 0;
     bool loop = false;
     int frames = 0;
     float duration = 0;
@@ -46,17 +54,15 @@ struct Vert {
 bool gReady = false;
 int gBones = 0;
 std::vector<int> gParents;
+std::vector<int> gBoneLayer; // 0 = lower body (gait layer), 1 = upper (aim layer)
+std::vector<float> gTwist;   // spine twist weights (sum 1 over the spine chain)
 std::vector<Vert> gVerts;
 std::vector<unsigned char> gTriTex;
 std::vector<Seq> gSeqs;
 // per sequence-frame-bone: position (3 floats) then quaternion (4 int16, / 32767)
 std::vector<float> gAnimPos;
 std::vector<short> gAnimQuat;
-size_t gFrameStride = 0; // bones per frame across all sequences laid end to end
-// version 2 extras: the gaits' measured strides and the rifle's two anchor points.
-// The defaults are the same measurements, so a version 1 file still walks true; it
-// just cannot say where its muzzle is.
-float gStrideWalk = 1.553f, gStrideRun = 2.970f;
+float gStrideWalk = 1.553f, gStrideRun = 2.970f, gStrideStrafe = 0.366f, gStrideBack = 2.322f;
 bool gHasGun = false;
 int gGunBone[2] = { -1, -1 }; // 0 muzzle, 1 butt
 Vec3 gGunLocal[2];
@@ -104,34 +110,36 @@ Vec3 ApplyDir(const Mat& m, const Vec3& v) {
                 m.a[2][0] * v.x + m.a[2][1] * v.y + m.a[2][2] * v.z);
 }
 
-const Seq* FindSeq(int category, int variant) {
+float WrapAngle(float a) {
+    while (a > 3.14159265f)
+        a -= 6.28318531f;
+    while (a < -3.14159265f)
+        a += 6.28318531f;
+    return a;
+}
+
+const Seq* FindSeq(int category, int layer, int variant) {
     const Seq* found = nullptr;
     int n = 0;
     for (const Seq& s : gSeqs)
-        if (s.category == category) {
+        if (s.category == category && s.layer == layer) {
             if (n == variant)
                 found = &s;
             ++n;
         }
     if (!found && n > 0) { // variant past the end: wrap onto the ones that exist
-        int want = variant % n, k = 0;
+        int want = ((variant % n) + n) % n, k = 0;
         for (const Seq& s : gSeqs)
-            if (s.category == category && k++ == want)
+            if (s.category == category && s.layer == layer && k++ == want)
                 found = &s;
     }
     return found;
 }
 
-// One bone's local transform at a moment: a position and a unit quaternion.
-struct Local {
-    Vec3 pos;
-    std::array<float, 4> q{ 0, 0, 0, 1 }; // x, y, z, w
-};
-
 // Samples every bone's local of one sequence at `time` seconds, interpolated
 // between the baked 30 fps frames (positions lerped, quaternions nlerped the
 // short way round) - the same smoothing the GoldSrc engine draws with.
-bool PoseLocals(const Seq& s, float time, std::vector<Local>& out) {
+bool PoseLocals(const Seq& s, float time, std::vector<SoldierLocal>& out) {
     if (gBones <= 0 || s.frames <= 0)
         return false;
     float ft = s.duration > 0.0f ? time / s.duration * (float)s.frames : 0.0f;
@@ -184,48 +192,52 @@ bool PoseLocals(const Seq& s, float time, std::vector<Local>& out) {
     return true;
 }
 
-// Composes bone locals down the hierarchy into model-space matrices.
-void ComposeLocals(const std::vector<Local>& locals, std::vector<Mat>& out) {
-    out.resize(gBones);
-    for (int b = 0; b < gBones; ++b) {
-        const Local& l = locals[b];
-        Mat local = QuatMat(l.q[0], l.q[1], l.q[2], l.q[3], l.pos);
-        out[b] = gParents[b] >= 0 ? Mul(out[gParents[b]], local) : local;
-    }
-}
-
-// Poses every bone of one sequence at `time` seconds into model-space matrices.
-bool PoseBones(const Seq& s, float time, std::vector<Mat>& out) {
-    std::vector<Local> locals;
-    if (!PoseLocals(s, time, locals))
-        return false;
-    ComposeLocals(locals, out);
-    return true;
-}
-
-// The sequence time a draw state means: the gaits do not run on the clock, they
+// The sequence time the leg layer means: the gaits do not run on the clock, they
 // run on the ground he has covered - one cycle per stride length, so his feet
 // neither skate nor moon-walk at any speed the brain walks him.
-float StateSeqTime(const Seq& s, int category, int variant, float time, float gait) {
-    // the gaits - and the shoot pose's moving variants, whose legs ARE a gait -
-    // are timed by the ground he has covered, not by a clock: that is what keeps
-    // a planted foot planted. Everything else runs on its own seconds.
-    if (category == SP_WALK || category == SP_RUN || (category == SP_SHOOT && variant > 0)) {
-        float phase = gait - std::floor(gait);
+float LegSeqTime(const SoldierDrawState& st, const Seq& s) {
+    if (st.legCategory == SP_WALK || st.legCategory == SP_RUN) {
+        float phase = st.gait - std::floor(st.gait);
         return phase * s.duration;
     }
-    return time;
+    return st.legTime;
 }
 
-bool PoseState(int category, int variant, float time, float gait, std::vector<Mat>& out) {
-    const Seq* s = FindSeq(category, variant);
-    if (!s)
-        return false;
-    std::vector<Local> cur;
-    if (!PoseLocals(*s, StateSeqTime(*s, category, variant, time, gait), cur))
-        return false;
-    ComposeLocals(cur, out);
-    return true;
+// Composes bone locals down the hierarchy into model-space matrices, applying
+// the spine twist on the way: each spine bone's world orientation is rotated
+// about the world up axis (through its own origin) by its share of the twist, so
+// the chain above it swings from the legs' facing toward the aim facing and the
+// chain below it never moves. Rotations only - no bone can stretch.
+void ComposeWorldMats(const std::vector<SoldierLocal>& locals, float twist, std::vector<Mat>& out) {
+    out.resize(gBones);
+    for (int b = 0; b < gBones; ++b) {
+        const SoldierLocal& l = locals[b];
+        Mat local = QuatMat(l.q[0], l.q[1], l.q[2], l.q[3], l.pos);
+        Mat w = gParents[b] >= 0 ? Mul(out[gParents[b]], local) : local;
+        if (twist != 0.0f && b < (int)gTwist.size() && gTwist[b] > 0.0f) {
+            const float th = twist * gTwist[b];
+            const float c = std::cos(th), s = std::sin(th);
+            Mat rz;
+            rz.a[0][0] = c;
+            rz.a[0][1] = -s;
+            rz.a[0][2] = 0;
+            rz.a[1][0] = s;
+            rz.a[1][1] = c;
+            rz.a[1][2] = 0;
+            rz.a[2][0] = 0;
+            rz.a[2][1] = 0;
+            rz.a[2][2] = 1;
+            rz.t = w.t;
+            // rotate the orientation about the bone's own origin: R' = Rz * R, t kept
+            Mat spun;
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    spun.a[i][j] = rz.a[i][0] * w.a[0][j] + rz.a[i][1] * w.a[1][j] + rz.a[i][2] * w.a[2][j];
+            spun.t = w.t;
+            w = spun;
+        }
+        out[b] = w;
+    }
 }
 
 // The man's stand in the world, recovered from the EntityPose DrawMob built him.
@@ -233,7 +245,8 @@ bool PoseState(int category, int variant, float time, float gait, std::vector<Ma
 // model x is the left, y is down, z is back), so every axis is un-negated here -
 // all three of them. (The first version of this code un-negated only two and read
 // base.X as "right" when it is in fact -right: the drawn man came out mirrored,
-// his rifle riding on the wrong shoulder.)
+// his rifle riding on the wrong shoulder.) The pose's yaw is his LEG yaw; the
+// torso reaches the aim yaw through the spine twist.
 struct Stand {
     Vec3 feet, right, fwd, up;
     bool ok = false;
@@ -261,7 +274,38 @@ Vec3 PlaceDir(const Stand& st, const Vec3& a) {
     return st.right * (-a.y) + st.fwd * a.x + st.up * a.z;
 }
 
+// The twist a draw state asks for: aim relative to legs, clamped to what a spine
+// can honestly do (110 degrees); past that the brain turns the legs themselves.
+float StateTwist(const SoldierDrawState& st) {
+    return Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
+}
+
 } // namespace
+
+bool SoldierComposeLocals(const SoldierDrawState& st, SoldierLocal* out, int maxBones) {
+    if (!gReady || !out || maxBones < gBones)
+        return false;
+    std::vector<SoldierLocal> locals;
+    if (st.fullCategory >= 0) {
+        const Seq* s = FindSeq(st.fullCategory, SL_FULL, st.fullVariant);
+        if (!s || !PoseLocals(*s, st.fullTime, locals))
+            return false;
+    } else {
+        const Seq* leg = FindSeq(st.legCategory, SL_LEG, st.legVariant);
+        const Seq* up = FindSeq(st.upCategory, SL_UP, st.upVariant);
+        if (!leg || !up)
+            return false;
+        std::vector<SoldierLocal> ll, uu;
+        if (!PoseLocals(*leg, LegSeqTime(st, *leg), ll) || !PoseLocals(*up, st.upTime, uu))
+            return false;
+        locals.resize(gBones);
+        for (int b = 0; b < gBones; ++b)
+            locals[b] = (b < (int)gBoneLayer.size() && gBoneLayer[b] == 0) ? ll[b] : uu[b];
+    }
+    for (int b = 0; b < gBones; ++b)
+        out[b] = locals[b];
+    return true;
+}
 
 bool LoadSoldierModel(const unsigned char* data, size_t size) {
     UnloadSoldierModel();
@@ -272,10 +316,16 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     Reader rd{ data, size };
     char magic[4];
     uint32_t version = 0, bones = 0, verts = 0, tris = 0, ntex = 0, nseq = 0;
-    if (!rd.Get(magic) || std::memcmp(magic, "CSM1", 4) != 0 || !rd.Get(version) || (version != 1 && version != 2) ||
+    if (!rd.Get(magic) || std::memcmp(magic, "CSM1", 4) != 0 || !rd.Get(version) ||
         !rd.Get(bones) || !rd.Get(verts) || !rd.Get(tris) || !rd.Get(ntex) ||
-        bones == 0 || bones > 256 || verts == 0 || verts % 3 != 0 || tris != verts / 3 || ntex == 0 || ntex > 8) {
+        bones == 0 || bones > 64 || verts == 0 || verts % 3 != 0 || tris != verts / 3 || ntex == 0 || ntex > 8) {
         Log("cs_soldier.bin: bad header - the Counter-Strike soldier cannot appear");
+        return false;
+    }
+    if (version != 3) {
+        Log("cs_soldier.bin: format version %u - this build needs the v3 layered file; "
+            "rebake it with tools/convert_cs_soldier.py - the Counter-Strike soldier cannot appear",
+            version);
         return false;
     }
     for (uint32_t i = 0; i < ntex; ++i) {
@@ -292,15 +342,17 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     std::vector<Seq> seqs;
     size_t frameCursor = 0;
     for (uint32_t i = 0; i < nseq; ++i) {
-        uint8_t cat = 0, loop = 0;
+        uint8_t cat = 0, layer = 0, loop = 0;
         uint16_t frames = 0;
         float dur = 0;
-        if (!rd.Get(cat) || !rd.Get(loop) || !rd.Get(frames) || !rd.Get(dur) || frames == 0 || dur <= 0.0f) {
+        if (!rd.Get(cat) || !rd.Get(layer) || !rd.Get(loop) || !rd.Get(frames) || !rd.Get(dur) ||
+            frames == 0 || dur <= 0.0f || layer > 2) {
             Log("cs_soldier.bin: bad sequence entry - the Counter-Strike soldier cannot appear");
             return false;
         }
         Seq s;
         s.category = cat;
+        s.layer = layer;
         s.loop = loop != 0;
         s.frames = frames;
         s.duration = dur;
@@ -313,22 +365,16 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
         Log("cs_soldier.bin: truncated - the Counter-Strike soldier cannot appear");
         return false;
     }
-    float strideWalk = 0, strideRun = 0;
+    float strides[4];
     int gunBone[2] = { -1, -1 };
     Vec3 gunLocal[2];
-    bool hasGun = false;
-    if (version == 2) {
-        float mx, my, mz, bx, by, bz;
-        if (!rd.Get(strideWalk) || !rd.Get(strideRun) || strideWalk <= 0.1f || strideRun <= 0.1f ||
-            !rd.Get(gunBone[0]) || !rd.Get(mx) || !rd.Get(my) || !rd.Get(mz) ||
-            !rd.Get(gunBone[1]) || !rd.Get(bx) || !rd.Get(by) || !rd.Get(bz) ||
-            gunBone[0] < 0 || gunBone[0] >= (int)bones || gunBone[1] < 0 || gunBone[1] >= (int)bones) {
-            Log("cs_soldier.bin: bad stride/gun table - the Counter-Strike soldier cannot appear");
-            return false;
-        }
-        gunLocal[0] = Vec3(mx, my, mz);
-        gunLocal[1] = Vec3(bx, by, bz);
-        hasGun = true;
+    if (!rd.Get(strides[0]) || !rd.Get(strides[1]) || !rd.Get(strides[2]) || !rd.Get(strides[3]) ||
+        strides[0] <= 0.1f || strides[1] <= 0.1f ||
+        !rd.Get(gunBone[0]) || !rd.Get(gunLocal[0].x) || !rd.Get(gunLocal[0].y) || !rd.Get(gunLocal[0].z) ||
+        !rd.Get(gunBone[1]) || !rd.Get(gunLocal[1].x) || !rd.Get(gunLocal[1].y) || !rd.Get(gunLocal[1].z) ||
+        gunBone[0] < 0 || gunBone[0] >= (int)bones || gunBone[1] < 0 || gunBone[1] >= (int)bones) {
+        Log("cs_soldier.bin: bad stride/gun table - the Counter-Strike soldier cannot appear");
+        return false;
     }
     std::vector<int> parents(bones);
     for (uint32_t i = 0; i < bones; ++i) {
@@ -338,6 +384,22 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
             return false;
         }
         parents[i] = p;
+    }
+    std::vector<int> boneLayer(bones);
+    std::vector<float> twist(bones);
+    for (uint32_t i = 0; i < bones; ++i) {
+        uint8_t v = 0;
+        if (!rd.Get(v) || v > 1) {
+            Log("cs_soldier.bin: bad bone layer table - the Counter-Strike soldier cannot appear");
+            return false;
+        }
+        boneLayer[i] = v;
+    }
+    for (uint32_t i = 0; i < bones; ++i) {
+        if (!rd.Get(twist[i]) || twist[i] < 0.0f || twist[i] > 1.0f) {
+            Log("cs_soldier.bin: bad twist table - the Counter-Strike soldier cannot appear");
+            return false;
+        }
     }
     std::vector<Vert> vv(verts);
     for (uint32_t i = 0; i < verts; ++i) {
@@ -388,24 +450,26 @@ bool LoadSoldierModel(const unsigned char* data, size_t size) {
     }
     gBones = (int)bones;
     gParents = std::move(parents);
+    gBoneLayer = std::move(boneLayer);
+    gTwist = std::move(twist);
     gVerts = std::move(vv);
     gTriTex = std::move(tt);
     gSeqs = std::move(seqs);
     gAnimPos = std::move(animPos);
     gAnimQuat = std::move(animQuat);
-    gFrameStride = frameCursor;
-    if (version == 2) {
-        gStrideWalk = strideWalk;
-        gStrideRun = strideRun;
-        gHasGun = hasGun;
-        gGunBone[0] = gunBone[0];
-        gGunBone[1] = gunBone[1];
-        gGunLocal[0] = gunLocal[0];
-        gGunLocal[1] = gunLocal[1];
-    }
+    gStrideWalk = strides[0];
+    gStrideRun = strides[1];
+    gStrideStrafe = strides[2];
+    gStrideBack = strides[3];
+    gHasGun = true;
+    gGunBone[0] = gunBone[0];
+    gGunBone[1] = gunBone[1];
+    gGunLocal[0] = gunLocal[0];
+    gGunLocal[1] = gunLocal[1];
     gReady = true;
-    Log("cs_soldier.bin loaded: %d bones, %d triangles, %d sequences (scale %.4f m/unit, lifted %.3f m, strides %.2f/%.2f m)",
-        gBones, (int)gTriTex.size(), (int)gSeqs.size(), infoScale, infoLift * infoScale, gStrideWalk, gStrideRun);
+    Log("cs_soldier.bin v3 loaded: %d bones, %d triangles, %d layered sequences (scale %.4f m/unit, lifted %.3f m, strides %.2f/%.2f/%.2f/%.2f m)",
+        gBones, (int)gTriTex.size(), (int)gSeqs.size(), infoScale, infoLift * infoScale,
+        gStrideWalk, gStrideRun, gStrideStrafe, gStrideBack);
     return true;
 }
 
@@ -413,19 +477,23 @@ void UnloadSoldierModel() {
     gReady = false;
     gBones = 0;
     gParents.clear();
+    gBoneLayer.clear();
+    gTwist.clear();
     gVerts.clear();
     gTriTex.clear();
     gSeqs.clear();
     gAnimPos.clear();
     gAnimQuat.clear();
-    gFrameStride = 0;
     gHasGun = false;
     gGunBone[0] = gGunBone[1] = -1;
     gStrideWalk = 1.553f;
     gStrideRun = 2.970f;
+    gStrideStrafe = 0.366f;
+    gStrideBack = 2.322f;
 }
 
 bool SoldierModelReady() { return gReady; }
+int SoldierBoneCount() { return gBones; }
 
 float SoldierStride(int category) {
     if (category == SP_WALK)
@@ -435,15 +503,30 @@ float SoldierStride(int category) {
     return 0.0f;
 }
 
-bool SoldierPoseSpan(int category, int variant, float time, float* loZ, float* hiZ) {
+float SoldierGaitStride(int legCategory, int legVariant) {
+    if (legCategory == SP_WALK)
+        return gStrideWalk;
+    if (legCategory == SP_RUN) {
+        if (legVariant == 1 || legVariant == 2)
+            return gStrideStrafe;
+        if (legVariant == 3)
+            return gStrideBack;
+        return gStrideRun;
+    }
+    return 0.0f;
+}
+
+bool SoldierPoseSpan(int category, int layer, int variant, float time, float* loZ, float* hiZ) {
     if (!gReady)
         return false;
-    const Seq* s = FindSeq(category, variant);
+    const Seq* s = FindSeq(category, layer, variant);
     if (!s)
         return false;
-    std::vector<Mat> mats;
-    if (!PoseBones(*s, time, mats))
+    std::vector<SoldierLocal> locals;
+    if (!PoseLocals(*s, time, locals))
         return false;
+    std::vector<Mat> mats;
+    ComposeWorldMats(locals, 0.0f, mats);
     float lo = 1e9f, hi = -1e9f;
     for (const Vert& v : gVerts) {
         float z = Apply(mats[v.bone], v.pos).z;
@@ -455,60 +538,107 @@ bool SoldierPoseSpan(int category, int variant, float time, float* loZ, float* h
     return true;
 }
 
-bool SoldierGunPose(const Pose& base, int category, int variant, float time, Vec3* muzzle, Vec3* butt) {
+bool SoldierGunPose(const Pose& base, const SoldierDrawState& st, Vec3* muzzle, Vec3* butt) {
     if (!gReady || !gHasGun)
         return false;
-    const Stand st = RecoverStand(base);
-    if (!st.ok)
+    const Stand stand = RecoverStand(base);
+    if (!stand.ok)
         return false;
+    SoldierLocal locals[64];
+    if (!SoldierComposeLocals(st, locals, 64))
+        return false;
+    std::vector<SoldierLocal> lv(locals, locals + gBones);
     std::vector<Mat> mats;
-    if (!PoseState(category, variant, time, 0.0f, mats))
-        return false;
+    ComposeWorldMats(lv, StateTwist(st), mats);
     if (muzzle)
-        *muzzle = Place(st, Apply(mats[gGunBone[0]], gGunLocal[0]));
+        *muzzle = Place(stand, Apply(mats[gGunBone[0]], gGunLocal[0]));
     if (butt)
-        *butt = Place(st, Apply(mats[gGunBone[1]], gGunLocal[1]));
+        *butt = Place(stand, Apply(mats[gGunBone[1]], gGunLocal[1]));
+    return true;
+}
+
+bool SoldierLegDir(const Pose& base, const SoldierDrawState& st, Vec3* dir) {
+    if (!gReady)
+        return false;
+    const Stand stand = RecoverStand(base);
+    if (!stand.ok)
+        return false;
+    SoldierLocal locals[64];
+    if (!SoldierComposeLocals(st, locals, 64))
+        return false;
+    std::vector<SoldierLocal> lv(locals, locals + gBones);
+    std::vector<Mat> mats;
+    ComposeWorldMats(lv, 0.0f, mats); // the legs never twist
+    // the pelvis: the lower-layer bone (past the root) the thighs hang from
+    int pelvis = -1;
+    for (int b = 1; b < gBones; ++b)
+        if (gBoneLayer[b] == 0 && gParents[b] == 0) {
+            pelvis = b;
+            break;
+        }
+    if (pelvis < 0)
+        return false;
+    Vec3 sum(0, 0, 0);
+    int legs = 0;
+    for (int b = 0; b < gBones; ++b) {
+        if (gBoneLayer[b] != 0 || gParents[b] != pelvis)
+            continue;
+        // walk down this leg's chain to its deepest bone (the toe)
+        int toe = b, guard = 0;
+        for (;;) {
+            int next = -1;
+            for (int c = 0; c < gBones; ++c)
+                if (gParents[c] == toe && gBoneLayer[c] == 0) {
+                    next = c;
+                    break;
+                }
+            if (next < 0 || ++guard > 8)
+                break;
+            toe = next;
+        }
+        sum = sum + (mats[toe].t - mats[b].t);
+        ++legs;
+    }
+    if (legs == 0)
+        return false;
+    Vec3 d = PlaceDir(stand, sum);
+    d.z = 0;
+    float len = d.Length();
+    if (len < 1e-6f)
+        return false;
+    *dir = d * (1.0f / len);
     return true;
 }
 
 void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light, float r, float g, float b) {
     if (!gReady)
         return;
-    const Seq* seq = FindSeq(st.category, st.variant);
-    if (!seq)
+    SoldierLocal buf[64];
+    if (!SoldierComposeLocals(st, buf, 64))
         return;
-    std::vector<Local> locals;
-    if (!PoseLocals(*seq, StateSeqTime(*seq, st.category, st.variant, st.time, st.gait), locals))
-        return;
-    // Cross-fade out of the previous pose: blend the two poses' bone locals (the
-    // GoldSrc engine blends its players the same way) and compose once, so the
-    // figure eases between sequences instead of snapping. His gait phase is kept
-    // continuous by the brain, so a walk that becomes a run mid-stride blends two
-    // poses of the same stride moment.
-    if (st.prevCategory >= 0 && st.fade < 1.0f && st.prevCategory != st.category) {
-        const Seq* prev = FindSeq(st.prevCategory, st.prevVariant);
-        std::vector<Local> from;
-        if (prev && PoseLocals(*prev, StateSeqTime(*prev, st.prevCategory, st.prevVariant, st.prevTime, st.prevGait), from) &&
-            from.size() == locals.size()) {
-            const float w = Clamp(st.fade, 0.0f, 1.0f);
-            const float s = w * w * (3.0f - 2.0f * w); // smoothstep: soft at both ends
-            for (size_t i = 0; i < locals.size(); ++i) {
-                Local& a = from[i];
-                Local& c = locals[i];
-                float dot = a.q[0] * c.q[0] + a.q[1] * c.q[1] + a.q[2] * c.q[2] + a.q[3] * c.q[3];
-                float sg = dot < 0.0f ? -1.0f : 1.0f;
-                float x = a.q[0] + (c.q[0] * sg - a.q[0]) * s, y = a.q[1] + (c.q[1] * sg - a.q[1]) * s,
-                      z = a.q[2] + (c.q[2] * sg - a.q[2]) * s, wq = a.q[3] + (c.q[3] * sg - a.q[3]) * s;
-                float len = std::sqrt(x * x + y * y + z * z + wq * wq);
-                if (len > 1e-6f) {
-                    c.q = { x / len, y / len, z / len, wq / len };
-                }
-                c.pos = a.pos + (c.pos - a.pos) * s;
-            }
+    std::vector<SoldierLocal> locals(buf, buf + gBones);
+    // Cross-fade out of the previous composed pose: the brain snapshots the
+    // composed locals whenever the pose changes; blend toward the new compose
+    // (positions lerped, quaternions nlerped the short way) so no transition -
+    // layer change, crouch, flinch, death - ever snaps.
+    if (st.hasPrev && st.fade < 1.0f && st.prevBones == gBones) {
+        const float w = Clamp(st.fade, 0.0f, 1.0f);
+        const float s = w * w * (3.0f - 2.0f * w); // smoothstep: soft at both ends
+        for (int i = 0; i < gBones; ++i) {
+            const SoldierLocal& a = st.prevLocals[i];
+            SoldierLocal& c = locals[i];
+            float dot = a.q[0] * c.q[0] + a.q[1] * c.q[1] + a.q[2] * c.q[2] + a.q[3] * c.q[3];
+            float sg = dot < 0.0f ? -1.0f : 1.0f;
+            float x = a.q[0] + (c.q[0] * sg - a.q[0]) * s, y = a.q[1] + (c.q[1] * sg - a.q[1]) * s,
+                  z = a.q[2] + (c.q[2] * sg - a.q[2]) * s, wq = a.q[3] + (c.q[3] * sg - a.q[3]) * s;
+            float len = std::sqrt(x * x + y * y + z * z + w * wq);
+            if (len > 1e-6f)
+                c.q = { x / len, y / len, z / len, wq / len };
+            c.pos = a.pos + (c.pos - a.pos) * s;
         }
     }
     std::vector<Mat> mats;
-    ComposeLocals(locals, mats);
+    ComposeWorldMats(locals, StateTwist(st), mats);
     const Stand stand = RecoverStand(base);
     if (!stand.ok)
         return;
@@ -546,6 +676,27 @@ void DrawSoldierModel(const Pose& base, const SoldierDrawState& st, float light,
         v[3] = v[2];
         TheModelSink().Quad(p, u, v, col);
     }
+}
+
+const int* SoldierBoneParents() { return gParents.empty() ? nullptr : gParents.data(); }
+
+bool SoldierComposedSpan(const SoldierDrawState& st, float* lo, float* hi) {
+    if (!gReady || !lo || !hi)
+        return false;
+    SoldierLocal locals[64];
+    if (!SoldierComposeLocals(st, locals, 64))
+        return false;
+    std::vector<SoldierLocal> lv(locals, locals + gBones);
+    std::vector<Mat> mats;
+    const float twist = Clamp(WrapAngle(st.aimYaw - st.legYaw), -1.92f, 1.92f);
+    ComposeWorldMats(lv, st.fullCategory >= 0 ? 0.0f : twist, mats);
+    *lo = 1e9f;
+    *hi = -1e9f;
+    for (int b = 0; b < gBones; ++b) {
+        *lo = std::min(*lo, mats[b].t.z);
+        *hi = std::max(*hi, mats[b].t.z);
+    }
+    return true;
 }
 
 } // namespace mc

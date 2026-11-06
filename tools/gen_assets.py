@@ -1572,6 +1572,26 @@ CS_SOUND_FILES = OrderedDict([
     ("SOLDIER_STEP", ["cs_pl_step1.wav", "cs_pl_step2.wav", "cs_pl_step3.wav", "cs_pl_step4.wav"]),
     ("SOLDIER_HURT", ["cs_bhit_kevlar-1.wav", "cs_bhit_flesh-1.wav", "cs_bhit_flesh-2.wav", "cs_bhit_flesh-3.wav"]),
     ("SOLDIER_DEATH", ["cs_die1.wav", "cs_die2.wav", "cs_die3.wav"]),
+    # the boss's voice (workstream H): his CS install's own radio lines,
+    # processed with a radio chain into boss_*.ogg (see cs-assets/boss-voice),
+    # plus his hurt grunts and the USP's shot. Appended only - nothing moves.
+    ("BOSS_CMD1", ["boss_cmd1.ogg"]),
+    ("BOSS_CMD2", ["boss_cmd2.ogg"]),
+    ("BOSS_CMD3", ["boss_cmd3.ogg"]),
+    ("BOSS_SPOT1", ["boss_spot1.ogg"]),
+    ("BOSS_SPOT2", ["boss_spot2.ogg"]),
+    ("BOSS_SPOT3", ["boss_spot3.ogg"]),
+    ("BOSS_LOST1", ["boss_lost1.ogg"]),
+    ("BOSS_LOST2", ["boss_lost2.ogg"]),
+    ("BOSS_SRCH1", ["boss_srch1.ogg"]),
+    ("BOSS_SRCH2", ["boss_srch2.ogg"]),
+    ("BOSS_RLD1", ["boss_rld1.ogg"]),
+    ("BOSS_GREN1", ["boss_gren1.ogg"]),
+    ("BOSS_DOWN1", ["boss_down1.ogg"]),
+    ("BOSS_IDLE1", ["boss_idle1.ogg"]),
+    ("BOSS_IDLE2", ["boss_idle2.ogg"]),
+    ("BOSS_HURT", ["boss_hurt1.ogg", "boss_hurt2.ogg"]),
+    ("BOSS_USP", ["boss_usp.ogg"]),
 ])
 for enum, files in CS_SOUND_FILES.items():
     first = len(sound_files_flat)

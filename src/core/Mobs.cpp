@@ -1,4 +1,5 @@
 #include "Mobs.h"
+#include "NavGraph.h"
 
 #include <cstdlib>
 
@@ -41,18 +42,22 @@ const MobType kTypes[MOB_KIND_COUNT] = {
     { 0.6f, 1.95f, 40.0f, 1.1f, 2.9f, SND_ZOMBIE_SAY, SND_ZOMBIE_HURT, SND_ZOMBIE_DEATH, { 0, 0, 0 }, true },
     { 0.6f, 1.9f, 40.0f, 1.7f, 3.1f, SND_SKELETON_SAY, SND_SKELETON_HURT, SND_SKELETON_DEATH, { 0, 0, 0 }, true },
     { 1.4f, 0.9f, 32.0f, 1.6f, 4.3f, SND_SPIDER_SAY, SND_SPIDER_HURT, SND_SPIDER_DEATH, { 0, 0, 0 }, true },
-    // the Counter-Strike soldier: a man, not a monster of Minecraft's - 1.8 m tall, and his 100 health
-    // points of Counter-Strike are counted the way this host counts everything, in half hearts (so 200),
-    // with another 200 of kevlar on top (the `armor` field, set at spawn). His `say` is never played on
+    // the Counter-Strike soldier: a man, not a monster of Minecraft's - 1.8 m tall. As the BOSS his
+    // health is 2400 half hearts (1200 CS hit points - the magazine arithmetic is in CS-BOSS-fa.md)
+    // with 800 more of kevlar on top (the `armor` field, set at spawn). His `say` is never played on
     // the ambient timer (monsters have none); his brain plays his footsteps itself, on his stride. His
-    // walk is his patrol pace, his run his fighting pace; the whole of his difficulty lives in kSoldier.
-    { 0.6f, 1.8f, 200.0f, 2.4f, 5.2f, SND_SOLDIER_STEP, SND_SOLDIER_HURT, SND_SOLDIER_DEATH, { 0, 0, 0 }, true },
+    // walk is his patrol pace, his run is CJ's own sprint; the whole of his difficulty lives in the
+    // two tune tables (kSoldier, kBoss).
+    { 0.6f, 1.8f, 2400.0f, 2.4f, 5.5f, SND_SOLDIER_STEP, SND_SOLDIER_HURT, SND_SOLDIER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
 float gSpawnTimer = 3.0f;
 std::vector<Vec3> gReinforceCalls; // where hurt zombies have called for help (answered at the top of MobsTick)
 } // namespace
+
+
+// ------------------------------------------------------------------ movement
 
 std::vector<Mob> gMobs;
 std::vector<ShotFx> gShotFx;
@@ -767,9 +772,16 @@ bool SpiderBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lo
 // rules, seen from outside, since Valve's bot code was never published. The user's standard for him is
 // zero-to-a-hundred faithful to the game, but much better - so the brain is deliberately a professional
 // player's, far past the original bots. One line is kept: he is a strong professional, not a cheat wall.
-// Every bullet still rolls its spread, a moving man at range can live, and he can be outplayed. His
-// final ceiling is set by the user's own eyes in the game, which is why every number of his strength
-// sits in this ONE table and nowhere else.
+// =====================================================================
+// THE BOSS - the solo Counter-Strike soldier, finished (workstreams B-I, K, L).
+// One SEAL, rebuilt to the standard the user set: a microscope-eyed, sharp-eared
+// professional with the whole map in his head, who talks first and fights like
+// the game's own best - and who the street itself can fight (workstream K: his
+// perception body in the bridge takes the gangs' fire for him).
+//
+// Every number of his body, senses and craft lives in the two tables below
+// (kSoldier kept from step 1 for the weapon's character, kBoss for the rest) -
+// nowhere else. His final ceiling is set by the user's own eyes in the game.
 
 // The one soldier table: turn a number here and the soldier in the game changes with it.
 struct SoldierTune {
@@ -795,8 +807,8 @@ struct SoldierTune {
     float armorAbsorb;   // kevlar swallows this share of every hit while it lasts (Counter-Strike: half)
 };
 const SoldierTune kSoldier = {
-    45.0f, 0.5f, 4.0f, // sight
-    0.22f,             // reaction
+    60.0f, 0.5f, 4.0f, // sight (the boss's range; his cone/meter live in kBoss)
+    0.15f,             // reaction: the boss's post-detection trigger discipline
     3.0f,              // strafe
     13.0f,             // patrol radius
     30, 3.0f, 0.1f,    // the M4A1
@@ -809,67 +821,254 @@ const SoldierTune kSoldier = {
     0.5f,              // kevlar absorbs half
 };
 
-// turn his body towards a flat direction at a set rate (his brain uses it while he stands and scans;
-// while he walks, Think turns him)
-void SoldierTurn(Mob& m, const Vec3& toward, float rate, float dt) {
+// The boss table: body, senses, hunt, combat craft, talk-first, voice.
+struct BossTune {
+    // B - the body (see CS-BOSS-fa.md for the magazine arithmetic)
+    float health;      // half hearts: 2400 = twelve hundred CS hit points
+    float armor;       // half hearts of kevlar pool: 800
+    float ramCapShare; // a full-speed car hit can never take more than this share of his pool
+    // C - the senses
+    float coneHalfDeg;   // vision cone half-angle (150 degrees in all)
+    float centreHalfDeg; // the fast centre of the cone (120 in all)
+    float pitchUpDeg;    // he sees up to +70 degrees of elevation...
+    float pitchDownDeg;  // ...and down to -60
+    float nightRangeMul; // night: vision range x0.75, hearing x1.3 - net the same man
+    float nightHearMul;
+    float fillClose;   // detection fill rate at arm's length, full body, cone centre (per second)
+    float fillFar;     // ...and at maximum range
+    float fillCentreMul; // cone-centre fill bonus
+    float fillEdgeMul;   // cone-edge fill
+    float fillMoveMul;   // a moving target fills faster
+    float fillAimMul;    // being AIMED at fills at this flat rate on top (native peds react to aim)
+    float fillDecay;     // the meter drains this fast when nothing feeds it
+    float glanceAt;      // at this fill he turns to look (suspicion)
+    float hearGunshot;   // hearing radii, metres (direction + alert only; walls muffle by LOS)
+    float hearExplosion;
+    float hearSprint;
+    float hearWalk;
+    float hearWeapon;    // a bowstring / crossbow at this range
+    float hearVehicle;   // an engine at this range primes him; faster = louder
+    // D - mobility
+    float jumpClear;   // he jumps obstacles up to this height (fences, low walls, car hoods)
+    float jumpVel;     // the arc's launch speed under the world's gravity
+    // E - the hunt
+    float huntSeconds;   // a hunt (intercept + search) lasts this long before he stands down to suspicious
+    float searchRadius;  // search points gather within this of the last seen spot
+    // F - combat craft
+    float crouchRange;   // at this range or more he crouches to shoot (stance spread below)
+    float crouchSpread;  // crouched spread multiplier
+    float peekMin, peekMax; // seconds exposed while peek-firing from cover
+    int pistolMag;       // the USP's fifteen
+    float pistolDamage;  // half hearts per USP bullet up close
+    float pistolInterval;
+    float pistolRange;   // inside this, an empty rifle becomes the pistol instead of a reload
+    float nadeMin, nadeMax; // the HE grenade's throwing window (target held in cover)
+    float nadeFuse;
+    float nadeRadius;
+    float nadeDamage;    // half hearts at the grenade's heart, through the core channel
+    float nadeHeldTime;  // the target must sit in cover this long before a grenade is worth throwing
+    float suppWindow;    // suppressive fire covers a corner this long after the target slips behind it
+    float woundedShare;  // below this health share he fights more carefully (longer cover, shorter peeks)
+    // G - talk first
+    float commandWindow; // seconds he holds his command before judging compliance
+    float commandRange;  // he approaches a compliant man to this distance
+    float primedSeconds; // after a stand-down his detection runs primed (x2) this long
+    // I - presence
+    float idleVoiceMin, idleVoiceMax; // an idle radio line every 45-90 s on post
+    float returnRange;   // idle and farther than this from Grove: he routes home
+};
+const BossTune kBoss = {
+    2400.0f, 800.0f, 0.35f,                    // body
+    75.0f, 60.0f, 70.0f, 60.0f,                // cone and pitch
+    0.75f, 1.3f,                               // night trading
+    7.0f, 2.4f, 1.5f, 0.7f, 1.35f, 3.5f, 0.25f, 0.45f, // detection fill
+    70.0f, 90.0f, 16.0f, 8.0f, 12.0f, 30.0f,   // hearing
+    1.1f, 8.6f,                                // jump
+    45.0f, 12.0f,                              // hunt
+    25.0f, 0.55f, 0.6f, 1.0f,                  // crouch + peek
+    15, 3.4f, 0.28f, 8.0f,                     // the USP
+    8.0f, 30.0f, 1.8f, 5.0f, 12.0f, 2.5f, 2.5f, 0.35f, // the grenade + suppression + wounded
+    1.6f, 4.0f, 60.0f,                         // talk first
+    45.0f, 90.0f, 150.0f,                      // presence
+};
+
+
+
+// ------------------------------------------------------------------ his voice
+// Lines per state, chosen here - never twice the same in a row, and about one
+// time in five he says nothing at all on a line that is not critical (a real
+// man does not narrate himself). The events are appended sound events; a state
+// with no files yet maps to -1 and he stays silent rather than faking a line.
+struct BossVoice {
+    int ev[3];   // up to three line events for the state
+    int count;
+    bool critical;
+};
+enum BossSayState {
+    SAY_COMMAND, SAY_SPOTTED, SAY_LOST, SAY_SEARCH, SAY_RELOAD,
+    SAY_GRENADE, SAY_STANDDOWN, SAY_IDLE, SAY_COUNT
+};
+const BossVoice kBossVoice[SAY_COUNT] = {
+    { { SND_BOSS_CMD1, SND_BOSS_CMD2, SND_BOSS_CMD3 }, 3, true },       // command
+    { { SND_BOSS_SPOT1, SND_BOSS_SPOT2, SND_BOSS_SPOT3 }, 3, true },    // spotted
+    { { SND_BOSS_LOST1, SND_BOSS_LOST2, -1 }, 2, false },               // lost him
+    { { SND_BOSS_SRCH1, SND_BOSS_SRCH2, -1 }, 2, false },               // searching
+    { { SND_BOSS_RLD1, -1, -1 }, 1, false },                            // reloading
+    { { SND_BOSS_GREN1, -1, -1 }, 1, true },                            // grenade out
+    { { SND_BOSS_DOWN1, -1, -1 }, 1, false },                           // stand down
+    { { SND_BOSS_IDLE1, SND_BOSS_IDLE2, -1 }, 2, false },               // idle radio
+};
+
+void BossSay(Mob& m, int state, float cooldown) {
+    if (state < 0 || state >= SAY_COUNT || m.voiceCd > 0.0f)
+        return;
+    const BossVoice& v = kBossVoice[state];
+    if (v.count <= 0)
+        return;
+    if (!v.critical && Rand01() < 0.2f) { // the random silence
+        m.voiceCd = cooldown;
+        return;
+    }
+    int pick = (int)(Rand01() * (float)v.count);
+    if (v.count > 1 && v.ev[pick] == m.lastVoiceEv)
+        pick = (pick + 1) % v.count; // never the same line twice in a row
+    if (v.ev[pick] < 0)
+        return;
+    m.lastVoiceEv = v.ev[pick];
+    m.voiceCd = cooldown;
+    const Vec3 c = m.pos + Vec3(0, 0, 1.5f);
+    PlaySfx((SoundEvent)v.ev[pick], &c, 1.6f);
+}
+
+// turn a yaw towards a flat direction at a set rate (his aim and his legs turn
+// on their own clocks - see the pose block at the brain's end)
+float TurnYawToward(float yaw, const Vec3& toward, float rate, float dt) {
     Vec3 t = toward;
     t.z = 0.0f;
     if (t.Length() < 0.05f)
-        return;
+        return yaw;
     const float want = std::atan2(-t.x, t.y);
-    const float d = WrapAngle(want - m.yaw);
+    const float d = WrapAngle(want - yaw);
     const float step = rate * dt;
-    m.yaw = WrapAngle(m.yaw + Clamp(d, -step, step));
+    return WrapAngle(yaw + Clamp(d, -step, step));
+}
+void SoldierTurn(Mob& m, const Vec3& toward, float rate, float dt) {
+    m.yaw = TurnYawToward(m.yaw, toward, rate, dt);
 }
 
-// One bullet of his M4A1. Counter-Strike's rifles are hitscan - no flying bullet, the shot lands the
-// moment it is fired - so the shot is a line, not a projectile: from his muzzle, through an aim point
-// scattered by his spread, and the man is hit when the line passes through his body. His spread follows
-// Counter-Strike's own rule (settled he is tight, moving he sprays) and the first bullet of a burst is
-// the tightest, the way a professional taps.
-void SoldierShoot(Mob& m, const Vec3& playerFeet, const Vec3& playerMid, float dist) {
+// ------------------------------------------------------------------ targets
+// Who the boss is fighting this tick, described once for the senses, the craft
+// and the rifle: the player on foot, the player in his car, or one of the
+// street's own people who attacked him (workstream K1).
+struct BossTarget {
+    bool valid = false;
+    int being = -1;          // -1: the player; >= 0: a host being
+    Vec3 feet{ 0, 0, 0 };    // his ground position
+    Vec3 mid{ 0, 0, 0 };     // his chest (the aim point on foot)
+    float dist = 0.0f;
+    bool inVehicle = false;  // the player, driving
+    Vec3 vehCentre{ 0, 0, 0 }, vehFwd{ 0, 1, 0 }, vehSeat{ 0, 0, 0 }, vehVel{ 0, 0, 0 };
+};
+
+// Damage down the core's OWN channel, the one no cheat code stands in front of:
+// the bridge builds the player's hurt directly out of this call (a generated
+// damage event on the player ped, never a weapon fired AT him - the GTA weapon
+// path is where BAGUVIX lives). Beings take a real shot attribution instead.
+void BossStrike(Mob& m, const BossTarget& t, const Vec3& dir, float halfHearts) {
+    if (t.being >= 0) {
+        ShotOwner by;
+        by.hostile = true;
+        by.shooter = -3; // the boss's mark: not the player, nobody else in particular
+        TheHost().HurtBeing(t.being, halfHearts, HURT_SHOT, &by);
+        TheHost().PushBeing(t.being, dir * 1.2f);
+    } else if (t.inVehicle) {
+        TheHost().HurtPlayer(halfHearts); // through the windshield: the core channel again
+    } else {
+        TheHost().HurtPlayer(halfHearts);
+    }
+}
+
+// One bullet of his rifle (or, with the pistol flag, of the USP). Counter-Strike's
+// rifles are hitscan: the shot is a line from his muzzle through an aim point
+// scattered by his spread, and it lands where the line meets the target's body.
+// Against a driver the line is tested on the driver's chest through the glass
+// band; a line that meets only the car's lower body hurts the CAR instead (and
+// a line at wheel height takes the tyre nearest it - workstream L).
+void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride = nullptr, bool noDamage = false) {
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
-    const Vec3 fwd = Flat(playerFeet - m.pos);
+    const Vec3 fwd = Flat(t.feet - m.pos);
     const Vec3 from = eye + fwd * 0.6f;
+    const float dist = t.dist;
     const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
     float spread = hv < 0.6f ? kSoldier.spreadSettled : hv < 3.6f ? kSoldier.spreadStrafe : kSoldier.spreadRun;
-    if (m.burstShots == m.burstSize)
+    if (m.crouch)
+        spread *= kBoss.crouchSpread;
+    if (!pistol && m.burstShots == m.burstSize)
         spread *= kSoldier.firstShot;
+    if (pistol)
+        spread *= 1.6f; // the USP is a sidearm, not a rifle
+    const Vec3 aimPoint = aimOverride ? *aimOverride : (t.inVehicle ? t.vehSeat : t.mid);
     const float err = std::tan(spread * kPi / 180.0f) * dist;
     const float a = Rand01() * 6.2831853f, rr = err * std::sqrt(Rand01());
-    const Vec3 aim = playerMid + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err);
+    const Vec3 aim = aimPoint + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err);
     Vec3 dir = aim - from;
     const float len = dir.Length();
-    bool hit = false;
+    bool hit = false, hitCar = false, hitTyre = false;
+    Vec3 carHitPoint;
     if (len > 0.1f) {
         dir = dir * (1.0f / len);
-        // the closest the line comes to the man's body (checked at shin, chest and head height)
-        for (float h = 0.4f; h <= 1.7f && !hit; h += 0.65f) {
-            const Vec3 p = playerFeet + Vec3(0, 0, h);
-            const Vec3 rel = p - from;
-            const float t = rel.Dot(dir);
-            if (t < 0.0f || t > dist + 2.0f)
-                continue;
-            hit = (rel - dir * t).Length() < 0.42f;
+        if (t.inVehicle) {
+            // the driver: one chest point behind glass - a line within a torso's
+            // width of it wounds him (the glass keeps a seventh of the bullet)
+            const Vec3 rel = t.vehSeat - from;
+            const float tt = rel.Dot(dir);
+            if (tt > 0.0f && tt < dist + 3.0f && (rel - dir * tt).Length() < 0.45f)
+                hit = true;
+            if (!hit) {
+                // the car itself: does the line cross its box below the glass band?
+                const Vec3 rc = t.vehCentre + Vec3(0, 0, 0.75f) - from;
+                const float tc = rc.Dot(dir);
+                if (tc > 0.0f && tc < dist + 3.0f) {
+                    const Vec3 p = from + dir * tc;
+                    const Vec3 d = p - t.vehCentre;
+                    const float along = d.Dot(t.vehFwd);
+                    const Vec3 sidev(t.vehFwd.y, -t.vehFwd.x, 0.0f);
+                    const float side = d.Dot(sidev);
+                    if (std::fabs(along) < 2.3f && std::fabs(side) < 1.0f && d.z > -0.2f && d.z < 0.85f) {
+                        hitCar = true;
+                        carHitPoint = p;
+                        hitTyre = d.z < 0.45f; // a wheel-height line hunts a tyre
+                    }
+                }
+            }
+        } else {
+            for (float h = 0.4f; h <= 1.7f && !hit; h += 0.65f) {
+                const Vec3 p = t.feet + Vec3(0, 0, h);
+                const Vec3 rel = p - from;
+                const float tt = rel.Dot(dir);
+                if (tt < 0.0f || tt > dist + 2.0f)
+                    continue;
+                hit = (rel - dir * tt).Length() < 0.42f;
+            }
         }
     }
     m.attackAnim = 1.0f;
     m.shootShow = 0.18f; // the shoot pose holds a breath past the shot, so a burst reads as firing
-    PlaySfx(SND_M4A1_SHOOT, &from, 3.0f, 0.95f + Rand01() * 0.1f);
-    // the shot is SEEN, not only heard: a flash at the rifle's own muzzle (the model's
-    // anchor, through the same stand the draw uses) and a tracer along the bullet's
-    // line - to the man it hit, or past the aim point when it missed. A model file
-    // without anchors (version 1) falls back to the brain's own muzzle point.
+    PlaySfx(pistol ? SND_BOSS_USP : SND_M4A1_SHOOT, &from, 3.0f, 0.95f + Rand01() * 0.1f);
     if (len > 0.1f) {
         Vec3 muzzle = from, butt;
         const Vec3 mfwd(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
         const Vec3 mright(mfwd.y, -mfwd.x, 0.0f);
         const Pose stand = EntityPose(m.pos, mright, Vec3(0, 0, 1), mfwd, MobScale(m));
-        SoldierGunPose(stand, SP_SHOOT, 0, m.soldierPoseTime, &muzzle, &butt); // the flash sits at the model's muzzle
+        SoldierDrawState st = m.draw;
+        st.upCategory = SP_SHOOT;
+        SoldierGunPose(stand, st, &muzzle, &butt); // the flash sits at the model's muzzle
         Vec3 end;
         if (hit) {
-            const float t = Clamp((playerMid - muzzle).Dot(dir), 0.0f, len);
-            end = muzzle + dir * t;
+            const float tt = Clamp((aimPoint - muzzle).Dot(dir), 0.0f, len);
+            end = muzzle + dir * tt;
+        } else if (hitCar) {
+            end = carHitPoint;
         } else {
             end = muzzle + dir * (dist + 2.0f);
         }
@@ -877,29 +1076,30 @@ void SoldierShoot(Mob& m, const Vec3& playerFeet, const Vec3& playerMid, float d
         if (gShotFx.size() > 64)
             gShotFx.erase(gShotFx.begin(), gShotFx.begin() + (ptrdiff_t)(gShotFx.size() - 64));
     }
-    if (hit) {
-        float dmg = kSoldier.damage;
-        if (dist > 10.0f) {
-            const float f = Clamp((dist - 10.0f) / (kSoldier.sightRange - 10.0f), 0.0f, 1.0f);
-            dmg *= 1.0f - (1.0f - kSoldier.damageFar) * f;
+    float dmg = pistol ? kBoss.pistolDamage : kSoldier.damage;
+    if (dist > 10.0f) {
+        const float f = Clamp((dist - 10.0f) / (kSoldier.sightRange - 10.0f), 0.0f, 1.0f);
+        dmg *= 1.0f - (1.0f - kSoldier.damageFar) * f;
+    }
+    if (hit && !noDamage) {
+        if (t.inVehicle)
+            dmg *= 0.85f; // the windshield's tax
+        BossStrike(m, t, fwd, dmg);
+    } else if (hitCar && !noDamage) {
+        // his fire genuinely works the car over: body damage through the bridge,
+        // and a wheel-height line bursts the tyre nearest where it landed
+        const int veh = TheHost().PlayerVehicle();
+        if (veh >= 0) {
+            TheHost().HurtVehicle(veh, dmg * 0.6f);
+            if (hitTyre)
+                TheHost().VehicleShotEffect(veh, carHitPoint, 1);
         }
-        StrikePrey(m, fwd, dmg, 0.0f); // his prey is the player (huntBeing -1), down the usual road
     }
 }
 
-// The soldier's brain. His enemy is the other team and only the other team: in this step that is the
-// player (the player fights for the terrorists; the soldier is counter). The host's people in the
-// street belong to no team and he never goes for them, whatever passes - `beings` is not even read.
-// He patrols his post, checks the angles at every stop, and fights the way he was tuned: see, react,
-// burst, hold or close, fall back when he is hurt, hunt what he lost, and reload like a man who knows
-// an empty rifle is a death sentence - on the move, never standing in the open.
-// ---- his one piece of real navigation: a sight-line probe ahead of his body. He
-// asks the bridge what stands in front of him (the bridge's line of sight counts the
-// city's own buildings, vehicles and objects) and, when his road is blocked, walks
-// around the blockage at the first open angle instead of pressing into the wall.
-// What this probe cannot do is stated plainly in CS-REALMODEL-fa.md: it looks 2.4 m
-// ahead at chest height and nothing more - no stairs, no low fences, no route
-// planning across a street. It is a detour reflex, not a pathfinder.
+// ---- his street navigation: the sight-line probe he already had (2.4 m ahead
+// at chest height, detour at the first open angle), kept as the last-metres and
+// off-graph reflex. Routes over the map (NavGraph) steer him between probes.
 Vec3 SoldierAdvance(Mob& m, const Vec3& want, float dt) {
     if (m.steerTime > 0.0f) {
         m.steerTime -= dt;
@@ -914,58 +1114,357 @@ Vec3 SoldierAdvance(Mob& m, const Vec3& want, float dt) {
         const Vec3 cand(want.x * c - want.y * s, want.x * s + want.y * c, 0.0f);
         if (!TheHost().LineBlocked(from, from + cand * 2.4f)) {
             m.steerDir = cand;
-            m.steerTime = 0.6f;
+            // a steep detour means a long obstacle (a wall, a building): commit
+            // to it, or he hugs the face re-probing every half second and crawls
+            m.steerTime = std::fabs(a) > 1.0f ? 1.1f : 0.6f;
             return cand;
         }
     }
     return want; // walled in on every side he can reach: he pushes on, and physics stops him
 }
 
+// ------------------------------------------------------------------ senses
+// How much of a target his eyes honestly take in: a fraction from sampling the
+// body at shin, chest and head - a man fully in the open is 1, a head-and-
+// shoulders peek over a wall is a third, and a third still fills the meter,
+// only slower. The cone is three-dimensional (roofs and jetpacks are in it),
+// the range is the tune's, and night trades range for hearing (kBoss).
+float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& seat, bool* inCentre) {
+    const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+    const Vec3 mid = inVehicle ? seat : feet + Vec3(0, 0, 0.95f);
+    Vec3 to = mid - eye;
+    const float dist3 = to.Length();
+    float range = kSoldier.sightRange;
+    if (TheHost().Dark())
+        range *= kBoss.nightRangeMul;
+    if (inCentre)
+        *inCentre = false;
+    if (dist3 > range || dist3 < 0.01f)
+        return 0.0f;
+    const float horiz = std::sqrt(to.x * to.x + to.y * to.y);
+    const Vec3 fwd(-std::sin(m.aimYaw), std::cos(m.aimYaw), 0.0f);
+    const float dot = horiz > 0.01f ? (fwd.x * to.x + fwd.y * to.y) / horiz : 1.0f;
+    const float angH = std::acos(Clamp(dot, -1.0f, 1.0f)) * 57.29578f;
+    const float pitch = std::atan2(to.z, std::max(0.01f, horiz)) * 57.29578f;
+    const bool pointBlank = dist3 < kSoldier.pointBlank;
+    if (!pointBlank && (angH > kBoss.coneHalfDeg || pitch > kBoss.pitchUpDeg || pitch < -kBoss.pitchDownDeg))
+        return 0.0f;
+    if (inCentre)
+        *inCentre = angH <= kBoss.centreHalfDeg;
+    if (inVehicle)
+        return TheHost().LineBlocked(eye, seat) ? 0.0f : 0.8f; // a driver is a partial target by nature
+    int clear = 0;
+    const float hs[3] = { 0.25f, 0.95f, 1.62f };
+    for (float h : hs)
+        if (!TheHost().LineBlocked(eye, feet + Vec3(0, 0, h)))
+            ++clear;
+    return clear / 3.0f;
+}
+
+
+// Walk or run him to a destination: over the map when a route is worth having
+// (recomputed when the destination moves or the route runs out), by probe for
+// the last metres and off-graph ground, jumping what a man can jump. Sets his
+// goal and speed through the usual fields and returns whether he is moving.
+bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist) {
+    Vec3 toDest = dest - m.pos;
+    toDest.z = 0.0f;
+    const float distDest = toDest.Length();
+    if (distDest < arriveDist) {
+        m.moving = false;
+        return false;
+    }
+    Vec3 goal = dest;
+    if (NavReady() && distDest > 6.0f) {
+        m.routeT -= dt;
+        if (m.route.empty() || m.routeIdx >= (int)m.route.size() || m.routeT <= 0.0f ||
+            (m.routeGoal - dest).LengthSq() > 9.0f) {
+            if (NavRoute(m.pos, dest, &m.route)) {
+                m.routeIdx = 0;
+                m.routeGoal = dest;
+                m.routeT = 2.5f;
+            } else {
+                m.route.clear();
+                m.routeT = 1.0f; // no route: probe-walk, and ask again in a second
+            }
+        }
+        while (m.routeIdx < (int)m.route.size()) {
+            Vec3 toWp = m.route[m.routeIdx] - m.pos;
+            toWp.z = 0.0f;
+            if (toWp.Length() < 2.2f)
+                ++m.routeIdx;
+            else {
+                goal = m.route[m.routeIdx];
+                break;
+            }
+        }
+    }
+    Vec3 to = goal - m.pos;
+    to.z = 0.0f;
+    if (to.Length() < 0.05f) {
+        m.moving = false;
+        return false;
+    }
+    const Vec3 dir = Flat(to);
+    // the jump: the road ahead is blocked low and open at head height - a fence,
+    // a low wall, a car. A man jumps those; he does not detour around them.
+    if (m.onGround && m.jumpCd <= 0.0f) {
+        const Vec3 shin = m.pos + Vec3(0, 0, 0.35f);
+        const Vec3 head = m.pos + Vec3(0, 0, 1.35f);
+        if (TheHost().LineBlocked(shin, shin + dir * 1.7f) && !TheHost().LineBlocked(head, head + dir * 1.7f)) {
+            m.vel.z = kBoss.jumpVel;
+            m.onGround = false;
+            m.airT = 0.0f;
+            m.jumpCd = 0.9f;
+        }
+    }
+    m.goal = SoldierAdvance(m, dir, dt);
+    m.moving = true;
+    m.moveSpeed = speedWanted;
+    return true;
+}
+
+// ------------------------------------------------------------------ the brain
+// States: 0 calm (patrol/return), 1 command (talk first), 2 combat, 3 hunt,
+// 4 suspicious (primed). The senses run in every state; the states decide what
+// he does about them.
+enum BossState { BS_CALM = 0, BS_COMMAND = 1, BS_COMBAT = 2, BS_HUNT = 3, BS_SUSPICIOUS = 4 };
+
 bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
                   const std::vector<BeingInfo>* beings) {
-    (void)beings; // the street is not his war
+    const MobType& t = kTypes[m.kind];
     m.attackAnim = std::max(0.0f, m.attackAnim - dt * 2.5f);
     m.shootShow = std::max(0.0f, m.shootShow - dt);
-    const bool wasAlerted = m.alerted;
-    const Vec3 playerFeet = playerPos - Vec3(0, 0, 1.0f);
-    Vec3 to = playerFeet - m.pos;
-    to.z = 0.0f;
-    const float dist = to.Length();
-    const Vec3 dir = dist > 0.01f ? to * (1.0f / dist) : Vec3(0, 1, 0);
-    const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+    m.voiceCd = std::max(0.0f, m.voiceCd - dt);
+    m.hurtSayT = std::max(0.0f, m.hurtSayT - dt);
+    m.flinchT = std::max(0.0f, m.flinchT - dt);
+    m.attackerFresh = std::max(0.0f, m.attackerFresh - dt);
+    m.playerHostileT = std::max(0.0f, m.playerHostileT - dt);
+    m.primedT = std::max(0.0f, m.primedT - dt);
+    m.nadeCd = std::max(0.0f, m.nadeCd - dt);
+    m.jumpCd = std::max(0.0f, m.jumpCd - dt);
+    m.dodgeT = std::max(0.0f, m.dodgeT - dt);
+    m.coverT = std::max(0.0f, m.coverT - dt);
+    m.heardT = std::max(0.0f, m.heardT - dt);
+    m.loudT = std::min(99.0f, m.loudT + dt);
+    m.moveSpeed = 0.0f;
+    if (!m.onGround)
+        m.airT += dt;
+    if (m.alerted && m.bossState == BS_CALM)
+        m.bossState = BS_SUSPICIOUS; // a hurt or a noise leaves him primed, not calm
 
-    // ---- seeing: a cone in front of him (and a man's instinct at point blank), a clear line, a living enemy
-    bool see = false;
-    if (gGame.deathTime < 0.0f && dist < kSoldier.sightRange && std::fabs(playerFeet.z - m.pos.z) < 8.0f) {
-        const Vec3 fwd(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
-        const float dot = fwd.x * dir.x + fwd.y * dir.y;
-        if (dot > kSoldier.sightCos || dist < kSoldier.pointBlank)
-            see = !TheHost().LineBlocked(eye, playerPos);
+    const bool playerAlive = gGame.deathTime < 0.0f;
+    const int playerVeh = TheHost().PlayerVehicle();
+    const bool inVeh = playerAlive && playerVeh >= 0;
+    Vec3 vehCentre, vehFwd, vehSeat, vehVel;
+    const bool vehPose = inVeh && TheHost().PlayerVehiclePose(&vehCentre, &vehFwd, &vehSeat, &vehVel);
+    const Vec3 playerFeet = inVeh && vehPose ? vehCentre : playerPos - Vec3(0, 0, 1.0f);
+    const Vec3 playerVel = TheHost().PlayerVelocity();
+    const float playerSpeed = std::sqrt(playerVel.x * playerVel.x + playerVel.y * playerVel.y);
+
+    // ---------------- the senses, for the player
+    bool inCentre = false;
+    float frac = 0.0f;
+    if (playerAlive)
+        frac = BossVisibleFraction(m, playerFeet, inVeh && vehPose, vehSeat, &inCentre);
+    const bool seeNow = frac > 0.0f;
+    const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
+    Vec3 toPlayer = playerFeet - m.pos;
+    toPlayer.z = 0.0f;
+    const float distPlayer = toPlayer.Length();
+    // being aimed at fills the meter fast, the way the game's own men react
+    bool aimedAt = false;
+    if (playerAlive && distPlayer < kSoldier.sightRange) {
+        const Vec3 fwd(-std::sin(m.aimYaw), std::cos(m.aimYaw), 0.0f);
+        const float dot = distPlayer > 0.01f ? (fwd.x * toPlayer.x + fwd.y * toPlayer.y) / distPlayer : 1.0f;
+        if (dot > -0.09f) // inside a wide 190-degree... no: inside the cone's shoulders (95 deg half)
+            aimedAt = TheHost().PlayerAimingAt(m.pos + Vec3(0, 0, 1.2f), 1.3f);
     }
-    if (see) {
-        m.seenTime += dt;
-        m.lastSeen = playerFeet;
+    const float primed = m.primedT > 0.0f ? 2.0f : 1.0f;
+    if (seeNow) {
+        float rate = kBoss.fillFar + (kBoss.fillClose - kBoss.fillFar) *
+                     (1.0f - Clamp(distPlayer / kSoldier.sightRange, 0.0f, 1.0f));
+        rate *= inCentre ? kBoss.fillCentreMul : kBoss.fillEdgeMul;
+        if (playerSpeed > 2.5f)
+            rate *= kBoss.fillMoveMul;
+        m.detect = std::min(1.5f, m.detect + frac * rate * primed * dt);
+    } else if (!aimedAt) {
+        m.detect = std::max(0.0f, m.detect - kBoss.fillDecay * dt);
+    }
+    if (aimedAt) // a gun pointed at him is fast news on top of everything else
+        m.detect = std::min(1.5f, m.detect + kBoss.fillAimMul * primed * dt);
+    const bool detected = m.detect >= 1.0f;
+    // tracking while visible: last seen, his velocity, the hiding-spot memory
+    if (seeNow) {
+        const Vec3 newSeen = playerFeet;
+        if (m.targetVisT > 0.0f && dt > 0.0f) {
+            const Vec3 v = (newSeen - m.lastSeen) * (1.0f / dt);
+            m.preyVel = m.preyVel * 0.6f + v * 0.4f;
+        }
+        m.lastSeen = newSeen;
+        m.targetVisT = std::min(10.0f, m.targetVisT + dt);
+        m.lostT = 0.0f;
         m.searchTime = kSoldier.searchSeconds;
         m.alerted = true;
         m.alertFade = 0.0f;
-        m.scanTime = 0.0f;
     } else {
-        m.seenTime = std::max(0.0f, m.seenTime - dt * 3.0f);
-        if (m.searchTime > 0.0f)
-            m.searchTime -= dt;
-        else if (m.alerted) {
-            m.alertFade += dt;
-            if (m.alertFade > 25.0f)
-                m.alerted = false; // a long quiet: he settles back to a patrolman's calm
+        if (m.targetVisT > 0.3f && m.bossState >= BS_COMBAT)
+            NoteHidingSpot(m.lastSeen); // he broke the line cleanly: remember the spot
+        m.targetVisT = 0.0f;
+        // a man holding good cover over a hidden target waits a beat before he
+        // pushes - and that beat is exactly the grenade's window (2.5 s), so
+        // the hunt timer runs slow while he holds cover in grenade range
+        const float lastSeenDist = (m.lastSeen - m.pos).Length();
+        const bool holdingForNade = m.bossState == BS_COMBAT && lastSeenDist > kBoss.nadeMin && lastSeenDist < kBoss.nadeMax;
+        m.lostT += dt * (holdingForNade ? 0.25f : 1.0f);
+        m.searchTime = std::max(0.0f, m.searchTime - dt);
+    }
+    // ---------------- hearing
+    float hearMul = TheHost().Dark() ? kBoss.nightHearMul : 1.0f;
+    bool heardSomething = false;
+    for (const Stimulus& s : gStimuli) {
+        Vec3 d = s.at - m.pos;
+        d.z = 0.0f;
+        const float dd = d.Length();
+        float r = s.radius * hearMul;
+        if (TheHost().LineBlocked(eye, s.at))
+            r *= 0.45f; // walls muffle
+        if (dd < r) {
+            heardSomething = true;
+            if (s.radius >= 40.0f)
+                m.loudT = 0.0f; // a shot or a blast, just now: a fight may already be on
+            m.heardDir = Flat(d);
+            m.heardT = 2.5f;
+            m.alerted = true;
+            m.alertFade = 0.0f;
+            if (m.bossState == BS_CALM) {
+                m.bossState = BS_SUSPICIOUS;
+                m.detect = std::max(m.detect, 0.3f);
+            }
+            if ((m.bossState == BS_COMBAT || m.bossState == BS_HUNT) && s.radius >= 40.0f) {
+                // a shot or a blast while he hunts: he checks where it came from
+                m.lastSeen = s.at;
+                m.searchTime = std::max(m.searchTime, 3.0f);
+            }
         }
     }
-    const float reaction = wasAlerted ? kSoldier.reaction * 0.5f : kSoldier.reaction;
-    const bool canFire = see && m.seenTime >= reaction;
-    m.huntValid = see; // Think's head and body machinery reads the prey from these two
-    m.huntBeing = -1;
-    *looking = see;
+    // his own ears on the player's movement and engine, no stimulus list needed
+    if (playerAlive && m.bossState != BS_COMBAT) {
+        float noiseR = 0.0f;
+        if (inVeh) {
+            const float sp = vehPose ? std::sqrt(vehVel.x * vehVel.x + vehVel.y * vehVel.y) : playerSpeed;
+            if (sp > 2.0f)
+                noiseR = kBoss.hearVehicle * (0.7f + std::min(1.0f, sp / 14.0f));
+        } else if (playerSpeed > 4.2f)
+            noiseR = kBoss.hearSprint;
+        else if (playerSpeed > 1.2f)
+            noiseR = kBoss.hearWalk;
+        if (noiseR > 0.0f) {
+            float r = noiseR * hearMul;
+            if (TheHost().LineBlocked(eye, playerPos))
+                r *= 0.45f;
+            if (distPlayer < r) {
+                heardSomething = true;
+                m.heardDir = Flat(toPlayer);
+                m.heardT = std::max(m.heardT, 1.2f);
+                m.alerted = true;
+                m.alertFade = 0.0f;
+                m.detect = std::max(m.detect, 0.3f);
+                if (m.bossState == BS_CALM)
+                    m.bossState = BS_SUSPICIOUS;
+            }
+        }
+    }
+    // ---------------- being attacked by the street (K1) refreshes his target
+    const BeingInfo* attackerInfo = nullptr;
+    if (m.attackerBeing >= 0 && beings) {
+        for (const BeingInfo& b : *beings)
+            if (b.being == m.attackerBeing) {
+                attackerInfo = &b;
+                break;
+            }
+        if (!attackerInfo && m.attackerFresh <= 0.0f)
+            m.attackerBeing = -1;
+    }
+    // ---------------- state entries from the senses
+    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+        if (m.attackerFresh > 0.0f && m.attackerBeing >= 0) {
+            m.bossState = BS_COMBAT;
+            m.negotiated = true; // a street fight is not a negotiation
+            m.fightStarted = true;
+            BossSay(m, SAY_SPOTTED, 2.0f);
+        } else if (detected && playerAlive) {
+            const bool peaceful = m.playerHostileT <= 0.0f && !aimedAt && playerSpeed < 4.2f;
+            // workstream G, as the user settled it: commands belong to the GUARD
+            // context - his post, a calm first contact, no fight in progress. If
+            // a fight has started (he was hurt, the street provoked him, shots
+            // were heard moments ago) there is NO command phase: he fights.
+            const bool guardContext = !m.fightStarted && m.loudT > 3.0f;
+            if (peaceful && !m.negotiated && guardContext) {
+                m.bossState = BS_COMMAND;
+                m.cmdPhase = 0;
+                m.cmdT = kBoss.commandWindow;
+                m.holdT = 0.0f;
+                m.negotiated = true;
+                BossSay(m, SAY_COMMAND, 2.0f);
+            } else if (peaceful && m.negotiated && m.primedT > 0.0f && m.bossState == BS_SUSPICIOUS) {
+                // the talk already happened and he is still primed from it: a
+                // peaceful man is watched at aim, not fought and not re-ordered
+                m.aimGoal = playerPos;
+                m.aimRate = 8.0f;
+            } else {
+                m.bossState = BS_COMBAT;
+                m.fightStarted = true;
+                m.seenTime = 0.0f;
+                BossSay(m, SAY_SPOTTED, 2.0f);
+            }
+        }
+    }
+    if (m.bossState == BS_SUSPICIOUS && m.primedT <= 0.0f && m.detect <= 0.05f && !heardSomething) {
+        m.bossState = BS_CALM;
+        m.negotiated = false; // a fresh encounter, a fresh chance to talk
+        m.fightStarted = false;
+        m.alerted = false;
+    }
+    // ---------------- pick the fighting target (player vs street attacker)
+    BossTarget tgt;
+    const bool playerFighting = m.playerHostileT > 0.0f;
+    if (m.bossState == BS_COMBAT || m.bossState == BS_HUNT) {
+        if (attackerInfo && m.attackerFresh > 0.0f && !playerFighting) {
+            tgt.valid = true;
+            tgt.being = m.attackerBeing;
+            tgt.feet = attackerInfo->pos - Vec3(0, 0, 1.0f);
+            tgt.mid = attackerInfo->pos;
+            Vec3 d = tgt.feet - m.pos;
+            d.z = 0.0f;
+            tgt.dist = d.Length();
+        } else if (playerAlive) {
+            tgt.valid = true;
+            tgt.being = -1;
+            tgt.feet = playerFeet;
+            tgt.mid = inVeh && vehPose ? vehSeat : playerPos;
+            tgt.dist = distPlayer;
+            tgt.inVehicle = inVeh && vehPose;
+            tgt.vehCentre = vehCentre;
+            tgt.vehFwd = vehFwd;
+            tgt.vehSeat = vehSeat;
+            tgt.vehVel = vehVel;
+        }
+    }
+    const bool tgtVisible = tgt.valid && (tgt.being >= 0
+        ? !TheHost().LineBlocked(eye, tgt.mid + Vec3(0, 0, 0.2f)) && tgt.dist < kSoldier.sightRange
+        : seeNow);
+    if (tgt.being >= 0 && tgtVisible) {
+        m.lastSeen = tgt.feet;
+        m.lostT = 0.0f;
+    }
+    m.huntValid = tgt.valid && (m.bossState == BS_COMBAT || m.bossState == BS_HUNT);
+    m.huntBeing = tgt.valid ? tgt.being : -1;
+    *looking = tgtVisible || m.bossState == BS_COMMAND;
+    m.aiTimer = 0.5f;
 
-    // ---- the rifle: reload first (it owns him until it is done), then bursts while he may fire
+    // ---------------- the reload machinery ticks in every state (the rifle
+    // does not pause because he is walking); firing lives in combat below.
     if (m.reloadT > 0.0f) {
         m.reloadT -= dt;
         if (m.reloadStage == 1 && m.reloadT <= 2.0f) {
@@ -979,207 +1478,570 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
         if (m.reloadT <= 0.0f) {
             m.mag = kSoldier.magazine;
+            m.pistolOut = false;
             m.burstShots = 0;
             m.burstPause = 0.15f;
         }
-    } else if (canFire) {
-        if (m.burstPause > 0.0f) {
-            m.burstPause -= dt;
-        } else {
-            if (m.burstShots <= 0) { // a new burst (or, with an empty magazine, the reload)
-                if (m.mag <= 0) {
-                    m.reloadT = kSoldier.reloadTime;
-                    m.reloadStage = 1;
-                    const Vec3 c = m.pos + Vec3(0, 0, 1.2f);
-                    PlaySfx(SND_M4A1_CLIPOUT, &c, 1.2f);
-                } else {
-                    m.burstSize = m.burstShots = std::min(m.mag, kSoldier.burstMin + rand() % (kSoldier.burstMax - kSoldier.burstMin + 1));
-                    m.shotTimer = 0.0f;
-                }
-            }
-            if (m.burstShots > 0) {
-                m.shotTimer -= dt;
-                if (m.shotTimer <= 0.0f) {
-                    m.shotTimer = kSoldier.shotInterval;
-                    SoldierShoot(m, playerFeet, playerPos, dist);
-                    --m.burstShots;
-                    --m.mag;
-                    if (m.burstShots <= 0)
-                        m.burstPause = kSoldier.burstPauseMin + Rand01() * (kSoldier.burstPauseMax - kSoldier.burstPauseMin);
-                }
+    }
+    auto startReload = [&]() {
+        m.reloadT = kSoldier.reloadTime;
+        m.reloadStage = 1;
+        const Vec3 c = m.pos + Vec3(0, 0, 1.2f);
+        PlaySfx(SND_M4A1_CLIPOUT, &c, 1.2f);
+        BossSay(m, SAY_RELOAD, 4.0f);
+    };
+    // ---------------- dodge: an incoming projectile or a vehicle's charge
+    // (the charge itself arrives through MobVehicleThreat, which sets dodgeT)
+    if (m.dodgeT <= 0.0f && (m.bossState == BS_COMBAT || m.bossState == BS_HUNT)) {
+        for (const Projectile& pr : gProjectiles) {
+            if (pr.hostile || pr.stuck)
+                continue;
+            const float pv = pr.vel.Length();
+            if (pv < 5.0f)
+                continue;
+            const Vec3 rel = m.pos + Vec3(0, 0, 1.0f) - pr.pos;
+            const Vec3 vh = pr.vel * (1.0f / pv);
+            const float tca = rel.Dot(vh);
+            if (tca < 0.0f || tca / pv > 0.55f)
+                continue;
+            const Vec3 closest = rel - vh * tca;
+            if (closest.Length() < 1.3f) {
+                Vec3 side(vh.y, -vh.x, 0.0f);
+                if (side.Dot(closest) > 0.0f)
+                    side = side * -1.0f;
+                m.dodgeDir = side;
+                m.dodgeT = 0.34f;
+                break;
             }
         }
-        m.attackAnim = std::max(m.attackAnim, 0.7f); // the rifle stays up while the enemy is in his sight
-    } else {
-        m.burstPause = std::max(0.0f, m.burstPause - dt);
-        m.shotTimer = 0.0f;
+    }
+    const bool dodging = m.dodgeT > 0.0f;
+    if (dodging) {
+        m.goal = m.dodgeDir;
+        m.moving = true;
+        m.moveSpeed = t.run;
     }
 
-    // ---- moving: fight, hunt, or patrol
-    const MobType& t = kTypes[m.kind];
-    const float maxHealth = t.health;
-    m.aiTimer = 0.5f;
-    if (see) {
-        const bool hurt = m.health < maxHealth * kSoldier.retreatUnder;
-        if (hurt && dist < 30.0f) {
-            m.goal = SoldierAdvance(m, dir * -1.0f, dt); // falling back, still facing the fight
-            m.moving = true;
-            *speed = t.run * 0.8f;
-        } else if (dist > 26.0f) {
-            m.goal = SoldierAdvance(m, dir, dt);
-            m.moving = true;
-            *speed = t.run;
-        } else if (dist < 6.0f) {
-            m.goal = SoldierAdvance(m, dir * -1.0f, dt);
-            m.moving = true;
-            *speed = kSoldier.strafeSpeed;
-        } else {
-            // his band: he holds his angle and drifts across it, changing side every few seconds -
-            // a standing target is a dead one, and he knows it
-            m.strafeTime -= dt;
-            if (m.strafeTime <= 0.0f) {
-                m.strafeTime = 1.6f + Rand01() * 1.6f;
-                m.strafeDir = -m.strafeDir;
+    // ================================================================ COMBAT
+    if (m.bossState == BS_COMBAT) {
+        m.seenTime = tgtVisible ? m.seenTime + dt : std::max(0.0f, m.seenTime - dt * 2.0f);
+        const float healthShare = m.health / kBoss.health;
+        const bool wounded = healthShare < kBoss.woundedShare;
+        // cover: re-judged twice a second - a point is cover when the threat's
+        // line to it is blocked and a half-step sideways from it can shoot
+        bool wantCover = false, inCoverNow = false, peekFire = false;
+        if (tgt.valid && !dodging) {
+            const bool exposed = !TheHost().LineBlocked(tgt.mid, eye);
+            wantCover = exposed && (m.reloadT > 0.0f || wounded || m.burstPause > 0.05f) && tgt.dist < 34.0f;
+            if (wantCover && m.coverT <= 0.0f) {
+                m.coverT = 0.5f;
+                bool found = false;
+                for (float r : { 2.2f, 3.4f }) {
+                    for (int k = 0; k < 12 && !found; ++k) {
+                        const float an = (float)k * 0.5236f;
+                        const Vec3 cand = m.pos + Vec3(std::cos(an) * r, std::sin(an) * r, 0.0f);
+                        float gz = 0.0f;
+                        if (!TheHost().GroundBelow(cand + Vec3(0, 0, 30.0f), 40.0f, &gz) ||
+                            std::fabs(gz - m.pos.z) > 1.3f)
+                            continue;
+                        const Vec3 cp = Vec3(cand.x, cand.y, gz);
+                        if (!TheHost().LineBlocked(tgt.mid, cp + Vec3(0, 0, 1.2f)))
+                            continue; // not hidden: not cover
+                        const Vec3 sidev(tgt.mid.y - cp.y, -(tgt.mid.x - cp.x), 0.0f);
+                        const Vec3 side = Flat(sidev);
+                        for (float sgn : { 1.0f, -1.0f }) {
+                            const Vec3 peek = cp + side * (0.85f * sgn);
+                            if (!TheHost().LineBlocked(peek + Vec3(0, 0, 1.2f), tgt.mid)) {
+                                m.coverPoint = cp;
+                                m.peekPoint = peek;
+                                m.hasCover = true;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (found)
+                        break;
+                }
+                if (!found)
+                    m.hasCover = false;
             }
-            const Vec3 side(dir.y, -dir.x, 0.0f);
-            m.goal = side * m.strafeDir;
-            m.moving = true;
-            *speed = kSoldier.strafeSpeed;
+            if (wantCover && m.hasCover) {
+                inCoverNow = (m.pos - m.coverPoint).LengthSq() < 1.2f;
+                if (m.peekPhase) {
+                    if (!BossGoTo(m, m.peekPoint, kSoldier.strafeSpeed, dt, 0.45f))
+                        m.peekT -= dt;
+                    peekFire = true;
+                    if (m.peekT <= 0.0f) {
+                        m.peekPhase = false;
+                        m.hideT = wounded ? 1.7f : 0.8f + Rand01() * 0.9f;
+                    }
+                } else {
+                    BossGoTo(m, m.coverPoint, t.run * 0.8f, dt, 0.45f);
+                    m.hideT -= dt;
+                    if (m.hideT <= 0.0f && inCoverNow) {
+                        m.peekPhase = true;
+                        m.peekT = (kBoss.peekMin + Rand01() * (kBoss.peekMax - kBoss.peekMin)) *
+                                  (wounded ? 0.6f : 1.0f);
+                    }
+                }
+            }
         }
-    } else if (m.searchTime > 0.0f) {
-        Vec3 toSeen = m.lastSeen - m.pos;
-        toSeen.z = 0.0f;
-        if (toSeen.Length() > 1.8f) {
-            m.goal = SoldierAdvance(m, Flat(toSeen), dt);
-            m.moving = true;
-            *speed = t.run * 0.75f; // he advances on a lost enemy like a man clearing a street: fast, not charging
-            m.scanTime = 0.0f;
+        // open-field movement when cover is not the play
+        if (!dodging && tgt.valid && !(wantCover && m.hasCover)) {
+            const Vec3 dir = Flat(tgt.feet - m.pos);
+            if (wounded && tgt.dist < 30.0f) {
+                m.goal = SoldierAdvance(m, dir * -1.0f, dt);
+                m.moving = true;
+                m.moveSpeed = t.run * 0.8f;
+            } else if (tgt.dist > 13.0f) {
+                if ((wounded && tgtVisible) ||
+                    (tgt.dist >= kBoss.crouchRange && m.burstPause > 0.0f)) {
+                    // planted: a wounded man holds his long ground, and a sound
+                    // one stops to shoot straight at range - the crouch below
+                    // is this same decision in the pose
+                    m.goal = Vec3(0, 0, 0);
+                    m.moving = false;
+                    m.moveSpeed = 0.0f;
+                } else {
+                    BossGoTo(m, tgt.feet, t.run, dt, 11.0f);
+                }
+            } else if (tgt.dist < 6.0f) {
+                m.goal = SoldierAdvance(m, dir * -1.0f, dt);
+                m.moving = true;
+                m.moveSpeed = kSoldier.strafeSpeed;
+            } else {
+                m.strafeTime -= dt;
+                if (m.strafeTime <= 0.0f) {
+                    m.strafeTime = 1.6f + Rand01() * 1.6f;
+                    m.strafeDir = -m.strafeDir;
+                }
+                const Vec3 side(dir.y, -dir.x, 0.0f);
+                m.goal = side * m.strafeDir;
+                m.moving = true;
+                m.moveSpeed = kSoldier.strafeSpeed;
+            }
+        }
+        // ---- fire control
+        m.crouch = tgt.valid && tgt.dist >= kBoss.crouchRange && !m.moving;
+        const bool mayFire = tgt.valid && m.seenTime >= kSoldier.reaction &&
+                             (tgtVisible || (tgt.being < 0 && m.lostT < kBoss.suppWindow));
+        if (m.reloadT <= 0.0f && mayFire && (!wantCover || !m.hasCover || peekFire)) {
+            if (m.burstPause > 0.0f) {
+                m.burstPause -= dt;
+            } else {
+                if (m.burstShots <= 0) {
+                    if (!m.pistolOut && m.mag <= 0) {
+                        if (tgt.dist < kBoss.pistolRange && m.pistolMag > 0) {
+                            m.pistolOut = true; // the USP, not a reload, at arm's length
+                        } else {
+                            // the rules say reload in cover or at range; when
+                            // neither offers, he reloads on the move - the
+                            // movement code never leaves him standing for it
+                            startReload();
+                        }
+                    }
+                    if (m.burstShots <= 0 && m.reloadT <= 0.0f) {
+                        const int avail = m.pistolOut ? m.pistolMag : m.mag;
+                        if (avail > 0) {
+                            m.burstSize = m.burstShots = std::min(avail, kSoldier.burstMin + rand() % (kSoldier.burstMax - kSoldier.burstMin + 1));
+                            m.shotTimer = 0.0f;
+                        } else if (m.pistolOut && m.pistolMag <= 0) {
+                            m.pistolOut = false;
+                            startReload();
+                        }
+                    }
+                }
+                if (m.burstShots > 0) {
+                    m.shotTimer -= dt;
+                    if (m.shotTimer <= 0.0f) {
+                        m.shotTimer = m.pistolOut ? kBoss.pistolInterval : kSoldier.shotInterval;
+                        if (tgtVisible)
+                            BossShoot(m, tgt, m.pistolOut);
+                        else { // suppressive fire on the corner he vanished behind:
+                               // real noise and real tracers at the corner, and it
+                               // can only hurt a man who steps back into the line
+                            const Vec3 corner = m.lastSeen + Vec3(0, 0, 1.0f);
+                            BossShoot(m, tgt, m.pistolOut, &corner, true);
+                        }
+                        --m.burstShots;
+                        if (m.pistolOut)
+                            --m.pistolMag;
+                        else
+                            --m.mag;
+                        if (m.burstShots <= 0)
+                            m.burstPause = (kSoldier.burstPauseMin + Rand01() * (kSoldier.burstPauseMax - kSoldier.burstPauseMin)) *
+                                           (wounded ? 1.3f : 1.0f);
+                    }
+                }
+            }
         } else {
-            // at the last seen spot: he stops and sweeps the angles before he gives the man up
-            m.moving = false;
-            if (m.scanTime <= 0.0f)
-                m.scanTime = 2.2f;
-            m.scanTime -= dt;
-            SoldierTurn(m, Vec3(std::sin(m.scanTime * 2.4f + (float)m.id), std::cos(m.scanTime * 2.4f + (float)m.id), 0.0f), 2.2f, dt);
-            m.attackAnim = std::max(m.attackAnim, 0.7f);
+            m.burstPause = std::max(0.0f, m.burstPause - dt);
+            m.shotTimer = 0.0f;
         }
-    } else {
-        // patrol: six posts around his anchor; at every post he stops, rifle up, and checks the angles
-        // before he walks on (the seed of corner-checking: never drift past an angle unlooked)
-        if (m.patrolWait > 0.0f) {
+        // ---- the grenade: a target dug in behind cover gets flushed out. The
+        // clock is the TARGET's time unreachable - leaky, because his own
+        // peek-fire glimpses do not un-dig the man (coverHeldT is that clock)
+        if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > 0.2f)
+            m.coverHeldT += dt;
+        else
+            m.coverHeldT = std::max(0.0f, m.coverHeldT - dt * 0.5f);
+        if (tgt.valid && tgt.being < 0 && m.coverHeldT > kBoss.nadeHeldTime && m.nades > 0 && m.nadeCd <= 0.0f) {
+            Vec3 d = m.lastSeen - m.pos;
+            const float dd = std::sqrt(d.x * d.x + d.y * d.y);
+            if (dd > kBoss.nadeMin && dd < kBoss.nadeMax) {
+                const float T = Clamp(dd / 11.0f, 0.7f, 1.6f);
+                BossNade n;
+                n.pos = m.pos + Vec3(0, 0, 1.6f);
+                n.vel = Vec3(d.x / T, d.y / T, (d.z + 16.0f * T * T) / T);
+                n.fuse = kBoss.nadeFuse;
+                gBossNades.push_back(n);
+                --m.nades;
+                m.nadeCd = 7.0f;
+                m.coverHeldT = 0.0f;
+                BossSay(m, SAY_GRENADE, 3.0f);
+            }
+        }
+        // ---- losing him starts the hunt (the player only; a street attacker
+        // who runs off is let go - the street is not his war until it shoots)
+        if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > 1.2f && gGame.deathTime < 0.0f) {
+            m.bossState = BS_HUNT;
+            m.huntPhase = 0;
+            m.huntT = 0.0f;
+            const float lead = Clamp(distPlayer / 6.0f, 0.0f, 2.5f);
+            m.huntDest = m.lastSeen + m.preyVel * lead;
+            m.route.clear();
+            BossSay(m, SAY_LOST, 3.0f);
+        }
+        if (tgt.being >= 0 && m.attackerFresh <= 0.0f && !attackerInfo) {
+            // the street fight is over: back to watching for the real enemy
+            m.bossState = BS_SUSPICIOUS;
+            m.primedT = std::max(m.primedT, 20.0f);
+            m.hasCover = false;
+        }
+        if (!playerAlive && tgt.being < 0) {
+            m.bossState = BS_SUSPICIOUS;
+            m.primedT = std::max(m.primedT, 30.0f);
+            m.detect = 0.3f;
+        }
+    }
+
+    // ================================================================ COMMAND
+    if (m.bossState == BS_COMMAND) {
+        m.aimGoal = playerPos;
+        m.aimRate = 8.0f;
+        bool violation = m.playerHostileT > 0.0f || playerSpeed > 4.2f;
+        if (aimedAt) {
+            m.aimViolT += dt;
+            if (m.aimViolT > 0.35f)
+                violation = true;
+        } else {
+            m.aimViolT = 0.0f;
+        }
+        if (violation) {
+            m.bossState = BS_COMBAT;
+            m.fightStarted = true;
+            m.seenTime = 0.0f;
+            BossSay(m, SAY_SPOTTED, 2.0f);
+        } else if (m.cmdPhase == 0) {
+            // the window: a man who stands still and keeps his gun down is heard out
+            if (playerSpeed < 0.9f) {
+                m.cmdT -= dt;
+                if (m.cmdT <= 0.0f)
+                    m.cmdPhase = 1;
+            } else if (distPlayer > 16.0f) {
+                // walking away, slowly, is not war: he lets him go, primed
+                m.bossState = BS_SUSPICIOUS;
+                m.primedT = std::max(m.primedT, 30.0f);
+                m.detect = 0.3f;
+            }
+        } else if (m.cmdPhase == 1) {
+            if (!BossGoTo(m, playerFeet, t.walk, dt, kBoss.commandRange)) {
+                m.cmdPhase = 2;
+                m.holdT = 2.0f;
+            }
+            m.aimGoal = playerPos;
+        } else {
+            m.holdT -= dt;
+            if (m.holdT <= 0.0f) {
+                // stood down: he lowers the rifle but not his guard - and this
+                // encounter has had its one talk (no re-commanding a man who
+                // already obeyed; the primed watch above is what he gets)
+                m.bossState = BS_SUSPICIOUS;
+                m.negotiated = true;
+                m.primedT = kBoss.primedSeconds;
+                m.detect = 0.35f;
+                m.alerted = true;
+                BossSay(m, SAY_STANDDOWN, 3.0f);
+            }
+        }
+        if (!playerAlive) {
+            m.bossState = BS_CALM;
+            m.detect = 0.0f;
+        }
+    }
+
+    // ================================================================ HUNT
+    if (m.bossState == BS_HUNT) {
+        m.huntT += dt;
+        if (seeNow && m.detect >= 0.85f) {
+            m.bossState = BS_COMBAT;
+            m.seenTime = 0.0f;
+            BossSay(m, SAY_SPOTTED, 2.0f);
+        } else if (m.huntT > kBoss.huntSeconds) {
+            m.bossState = BS_SUSPICIOUS;
+            m.primedT = std::max(m.primedT, 30.0f);
+            m.detect = std::min(m.detect, 0.3f);
+        } else if (m.huntPhase == 0) {
+            m.aimGoal = m.huntDest + Vec3(0, 0, 1.2f);
+            m.aimRate = 6.0f;
+            if (!BossGoTo(m, m.huntDest, t.run * 0.85f, dt, 1.8f)) {
+                // arrived: gather the search - his hiding spots first, then the
+                // street's own corners (graph nodes), then the nearest named place
+                m.searchPts.clear();
+                for (const Vec3& s : gHidingSpots)
+                    if ((s - m.lastSeen).LengthSq() < kBoss.searchRadius * kBoss.searchRadius)
+                        m.searchPts.push_back(s);
+                if (NavReady()) {
+                    std::vector<std::pair<float, Vec3>> cand;
+                    for (int i = 0; i < NavNodeCount(); ++i) {
+                        Vec3 np;
+                        if (NavNodePos(i, &np)) {
+                            const float d2 = (np - m.lastSeen).LengthSq();
+                            if (d2 < kBoss.searchRadius * kBoss.searchRadius)
+                                cand.push_back({ d2, np });
+                        }
+                    }
+                    std::sort(cand.begin(), cand.end(),
+                              [](const std::pair<float, Vec3>& a, const std::pair<float, Vec3>& b) { return a.first < b.first; });
+                    for (size_t i = 0; i < cand.size() && m.searchPts.size() < 10; ++i)
+                        m.searchPts.push_back(cand[i].second);
+                }
+                const int poi = NavNearestPoi(m.lastSeen);
+                if (poi >= 0 && (NavPoiAt(poi).at - m.lastSeen).LengthSq() < 900.0f)
+                    m.searchPts.push_back(NavPoiAt(poi).at);
+                m.searchIdx = 0;
+                m.scanT = 0.0f;
+                m.huntPhase = 1;
+                BossSay(m, SAY_SEARCH, 3.0f);
+            }
+        } else {
+            if (m.searchIdx >= (int)m.searchPts.size()) {
+                m.bossState = BS_SUSPICIOUS;
+                m.primedT = std::max(m.primedT, 30.0f);
+                m.detect = std::min(m.detect, 0.3f);
+            } else {
+                const Vec3 pt = m.searchPts[m.searchIdx];
+                if (!BossGoTo(m, pt, t.run * 0.8f, dt, 1.4f)) {
+                    // at a corner he slices it: the rifle sweeps the angle he
+                    // could not see on the way in, before he trusts the spot
+                    m.scanT += dt;
+                    const float base = std::atan2(-(pt.x - m.pos.x), pt.y - m.pos.y);
+                    const float sweep = base + std::sin(m.scanT * 2.2f) * 0.9f;
+                    m.aimGoal = m.pos + Vec3(-std::sin(sweep), std::cos(sweep), 0.0f) * 10.0f + Vec3(0, 0, 1.2f);
+                    m.aimRate = 7.0f;
+                    if (m.scanT > 1.6f) {
+                        ++m.searchIdx;
+                        m.scanT = 0.0f;
+                    }
+                } else {
+                    m.aimGoal = pt + Vec3(0, 0, 1.2f);
+                    m.aimRate = 6.0f;
+                }
+            }
+        }
+    }
+
+    // ================================================================ CALM / SUSPICIOUS
+    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+        const bool suspicious = m.bossState == BS_SUSPICIOUS;
+        if (m.patrolPts.empty()) {
+            // his posts stand on Grove Street's own graph nodes when the map is
+            // loaded - the street he guards, in the street's own geometry
+            for (int k = 0; k < 6; ++k) {
+                const float a = (float)k * 1.0472f + (float)(m.id % 6) * 0.5f;
+                Vec3 post = m.anchor + Vec3(std::cos(a), std::sin(a), 0.0f) * kSoldier.patrolRadius;
+                if (NavReady()) {
+                    const int n = NavNearest(post, 10.0f);
+                    Vec3 np;
+                    if (n >= 0 && NavNodePos(n, &np))
+                        post = np;
+                }
+                m.patrolPts.push_back(post);
+            }
+        }
+        Vec3 toAnchor = m.anchor - m.pos;
+        toAnchor.z = 0.0f;
+        if (!suspicious && toAnchor.Length() > kBoss.returnRange) {
+            BossGoTo(m, m.anchor, t.run, dt, 3.0f); // home is Grove; he routes back
+            m.aimGoal = m.anchor + Vec3(0, 0, 1.2f);
+            m.aimRate = 4.0f;
+        } else if (m.patrolWait > 0.0f) {
             m.patrolWait -= dt;
             m.moving = false;
-            m.attackAnim = std::max(m.attackAnim, 0.7f);
-            const float a = (float)m.patrolStep * 1.0472f + (float)(m.id % 6) * 0.5f;
-            SoldierTurn(m, Vec3(std::cos(a), std::sin(a), 0.0f), 1.6f, dt);
+            // head scans on post: his eyes keep working the street
+            m.scanClock += dt;
+            const float sweep = m.legYaw + std::sin(m.scanClock * (suspicious ? 1.3f : 0.8f)) * 0.85f;
+            m.aimGoal = m.pos + Vec3(-std::sin(sweep), std::cos(sweep), 0.0f) * 10.0f + Vec3(0, 0, 1.4f);
+            m.aimRate = 3.0f;
+            m.idleVoiceT -= dt;
+            if (m.idleVoiceT <= 0.0f) {
+                m.idleVoiceT = kBoss.idleVoiceMin + Rand01() * (kBoss.idleVoiceMax - kBoss.idleVoiceMin);
+                BossSay(m, SAY_IDLE, 5.0f);
+            }
             if (m.patrolWait <= 0.0f) {
                 m.patrolStep = (m.patrolStep + 1) % 6;
                 m.patrolLeg = 0.0f;
             }
         } else {
-            const float a = (float)m.patrolStep * 1.0472f + (float)(m.id % 6) * 0.5f;
-            const Vec3 post = m.anchor + Vec3(std::cos(a), std::sin(a), 0.0f) * kSoldier.patrolRadius;
-            Vec3 toPost = post - m.pos;
-            toPost.z = 0.0f;
+            const Vec3 post = m.patrolPts[m.patrolStep % (int)m.patrolPts.size()];
             m.patrolLeg += dt;
-            if (toPost.Length() < 1.2f || m.patrolLeg > 9.0f) {
-                m.patrolWait = 1.2f + Rand01() * 1.2f; // (a leg that takes too long is given up, post reached or not)
+            if (!BossGoTo(m, post, t.walk, dt, 1.2f) || m.patrolLeg > 12.0f) {
+                m.patrolWait = 1.4f + Rand01() * 1.6f;
                 m.moving = false;
-            } else {
-                m.goal = SoldierAdvance(m, Flat(toPost), dt);
-                m.moving = true;
-                *speed = t.walk;
             }
+            m.aimGoal = post + Vec3(0, 0, 1.4f);
+            m.aimRate = 3.0f;
+        }
+        if (m.heardT > 0.0f) {
+            // a noise in the street: his head goes to it first
+            m.aimGoal = m.pos + m.heardDir * 10.0f + Vec3(0, 0, 1.2f);
+            m.aimRate = 6.0f;
+        } else if (m.detect >= kBoss.glanceAt && playerAlive) {
+            m.aimGoal = playerPos; // something half-seen: he looks, properly
+            m.aimRate = 6.0f;
         }
     }
 
-    // ---- what his body shows: the brain's state IS the animation state, the way the
-    // game itself layers it (SoldierModel.h). Firing plants his feet for the burst;
-    // a moving man walks or runs under the same aim layer; a still man with his
-    // rifle up stands in the aim pose; the rest is the patrolman's idle.
-    // the gait his pace asks for: the run at a fighting pace, the walk below it -
-    // and a man drifting SIDEWAYS across his aim keeps the walk gait whatever his
-    // speed: his legs step where he drifts, they do not run in place sideways.
-    // (The model has no strafe gait of its own - urban.mdl carries none - so the
-    // walk cycle is the honest cloth.) The shoot pose borrows this gait for its
-    // moving variants, the way the game's lower body runs independently.
-    int movePose = SP_IDLE;
-    if (m.moving) {
-        const Vec3 face = see ? dir : m.goal;
-        const float along = std::fabs(m.goal.x * face.x + m.goal.y * face.y);
-        movePose = (*speed > 2.6f && along >= 0.45f) ? SP_RUN : SP_WALK;
+    // ================================================================ his body
+    // The aim: in a fight his eyes are on the target at a professional's turn
+    // rate; elsewhere the states above left their wish in aimGoal.
+    {
+        Vec3 aimAt = m.aimGoal;
+        float aimRate = m.aimRate;
+        if (m.bossState == BS_COMBAT) {
+            aimAt = tgt.valid ? tgt.mid : m.lastSeen + Vec3(0, 0, 1.2f);
+            aimRate = 12.0f;
+        }
+        m.aimYaw = TurnYawToward(m.aimYaw, aimAt - m.pos, aimRate, dt);
     }
-    int pose = SP_IDLE;
-    int variant = 0;
-    if (m.reloadT > 0.0f)
-        pose = SP_RELOAD;
-    else if (m.burstShots > 0 || m.shootShow > 0.0f) {
-        pose = SP_SHOOT;
-        variant = movePose == SP_RUN ? 2 : movePose == SP_WALK ? 1 : 0; // firing keeps his gait under him
-    } else if (m.moving)
-        pose = movePose;
-    else if (see || m.attackAnim > 0.3f)
-        pose = SP_AIM;
-    if (pose != m.soldierPose || variant != m.soldierVariant) {
-        // the pose he leaves becomes the cross-fade's source (SoldierModel blends
-        // the two); his gait phase carries over, so a stride is never restarted
-        m.soldierPrevPose = m.soldierPose;
-        m.soldierPrevVariant = m.soldierVariant;
-        m.soldierPrevTime = m.soldierPoseTime;
-        m.soldierPrevGait = m.soldierGait;
-        m.soldierFade = 0.0f;
-        m.soldierPose = pose;
-        m.soldierVariant = variant;
-        m.soldierPoseTime = 0.0f;
-    } else {
-        m.soldierPoseTime += dt;
+    // The legs: they face where he is actually going, eased; the torso reaches
+    // the aim through the spine (SoldierModel). Standing still with the aim far
+    // off his legs, he step-turns like a man instead of pivoting like a statue.
+    const float velH = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+    bool stepping = false;
+    if (m.moving && velH > 0.4f) {
+        const Vec3 mv = Flat(Vec3(m.vel.x, m.vel.y, 0.0f));
+        float desired = std::atan2(-mv.x, mv.y);
+        if (std::fabs(WrapAngle(m.aimYaw - desired)) > 2.27f)
+            desired = m.aimYaw; // running straight away from his aim: the back gait carries it
+        m.legYaw = TurnYawToward(m.legYaw, Vec3(-std::sin(desired), std::cos(desired), 0.0f), 6.0f, dt);
+    } else if (std::fabs(WrapAngle(m.aimYaw - m.legYaw)) > 0.3f) {
+        m.legYaw = TurnYawToward(m.legYaw, Vec3(-std::sin(m.aimYaw), std::cos(m.aimYaw), 0.0f), 3.5f, dt);
+        stepping = true;
     }
-    if (m.soldierFade < 1.0f) {
-        m.soldierFade = std::min(1.0f, m.soldierFade + dt / kSoldierFadeSeconds);
-        m.soldierPrevTime += dt; // the pose he is leaving keeps playing while it fades
+    m.yaw = m.legYaw;
+    // the aim pitch row, from the target's elevation (his rifle must visibly
+    // pitch to a man on a roof or below him - the baked grid rows do it)
+    if (tgt.valid) {
+        const float dz = tgt.mid.z - eye.z;
+        const float pitch = std::atan2(dz, std::max(1.0f, tgt.dist));
+        m.pitchIdx = pitch > 0.21f ? 1 : pitch < -0.21f ? 2 : 0;
     }
-
-    // ---- his gait phase: advanced by the ground he actually covers, at the
-    // model's own stride length, so a foot planted on the ground stays planted.
-    // Towards or away from what he faces the phase is signed (a man falling back
-    // runs his cycle backwards, the way the game plays it); drifting sideways it
-    // advances with the distance, unsigned.
-    auto gaitPoseOf = [](int p, int v) -> int {
-        if (p == SP_WALK || p == SP_RUN)
-            return p;
-        if (p == SP_SHOOT && v == 1)
-            return SP_WALK;
-        if (p == SP_SHOOT && v == 2)
-            return SP_RUN;
-        return -1;
-    };
-    const int gaitPose = gaitPoseOf(pose, variant);
-    if (gaitPose >= 0) {
-        const Vec3 fwdv(-std::sin(m.yaw), std::cos(m.yaw), 0.0f);
-        const float alongV = m.vel.x * fwdv.x + m.vel.y * fwdv.y;
-        const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
-        const float sideV = std::sqrt(std::max(0.0f, hv * hv - alongV * alongV));
-        const float adv = std::fabs(alongV) >= sideV ? alongV : hv;
-        const float stride = SoldierStride(gaitPose);
-        if (stride > 0.01f)
-            m.soldierGait += adv * dt / stride;
-        if (m.soldierFade < 1.0f) {
-            const int prevGaitPose = gaitPoseOf(m.soldierPrevPose, m.soldierPrevVariant);
-            if (prevGaitPose >= 0) {
-                const float prevStride = SoldierStride(prevGaitPose);
-                if (prevStride > 0.01f)
-                    m.soldierPrevGait += adv * dt / prevStride;
+    // ---- compose the draw state (workstream M's two layers)
+    SoldierDrawState& d = m.draw;
+    int legCat = SP_IDLE, legVar = 0, upCat = SP_IDLE, upVar = 0;
+    if (!m.onGround && m.airT > 0.02f) {
+        legCat = SP_JUMP;
+    } else if (m.crouch && m.bossState == BS_COMBAT) {
+        legCat = SP_CROUCH;
+    } else if (m.moving || stepping) {
+        const bool running = m.moveSpeed > 2.6f && !stepping;
+        if (running) {
+            legCat = SP_RUN;
+            const Vec3 mv = velH > 0.4f ? Flat(Vec3(m.vel.x, m.vel.y, 0.0f)) : m.goal;
+            const Vec3 lf(-std::sin(m.legYaw), std::cos(m.legYaw), 0.0f);
+            const float along = mv.x * lf.x + mv.y * lf.y;
+            const float cross = lf.x * mv.y - lf.y * mv.x;
+            const float res = std::acos(Clamp(along, -1.0f, 1.0f));
+            if (res < 0.87f)
+                legVar = 0;
+            else if (res > 2.27f)
+                legVar = 3; // back
+            else
+                legVar = cross > 0.0f ? 1 : 2; // strafe left / right of his facing (the model's own gaits, in its own naming)
+        } else {
+            legCat = SP_WALK;
+        }
+    }
+    if (m.flinchT > 0.0f) {
+        upCat = SP_FLINCH;
+        upVar = m.hurtHigh ? 1 : 0;
+    } else if (m.reloadT > 0.0f) {
+        upCat = SP_RELOAD;
+        upVar = m.crouch ? 1 : 0;
+    } else if (m.burstShots > 0 || m.shootShow > 0.0f) {
+        upCat = SP_SHOOT;
+        upVar = m.pitchIdx + (m.crouch ? 3 : 0);
+    } else if (m.bossState != BS_CALM || m.alerted) {
+        upCat = SP_AIM;
+        upVar = m.pitchIdx + (m.crouch ? 3 : 0);
+    }
+    // his clocks: the upper pose runs on seconds, the gaits on the ground covered
+    if (upCat == SP_SHOOT)
+        m.shootClock += dt;
+    else
+        m.shootClock = 0.0f;
+    const float upTime = upCat == SP_RELOAD ? (kSoldier.reloadTime - m.reloadT)
+                         : upCat == SP_SHOOT ? m.shootClock
+                         : upCat == SP_FLINCH ? (0.30f - m.flinchT)
+                                              : d.upTime + dt;
+    const float legTime = legCat == SP_JUMP ? m.airT : d.legTime + dt;
+    if (legCat != d.legCategory || legVar != d.legVariant || upCat != d.upCategory || upVar != d.upVariant) {
+        // the pose he leaves is snapshotted composed, layers and all, and the
+        // draw blends out of it - no transition ever snaps
+        SoldierLocal prev[64];
+        if (SoldierComposeLocals(d, prev, 64)) {
+            for (int i = 0; i < 64; ++i)
+                d.prevLocals[i] = prev[i];
+            d.prevBones = SoldierBoneCount();
+            d.hasPrev = d.prevBones > 0;
+            d.fade = 0.0f;
+        }
+    }
+    d.legCategory = legCat;
+    d.legVariant = legVar;
+    d.upCategory = upCat;
+    d.upVariant = upVar;
+    d.upTime = upTime;
+    d.legTime = legTime;
+    d.aimYaw = m.aimYaw;
+    d.legYaw = m.legYaw;
+    d.fullCategory = -1;
+    if (d.fade < 1.0f)
+        d.fade = std::min(1.0f, d.fade + dt / kSoldierFadeSeconds);
+    // gait phase from the ground he actually covers, at the current gait's own
+    // stride; in a step-turn the cycle advances as if shuffling on the spot
+    if (legCat == SP_WALK || legCat == SP_RUN) {
+        const float stride = SoldierGaitStride(legCat, legVar);
+        if (stride > 0.01f) {
+            if (stepping)
+                d.gait += dt * 1.1f / stride;
+            else {
+                const Vec3 fwdv(-std::sin(m.legYaw), std::cos(m.legYaw), 0.0f);
+                const float alongV = m.vel.x * fwdv.x + m.vel.y * fwdv.y;
+                const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+                const float sideV = std::sqrt(std::max(0.0f, hv * hv - alongV * alongV));
+                const float adv = std::fabs(alongV) >= sideV ? alongV : hv;
+                d.gait += adv * dt / stride;
             }
         }
     }
-
-    // ---- his steps, on his stride, the game's own footstep sounds: one step is
-    // half a gait cycle, so the sound lands when a foot does
-    if (m.moving && m.onGround) {
-        const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
-        const float stride = gaitPose >= 0 ? SoldierStride(gaitPose) : 0.0f;
+    // footsteps on his stride, the game's own sounds
+    if ((m.moving || stepping) && m.onGround) {
+        const float stride = SoldierGaitStride(legCat, legVar);
         const float stepLen = stride > 0.01f ? stride * 0.5f : 2.6f;
-        m.stepAcc += hv * dt;
+        m.stepAcc += velH * dt + (stepping ? dt * 1.1f : 0.0f);
         if (m.stepAcc > stepLen) {
             m.stepAcc = 0.0f;
             PlaySfx(SND_SOLDIER_STEP, &m.pos, 1.3f, 0.95f + Rand01() * 0.1f);
@@ -1187,7 +2049,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     } else {
         m.stepAcc = 0.0f;
     }
-    return true; // a soldier is always on duty: patrol, hunt and fight are all his
+    *speed = m.moveSpeed;
+    return true; // a soldier is always on duty: patrol, talk, hunt and fight are all his
 }
 
 void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t playerHeld,
@@ -1267,9 +2130,11 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
     // or closes in. Its bow is drawn in the body's frame (McModel) and its head rides on the body, so facing
     // the prey is what puts the look, the aim and the arrow on one line. Before this, the body faced where it
     // walked (sideways, while strafing), the head looked at the player, and the arrow flew at the prey: three
-    // different ways at once, which is exactly what the user saw. The soldier fights the same way - a man
-    // with a rifle keeps his body on his enemy while his feet drift - so he shares the rule.
-    const bool aiming = hasPrey && (m.kind == MOB_SKELETON || m.kind == MOB_SOLDIER);
+    // different ways at once, which is exactly what the user saw. The soldier shared this rule in step 1,
+    // but the BOSS owns his own facing now: his brain turns his LEGS to his movement and his TORSO to his
+    // aim (the two-layer draw, SoldierModel), so the generic body-turn must not touch him - and his feet
+    // follow his goal, not his nose, like the skeleton's.
+    const bool aiming = hasPrey && m.kind == MOB_SKELETON;
 
     // turn the body towards where it walks (a skeleton with prey: towards the prey, fast, the way it aims)
     if (aiming) {
@@ -1292,7 +2157,7 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
     // prey: its feet follow the goal, not the nose. Everyone else walks where he faces, as before.
     Vec3 target = Vec3(0, 0, 0);
     if (m.moving)
-        target = aiming ? m.goal * speed : fwd * speed;
+        target = (aiming || m.kind == MOB_SOLDIER) ? m.goal * speed : fwd * speed;
     // a hunter also answers quicker: the shared soft start (9 a second) made the chase feel like wading
     float k = Clamp(dt * (m.onGround ? (chasing && t.monster ? 14.0f : 9.0f) : 1.2f), 0.0f, 1.0f);
     m.vel.x += (target.x - m.vel.x) * k;
@@ -1320,8 +2185,22 @@ void Kill(Mob& m) {
         return;
     m.death = 0.0f;
     m.health = 0.0f;
-    if (m.kind == MOB_SOLDIER)
+    if (m.kind == MOB_SOLDIER) {
         m.soldierDeath = (int)(Rand01() * 2.99f); // one of the game's three falls, his own
+        // he falls out of the pose he died in, not out of a snap: the composed
+        // pose is snapshotted for the cross-fade, then the death takes over
+        SoldierLocal prev[64];
+        if (SoldierComposeLocals(m.draw, prev, 64)) {
+            for (int i = 0; i < 64; ++i)
+                m.draw.prevLocals[i] = prev[i];
+            m.draw.prevBones = SoldierBoneCount();
+            m.draw.hasPrev = m.draw.prevBones > 0;
+            m.draw.fade = 0.0f;
+        }
+        m.draw.fullCategory = SP_DEATH;
+        m.draw.fullVariant = m.soldierDeath;
+        m.draw.fullTime = 0.0f;
+    }
     m.moving = false;
     Vec3 c = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
     PlaySfx(kTypes[m.kind].death, &c, 1.0f, m.baby > 0.0f ? 1.5f : 0.9f + Rand01() * 0.2f);
@@ -1384,6 +2263,75 @@ void TrySpawn(const Vec3& playerPos) {
 }
 } // namespace
 
+// ------------------------------------------------------------------
+// The boss's shared world state, at mc:: scope: the stimulus list his
+// ears read, his live grenades, and the session's hiding-spot memory.
+// (Defined here, outside the brain's anonymous namespace, because
+// Combat, Entities, MobsTick and MobsClear all reach them.)
+// ------------------------------------------------------------------ stimuli
+// Loud facts the whole core can hear: a weapon loosed, an explosion. Combat and
+// Entities report them here; every soldier's hearing reads the same list, which
+// MobsTick ages. A stimulus never says WHO - direction and alert only, the way
+// a real ear works.
+std::vector<Stimulus> gStimuli;
+
+void NotePlayerShot(const Vec3& at, float radius) {
+    if (gStimuli.size() < 32)
+        gStimuli.push_back(Stimulus{ at, radius, 0.5f });
+}
+void NoteExplosion(const Vec3& at) { NotePlayerShot(at, kBoss.hearExplosion); }
+
+// ------------------------------------------------------------------ grenades
+// His HE grenades, flown honestly: an arc, gravity, a fuse, then the bridge's
+// own explosion for the eye and the core channel for the hurt (the same split
+// the creeper lives by). Two a fight - a professional carries two.
+std::vector<BossNade> gBossNades;
+
+void BossNadeBlastPlayer(const Vec3& at, const Vec3& playerPos); // below
+void BossNadesTick(float dt, const Vec3& playerPos) {
+    for (size_t i = 0; i < gBossNades.size();) {
+        BossNade& n = gBossNades[i];
+        n.fuse -= dt;
+        n.vel.z -= 32.0f * dt; // the world's gravity, the one MoveMob falls by
+        n.pos = n.pos + n.vel * dt;
+        if (n.fuse <= 0.0f) {
+            const Vec3 at = n.pos;
+            TheHost().Explosion(at, BLAST_SMALL);
+            PlaySfx(SND_EXPLODE, &at, 3.0f);
+            // other mobs take the radial as usual; the player's share lands on
+            // the core's own channel with a falloff (BAGUVIX cannot stand in
+            // front of this either) - BossNadeBlastPlayer, just below
+            MobsRadial(at, kBoss.nadeRadius, 4.0f, 8.0f);
+            BossNadeBlastPlayer(at, playerPos);
+            gBossNades.erase(gBossNades.begin() + (ptrdiff_t)i);
+        } else {
+            ++i;
+        }
+    }
+}
+
+void BossNadeBlastPlayer(const Vec3& at, const Vec3& playerPos) {
+    const float d = (playerPos - at).Length();
+    if (d < kBoss.nadeRadius) {
+        const float f = 1.0f - d / kBoss.nadeRadius;
+        TheHost().HurtPlayer(kBoss.nadeDamage * f * f + 1.0f);
+    }
+}
+
+// ---- his street navigation
+// One session's worth of the player's hiding spots: where his line of sight
+// broke successfully. The hunt checks these first next time. Session-only -
+// the world save has no honest slot for them, and a new session is a new man
+// to hunt. (Cleared in MobsClear.)
+std::vector<Vec3> gHidingSpots;
+void NoteHidingSpot(const Vec3& at) {
+    for (const Vec3& s : gHidingSpots)
+        if ((s - at).LengthSq() < 9.0f)
+            return;
+    if (gHidingSpots.size() < 12)
+        gHidingSpots.push_back(at);
+}
+
 uint32_t MobIdAt(int index) { return index >= 0 && index < (int)gMobs.size() ? gMobs[index].id : 0; }
 
 int MobIndexById(uint32_t id) {
@@ -1410,6 +2358,11 @@ void MobsClear() {
     gMobs.clear();
     gSpawnTimer = 3.0f;
     gReinforceCalls.clear();
+    // the boss's session memory dies with the session (his hiding spots are
+    // session-only by design), and no stimulus or live grenade outlives it
+    gHidingSpots.clear();
+    gStimuli.clear();
+    gBossNades.clear();
 }
 
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
@@ -1433,11 +2386,20 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     m.groundZ = feet.z;
     m.baby = baby ? 90.0f : 0.0f;
     if (kind == MOB_SOLDIER) {
-        // posted where he was summoned: counter-terrorist, kevlar on, a full magazine in the rifle
+        // posted where he was summoned: counter-terrorist, the boss's kevlar on,
+        // a full magazine in the rifle, two grenades, a loaded USP, his aim and
+        // his legs both on the way he was summoned facing
         m.team = TEAM_COUNTER;
-        m.armor = 200.0f; // Counter-Strike's 100 kevlar points, in half hearts like his health
+        m.armor = kBoss.armor;
         m.anchor = feet;
         m.mag = kSoldier.magazine;
+        m.pistolMag = kBoss.pistolMag;
+        m.nades = 2;
+        m.aimYaw = m.yaw;
+        m.legYaw = m.yaw;
+        m.draw.aimYaw = m.yaw;
+        m.draw.legYaw = m.yaw;
+        m.bossState = BS_CALM;
     }
     m.id = gNextMobId++;
     gMobs.push_back(m);
@@ -1494,8 +2456,10 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
     float dmg = halfHearts;
     if (m.kind == MOB_SOLDIER) {
         // Counter-Strike's kevlar: while it lasts it swallows half of every hit, and what is left reaches
-        // the man. A professional in armour is also barely shoved by a blow. And being shot at tells him
-        // where his enemy is: he is alerted, and he hunts the shot's origin.
+        // the man. There is no hit-zone anywhere in this road - a hit is a hit, head or body alike, and
+        // no multiplier exists for it to take (the boss's no-headshot law is structural, not a rule).
+        // A professional in armour is also barely shoved by a blow. And being hurt tells him where his
+        // enemy is: he is alerted, his detection is full, and he hunts the blow's origin.
         knock *= 0.25f;
         if (m.armor > 0.0f) {
             const float absorbed = std::min(m.armor, dmg * kSoldier.armorAbsorb);
@@ -1506,6 +2470,45 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
         m.alertFade = 0.0f;
         m.lastSeen = from;
         m.searchTime = std::max(m.searchTime, kSoldier.searchSeconds);
+        m.detect = 1.0f;
+        m.hurtHigh = from.z > m.pos.z + 1.4f;
+        if (m.flinchT <= 0.0f)
+            m.flinchT = 0.30f; // a brief upper-body flinch, throttled (workstream M)
+        if (m.hurtSayT <= 0.0f) {
+            m.hurtSayT = 0.6f;
+            if (m.proxyHit)
+                BossSay(m, SAY_SPOTTED, 1.5f); // shot by the street: he calls it
+            else {
+                const Vec3 c = m.pos + Vec3(0, 0, 1.3f);
+                PlaySfx(SND_BOSS_HURT, &c, 1.4f);
+            }
+        }
+        m.fightStarted = true; // he has been hurt: no command phase after this
+        if (m.proxyHit) {
+            // the street hurt him through his perception body: the attacker is a
+            // legitimate target now (K1) - and a talk-first window, if one was
+            // open with the player, is not burnt by somebody else's war
+            if (m.proxyAttacker >= 0) {
+                m.attackerBeing = m.proxyAttacker;
+                m.attackerFresh = 6.0f;
+            } else if (m.proxyAttacker == -2) {
+                // no gang hand on the hurt and the player right there: the shot
+                // was his (his projectiles meet the proxy; no task names them)
+                m.playerHostileT = 5.0f;
+                m.negotiated = true;
+                if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND)
+                    m.bossState = BS_COMBAT;
+            }
+            m.proxyHit = false;
+            m.proxyAttacker = -1;
+        } else {
+            // hurt by the player (his blows, his arrows, his blasts land here):
+            // the player is the one fighting him, and any talk is over
+            m.playerHostileT = 5.0f;
+            m.negotiated = true;
+            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND)
+                m.bossState = BS_COMBAT;
+        }
     }
     m.health -= dmg;
     m.hurt = 0.5f;
@@ -1547,6 +2550,100 @@ void MobPush(int index, const Vec3& velocity) {
     if (m.death < 0.0f) {
         m.panic = std::max(m.panic, 3.0f);
         m.aiTimer = 0.0f;
+    }
+}
+
+// ------------------------------------------------------------------
+// The boss's doors in from the bridge (workstreams K and L). All of them are
+// soldier-only; every other kind ignores them.
+
+void MobProvoked(int index, int being, const Vec3& from) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f || being < 0)
+        return;
+    // somebody in the street raised a hand to him: a legitimate target (K1).
+    // He does not need to be hurt first - a ped drawing on him is enough.
+    m.attackerBeing = being;
+    m.attackerFresh = 6.0f;
+    m.fightStarted = true;
+    m.alerted = true;
+    m.alertFade = 0.0f;
+    m.lastSeen = from;
+    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+        m.bossState = BS_COMBAT;
+        m.negotiated = true;
+        m.seenTime = 0.0f;
+    }
+}
+
+void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerBeing) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f || halfHearts <= 0.0f)
+        return;
+    // One relayed event can never take a boss-killing share: the game's own
+    // headshots land on the proxy too, and his law says a head hit is a body
+    // hit. The cap is a tenth of his pool - ten solid events minimum to die by
+    // the street, and ordinary gang fire arrives far below it.
+    const float capped = std::min(halfHearts, kBoss.health * 0.10f);
+    m.proxyHit = true;
+    m.proxyAttacker = attackerBeing;
+    const float hurtBefore = m.hurt;
+    m.hurt = 0.0f; // the proxy bleeds at the game's rate, not at MobHurt's window
+    MobHurt(index, capped, from, 0.0f);
+    if (m.death < 0.0f)
+        m.hurt = std::min(m.hurt, std::max(hurtBefore, 0.2f));
+}
+
+void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f || m.dodgeT > 0.0f || !m.onGround)
+        return;
+    // a fast lateral step, to whichever side has room (probed honestly)
+    const Vec3 vh = Flat(vehVel);
+    Vec3 side(vh.y, -vh.x, 0.0f);
+    const Vec3 chest = m.pos + Vec3(0, 0, 1.1f);
+    const bool leftOpen = !TheHost().LineBlocked(chest, chest + side * 2.2f);
+    const bool rightOpen = !TheHost().LineBlocked(chest, chest - side * 2.2f);
+    if (!leftOpen && !rightOpen)
+        return; // walled in: he braces instead (the hit itself is capped)
+    if (!leftOpen)
+        side = side * -1.0f;
+    m.dodgeDir = side;
+    m.dodgeT = 0.38f;
+    m.vel.x += side.x * 4.5f;
+    m.vel.y += side.y * 4.5f;
+}
+
+void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f)
+        return;
+    // a car is the heaviest blow the street owns - and it still cannot one-shot
+    // him: the tune caps it at a share of his whole pool, whatever the speed
+    const float raw = 30.0f + speed * 55.0f;
+    const float capped = std::min(raw, kBoss.health * kBoss.ramCapShare);
+    m.proxyHit = false;
+    const float hurtBefore = m.hurt;
+    m.hurt = 0.0f;
+    MobHurt(index, capped, from, 0.6f);
+    if (m.death < 0.0f) {
+        m.hurt = std::min(m.hurt, std::max(hurtBefore, 0.2f));
+        m.ramT = 0.9f; // a breath on the ground, then he is up and fighting
+        m.detect = 1.0f;
+        if (driverIsPlayer) {
+            m.playerHostileT = 6.0f;
+            m.negotiated = true;
+            m.bossState = BS_COMBAT;
+            m.seenTime = kSoldier.reaction; // the driver is known, completely, at once
+        }
     }
 }
 
@@ -1653,6 +2750,15 @@ void MobsSpawnTick(float dt, const Vec3& playerPos) {
 
 void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerOnFoot,
               const std::vector<BeingInfo>* beings) {
+    // the boss's world ticks: loud facts age out, his thrown grenades fly
+    for (size_t i = 0; i < gStimuli.size();) {
+        gStimuli[i].ttl -= dt;
+        if (gStimuli[i].ttl <= 0.0f)
+            gStimuli.erase(gStimuli.begin() + (ptrdiff_t)i);
+        else
+            ++i;
+    }
+    BossNadesTick(dt, playerPos);
     // a shot's flash and tracer live for a blink and no longer; they age out here
     for (size_t i = 0; i < gShotFx.size();) {
         gShotFx[i].age += dt;

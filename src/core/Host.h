@@ -100,6 +100,19 @@ struct Host {
     virtual bool UseOnBeing(int being) { return false; }                     // the use button on him (a villager trades)
     virtual void NearbyBeings(const Vec3& centre, float radius, std::vector<BeingInfo>& out) {} // its people near a point
     virtual void HurtVehicle(int vehicle, float halfHearts) {}
+    // ---- the boss's vehicle senses (workstream L): the player's car as a target
+    // The player's vehicle described for aimed fire: centre, forward, the driver's
+    // chest position, velocity. False when he is on foot. The seat position is the
+    // bridge's best knowledge of where the driver actually sits.
+    virtual bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) { return false; }
+    // One aimed shot's effect on the player's vehicle at a world hit point:
+    // effect 1 = burst the tyre nearest that point; effect 0 = nothing extra (the
+    // body damage itself goes through HurtVehicle). Native thresholds (smoke,
+    // fire, immobilisation) are the game's own business.
+    virtual void VehicleShotEffect(int vehicle, const Vec3& hitPoint, int effect) {}
+    // Is the player aiming a weapon at this world point (within radius)? The
+    // game's own peds react to being aimed at; the boss polls the same fact.
+    virtual bool PlayerAimingAt(const Vec3& point, float radius) { return false; }
     // ---- the fishing hook
     virtual HostHit HookTrace(const Vec3& from, const Vec3& dir, float len) { return HostHit(); } // in the way of the flying hook
     virtual bool HookPoint(const HostHit& hooked, Vec3* at) { return false; } // where the hook on its thing is now (false: gone)

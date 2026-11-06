@@ -2586,7 +2586,7 @@ const CookingRecipe kCooking[102] = {
 const int kNumShaped = 583, kNumShapeless = 214, kNumCooking = 102;
 const int kNumIngredientSets = 510;
 
-const SoundFile kSoundFiles[513] = {
+const SoundFile kSoundFiles[531] = {
     { "dig_stone1.ogg", 1.00f, 1.00f },
     { "dig_stone2.ogg", 1.00f, 1.00f },
     { "dig_stone3.ogg", 1.00f, 1.00f },
@@ -3100,6 +3100,24 @@ const SoundFile kSoundFiles[513] = {
     { "cs_die1.wav", 1.00f, 1.00f },
     { "cs_die2.wav", 1.00f, 1.00f },
     { "cs_die3.wav", 1.00f, 1.00f },
+    { "boss_cmd1.ogg", 1.00f, 1.00f },
+    { "boss_cmd2.ogg", 1.00f, 1.00f },
+    { "boss_cmd3.ogg", 1.00f, 1.00f },
+    { "boss_spot1.ogg", 1.00f, 1.00f },
+    { "boss_spot2.ogg", 1.00f, 1.00f },
+    { "boss_spot3.ogg", 1.00f, 1.00f },
+    { "boss_lost1.ogg", 1.00f, 1.00f },
+    { "boss_lost2.ogg", 1.00f, 1.00f },
+    { "boss_srch1.ogg", 1.00f, 1.00f },
+    { "boss_srch2.ogg", 1.00f, 1.00f },
+    { "boss_rld1.ogg", 1.00f, 1.00f },
+    { "boss_gren1.ogg", 1.00f, 1.00f },
+    { "boss_down1.ogg", 1.00f, 1.00f },
+    { "boss_idle1.ogg", 1.00f, 1.00f },
+    { "boss_idle2.ogg", 1.00f, 1.00f },
+    { "boss_hurt1.ogg", 1.00f, 1.00f },
+    { "boss_hurt2.ogg", 1.00f, 1.00f },
+    { "boss_usp.ogg", 1.00f, 1.00f },
 };
 const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 0, 4 }, // DIG_STONE
@@ -3262,6 +3280,23 @@ const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 502, 4 }, // SOLDIER_STEP
     { 506, 4 }, // SOLDIER_HURT
     { 510, 3 }, // SOLDIER_DEATH
+    { 513, 1 }, // BOSS_CMD1
+    { 514, 1 }, // BOSS_CMD2
+    { 515, 1 }, // BOSS_CMD3
+    { 516, 1 }, // BOSS_SPOT1
+    { 517, 1 }, // BOSS_SPOT2
+    { 518, 1 }, // BOSS_SPOT3
+    { 519, 1 }, // BOSS_LOST1
+    { 520, 1 }, // BOSS_LOST2
+    { 521, 1 }, // BOSS_SRCH1
+    { 522, 1 }, // BOSS_SRCH2
+    { 523, 1 }, // BOSS_RLD1
+    { 524, 1 }, // BOSS_GREN1
+    { 525, 1 }, // BOSS_DOWN1
+    { 526, 1 }, // BOSS_IDLE1
+    { 527, 1 }, // BOSS_IDLE2
+    { 528, 2 }, // BOSS_HURT
+    { 530, 1 }, // BOSS_USP
 };
 
 } // namespace mc

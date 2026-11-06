@@ -30,6 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mdl as M
 
 CAT_IDLE, CAT_WALK, CAT_RUN, CAT_AIM, CAT_SHOOT, CAT_RELOAD, CAT_DEATH = range(7)
+CAT_CROUCH, CAT_JUMP, CAT_FLINCH = 7, 8, 9
+LYR_FULL, LYR_LEG, LYR_UP = 0, 1, 2
 OUT_FPS = 30.0
 
 
@@ -55,6 +57,15 @@ def centre_blend(seq):
     layer's grids are 3x3 (yaw x pitch); their centre is numblends // 2. A sequence
     with one blend has only cell 0. See mdl.bone_pose for why this is not cosmetic."""
     return seq.numblends // 2 if seq.numblends > 1 else 0
+
+
+# The aim grid's centre column, measured off urban.mdl itself (gun line per cell):
+# the column whose yaw stays on the man's facing while the pitch walks the three
+# rows - blend 1 aims UP (+33 degrees), blend 4 is LEVEL (-13, the game's own
+# relaxed hold), blend 7 aims DOWN (-31). The boss's aim and shoot poses are baked
+# at all three so his rifle visibly pitches to a target above or below him; the
+# brain picks the row by the target's elevation and blends at the change.
+AIM_BLEND = {0: 4, 1: 1, 2: 7}  # pitch index (0 level, 1 up, 2 down) -> blend cell
 
 
 def sample_locals(mdl, seq, t, clamp=False, blend=0):
@@ -139,38 +150,34 @@ def leg_bone_set(m):
 
 
 def bake(urban, comb, plan):
-    """plan: list of dicts {cat, loop, frames, legs:(seq,stretch,clamp)|None,
-    upper:(seq,stretch,clamp)|None, full:(seq,stretch,clamp)|None} -> baked tracks.
-    The weapon (upper) layer is sampled at its grid's centre blend - the pose where
-    the man aims where he faces. The gait and full-body layers have one blend."""
-    legs_set = leg_bone_set(urban)
+    """plan: list of dicts {cat, layer, loop, frames, seq:(seq,stretch,clamp,blend)}
+    -> baked tracks. V3 stores the layers SEPARATELY: a legs-layer track holds the
+    gait sequence's full pose (the runtime reads only its lower-body bones), an
+    upper-layer track holds the aim/shoot sequence's full pose sampled at one cell
+    of its blend grid (the runtime reads only its spine-up bones), and a full track
+    (deaths) is read whole. The runtime composes the two layers with the legs
+    facing the movement and the torso twisted to the aim - the way GoldSrc itself
+    separates gait from aim - instead of one merged statue pose per state."""
     seqs = []
     for spec in plan:
         nf = spec["frames"]
-        dur = nf / OUT_FPS
         frames = []
+        seq, stretch, clamp, blend = spec["seq"]
         for i in range(nf):
             t = i / OUT_FPS
-            if spec.get("full"):
-                seq, stretch, clamp = spec["full"]
-                loc = sample_locals(urban, seq, t * stretch, clamp, centre_blend(seq))
-            else:
-                lseq, lstretch, lclamp = spec["legs"]
-                useq, ustretch, uclamp = spec["upper"]
-                ll = sample_locals(urban, lseq, t * lstretch, lclamp)
-                uu = sample_locals(urban, useq, t * ustretch, uclamp, centre_blend(useq))
-                loc = [ll[bi] if bi in legs_set else uu[bi] for bi in range(len(urban.bones))]
+            loc = sample_locals(urban, seq, t * stretch, clamp, blend)
             frames.append(comb.pose(urban, loc))
-        seqs.append((spec["cat"], 1 if spec["loop"] else 0, frames))
+        seqs.append((spec["cat"], spec["layer"], 1 if spec["loop"] else 0, frames))
     return seqs
 
 
-def measure_stride(mdl, seq, scale):
+def measure_stride(mdl, seq, scale, axis=0):
     """The gait's own stride, measured off the model: how far the planted foot
-    travels backwards against the pelvis during its stance, per second of stance
+    travels against the pelvis during its stance, per second of stance
     (that rate IS the ground speed at which the feet do not slip), times the cycle
     time. Returns (stride length in metres, no-slip speed in m/s). A stance is the
-    longest run of frames where a toe stays within 3 cm of its lowest point."""
+    longest run of frames where a toe stays within 3 cm of its lowest point.
+    axis picks the travel coordinate: 0 for forward/back gaits, 1 for strafes."""
     names = [b.name for b in mdl.bones]
     i_pelvis = names.index("Bip01 Pelvis")
     toes = [names.index("Bip01 L Toe0"), names.index("Bip01 R Toe0")]
@@ -181,7 +188,7 @@ def measure_stride(mdl, seq, scale):
     frames = np.array(frames)  # (F, bones, 3) metres
     speeds = []
     for ti in toes:
-        x = frames[:, ti, 0] - frames[:, i_pelvis, 0]
+        x = frames[:, ti, axis] - frames[:, i_pelvis, axis]
         z = frames[:, ti, 2]
         planted = z < z.min() + 0.03
         idx = [f for f in range(seq.numframes) if planted[f]]
@@ -195,7 +202,7 @@ def measure_stride(mdl, seq, scale):
             if len(run) > len(best):
                 best = run
         if len(best) >= 3:
-            dx = x[best[0]] - x[best[-1]]
+            dx = abs(x[best[0]] - x[best[-1]])
             dur = len(best) / seq.fps
             if dur > 0 and dx > 0:
                 speeds.append(dx / dur)
@@ -326,60 +333,130 @@ def main():
     print("bind height %.2f units -> scale %.5f m/unit; aim pose z %.2f..%.2f -> lift %.2f units (%.3f m)"
           % (h_bind, scale, float(pts[:, 2].min()), float(pts[:, 2].max()), zshift, zshift * scale))
 
-    no_str = (1.0, False)
+    def spec(seq, stretch=1.0, clamp=False, blend=None):
+        if blend is None:
+            blend = centre_blend(seq)
+        return (seq, stretch, clamp, blend)
+
+    def native_frames(seq):
+        return max(2, int(round(seq.numframes / seq.fps * OUT_FPS)))
+
+    # V3 plan: layers stored separately. Legs variants: WALK 0 = forward; RUN
+    # 0 = forward, 1 = strafe-left, 2 = strafe-right, 3 = back (the model's own
+    # directional gaits). Upper variants: AIM/SHOOT 0..2 = standing pitch rows
+    # (level/up/down of the aim grid), 3..5 = the crouched rows; RELOAD 0 =
+    # standing, 1 = crouched; FLINCH 0 = gut, 1 = head.
     plan = [
-        dict(cat=CAT_IDLE, loop=True, frames=122, full=(S["idle1"],) + no_str),
-        dict(cat=CAT_WALK, loop=True, frames=33, legs=(S["walk"],) + no_str,
-             upper=(S["ref_aim_carbine"],) + no_str),
-        dict(cat=CAT_RUN, loop=True, frames=19, legs=(S["run"],) + no_str,
-             upper=(S["ref_aim_carbine"],) + no_str),
-        dict(cat=CAT_AIM, loop=True, frames=2, legs=(S["idle1"],) + no_str,
-             upper=(S["ref_aim_carbine"],) + no_str),
-        dict(cat=CAT_SHOOT, loop=True, frames=10, legs=(S["idle1"],) + no_str,
-             upper=(S["ref_shoot_carbine"],) + no_str),
-        # firing on the move: the same recoil over the walk and run gaits (the
-        # game's lower and upper body are independent). Variants 1 and 2 of the
-        # shoot category; the brain picks by his pace and times them by his gait
-        # phase, the recoil clamped at its own end inside each cycle.
-        dict(cat=CAT_SHOOT, loop=True, frames=33, legs=(S["walk"],) + no_str,
-             upper=(S["ref_shoot_carbine"],) + (1.0, True)),
-        dict(cat=CAT_SHOOT, loop=True, frames=19, legs=(S["run"],) + no_str,
-             upper=(S["ref_shoot_carbine"],) + (1.0, True)),
+        # ---- legs layer ----
+        dict(cat=CAT_IDLE, layer=LYR_LEG, loop=True, frames=122, seq=spec(S["idle1"])),
+        dict(cat=CAT_WALK, layer=LYR_LEG, loop=True, frames=33, seq=spec(S["walk"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=19, seq=spec(S["run"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["left"]), seq=spec(S["left"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["right"]), seq=spec(S["right"])),
+        dict(cat=CAT_RUN, layer=LYR_LEG, loop=True, frames=native_frames(S["back"]), seq=spec(S["back"])),
+        dict(cat=CAT_CROUCH, layer=LYR_LEG, loop=True, frames=30, seq=spec(S["crouch_idle"])),
+        dict(cat=CAT_JUMP, layer=LYR_LEG, loop=False, frames=native_frames(S["jump"]),
+             seq=spec(S["jump"], 1.0, True)),
+        # ---- upper layer ----
+        dict(cat=CAT_IDLE, layer=LYR_UP, loop=True, frames=41,
+             seq=spec(S["idle1"], 122.0 / 41.0)),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["ref_aim_carbine"], 1.0, False, AIM_BLEND[0])),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["ref_aim_carbine"], 1.0, False, AIM_BLEND[1])),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["ref_aim_carbine"], 1.0, False, AIM_BLEND[2])),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["crouch_aim_carbine"], 1.0, False, AIM_BLEND[0])),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["crouch_aim_carbine"], 1.0, False, AIM_BLEND[1])),
+        dict(cat=CAT_AIM, layer=LYR_UP, loop=True, frames=2,
+             seq=spec(S["crouch_aim_carbine"], 1.0, False, AIM_BLEND[2])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["ref_shoot_carbine"], 1.0, False, AIM_BLEND[0])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["ref_shoot_carbine"], 1.0, False, AIM_BLEND[1])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["ref_shoot_carbine"], 1.0, False, AIM_BLEND[2])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["crouch_shoot_carbine"], 1.0, False, AIM_BLEND[0])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["crouch_shoot_carbine"], 1.0, False, AIM_BLEND[1])),
+        dict(cat=CAT_SHOOT, layer=LYR_UP, loop=True, frames=10,
+             seq=spec(S["crouch_shoot_carbine"], 1.0, False, AIM_BLEND[2])),
         # the brain's reload takes 3.0 s; the game's own reload anim is 2.03 s, stretched to fit
-        dict(cat=CAT_RELOAD, loop=False, frames=90, legs=(S["idle1"],) + no_str,
-             upper=(S["ref_reload_carbine"], (61 / 30.0) / 3.0, True)),
-        dict(cat=CAT_DEATH, loop=False, frames=36, full=(S["death1"],) + (1.0, True)),
-        dict(cat=CAT_DEATH, loop=False, frames=41, full=(S["death2"],) + (1.0, True)),
-        dict(cat=CAT_DEATH, loop=False, frames=106, full=(S["death3"],) + (1.0, True)),
+        dict(cat=CAT_RELOAD, layer=LYR_UP, loop=False, frames=90,
+             seq=spec(S["ref_reload_carbine"], (61 / 30.0) / 3.0, True)),
+        dict(cat=CAT_RELOAD, layer=LYR_UP, loop=False, frames=90,
+             seq=spec(S["crouch_reload_carbine"],
+                      (S["crouch_reload_carbine"].numframes / S["crouch_reload_carbine"].fps) / 3.0, True)),
+        dict(cat=CAT_FLINCH, layer=LYR_UP, loop=False, frames=native_frames(S["gut_flinch"]),
+             seq=spec(S["gut_flinch"], 1.0, True)),
+        dict(cat=CAT_FLINCH, layer=LYR_UP, loop=False, frames=native_frames(S["head_flinch"]),
+             seq=spec(S["head_flinch"], 1.0, True)),
+        # ---- full layer ----
+        dict(cat=CAT_DEATH, layer=LYR_FULL, loop=False, frames=36, seq=spec(S["death1"], 1.0, True)),
+        dict(cat=CAT_DEATH, layer=LYR_FULL, loop=False, frames=41, seq=spec(S["death2"], 1.0, True)),
+        dict(cat=CAT_DEATH, layer=LYR_FULL, loop=False, frames=106, seq=spec(S["death3"], 1.0, True)),
     ]
     seqs = bake(urban, comb, plan)
     corners = collect_corners(urban, weapon, comb, scale)
     tris = len(corners) // 3
     print("corners %d, triangles %d, baked sequences %d, frames %d"
-          % (len(corners), tris, len(seqs), sum(len(f) for _c, _l, f in seqs)))
+          % (len(corners), tris, len(seqs), sum(len(f) for _c, _ly, _l, f in seqs)))
 
     stride_walk, v_walk = measure_stride(urban, S["walk"], scale)
     stride_run, v_run = measure_stride(urban, S["run"], scale)
-    print("strides: walk %.3f m (feet match the ground at %.2f m/s), run %.3f m (at %.2f m/s)"
-          % (stride_walk, v_walk, stride_run, v_run))
+    try:
+        stride_strafe_l, _vl = measure_stride(urban, S["left"], scale, axis=1)
+        stride_strafe_r, _vr = measure_stride(urban, S["right"], scale, axis=1)
+        stride_strafe = (stride_strafe_l + stride_strafe_r) * 0.5
+    except SystemExit:
+        stride_strafe = stride_run
+        print("strafe stride unmeasurable - falling back to the run stride")
+    try:
+        stride_back, _vb = measure_stride(urban, S["back"], scale)
+    except SystemExit:
+        stride_back = stride_run
+        print("back stride unmeasurable - falling back to the run stride")
+    print("strides: walk %.3f m (feet match the ground at %.2f m/s), run %.3f m (at %.2f m/s), strafe %.3f m, back %.3f m"
+          % (stride_walk, v_walk, stride_run, v_run, stride_strafe, stride_back))
     muzzle, butt = gun_anchors(urban, weapon, comb, scale)
+
+    # per-bone layer + waist-twist weights for the runtime's two-layer compose:
+    # lower bones (root, pelvis, legs) come from the gait layer; spine and up
+    # come from the aim layer; the aim-vs-movement yaw difference is distributed
+    # over the three spine bones so the torso twists like a real man's.
+    legs_set = leg_bone_set(urban)
+    bone_layer = []
+    twist = []
+    TWIST_BY_NAME = {"Bip01 Spine": 0.40, "Bip01 Spine1": 0.35, "Bip01 Spine2": 0.25}
+    for i, name in enumerate(comb.names):
+        bone_layer.append(0 if i in legs_set else 1)
+        twist.append(TWIST_BY_NAME.get(name, 0.0))
+    print("lower bones: %d of %d; twist weights sum %.2f"
+          % (sum(1 for v in bone_layer if v == 0), comb.count, sum(twist)))
 
     textures = [(t.w, t.h) for t in urban.textures] + [(t.w, t.h) for t in weapon.textures]
     blob = bytearray()
     blob += b"CSM1"
-    blob += struct.pack("<I", 2)  # version 2: strides and gun anchors ride along
+    blob += struct.pack("<I", 3)  # version 3: layers stored separately + bone layer/twist tables
     blob += struct.pack("<IIII", comb.count, len(corners), tris, len(textures))
     for w, h in textures:
         blob += struct.pack("<HH", w, h)
     blob += struct.pack("<I", len(seqs))
-    for cat, loop, frames in seqs:
-        blob += struct.pack("<BBHf", cat, loop, len(frames), len(frames) / OUT_FPS)
+    for cat, layer, loop, frames in seqs:
+        blob += struct.pack("<BBBHf", cat, layer, loop, len(frames), len(frames) / OUT_FPS)
     blob += struct.pack("<ff", scale, zshift)
-    blob += struct.pack("<ff", stride_walk, stride_run)
+    blob += struct.pack("<ffff", stride_walk, stride_run, stride_strafe, stride_back)
     for _posed, bone, local in (muzzle, butt):
         blob += struct.pack("<i3f", bone, local[0], local[1], local[2])
     for p in comb.parents:
         blob += struct.pack("<i", p)
+    for v in bone_layer:
+        blob += struct.pack("<B", v)
+    for wgt in twist:
+        blob += struct.pack("<f", wgt)
     for pos, n, uv, bone, _tex in corners:
         nn = np.array(n, dtype=np.float64)
         ln = np.linalg.norm(nn) or 1.0
@@ -388,7 +465,7 @@ def main():
                             int(nn[0]), int(nn[1]), int(nn[2]), uv[0], uv[1], bone)
     for i in range(tris):
         blob += struct.pack("<B", corners[3 * i][4])
-    for _cat, _loop, frames in seqs:
+    for _cat, _layer, _loop, frames in seqs:
         for frame in frames:
             for bi, (pos, quat) in enumerate(frame):
                 x, y, z = pos[0] * scale, pos[1] * scale, pos[2] * scale

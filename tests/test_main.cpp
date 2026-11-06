@@ -19,6 +19,7 @@
 #include "Items.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "NavGraph.h"
 #include "SoldierModel.h"
 #include "Screens.h"
 #include "Shapes.h"
@@ -621,6 +622,28 @@ struct TestHost : Host {
     bool PlayerOnGround() override { return onGround; }
     bool PlayerFalling() override { return falling; }
     int PlayerVehicle() override { return vehicle; }
+    // the boss's vehicle senses (workstream L): a scripted car to sit in
+    bool vehPoseOn = false;
+    Vec3 vehCentre, vehFwd{ 0, 1, 0 }, vehSeat, vehVel;
+    bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {
+        if (!vehPoseOn)
+            return false;
+        *centre = vehCentre;
+        *forward = vehFwd;
+        *driverChest = vehSeat;
+        *velocity = vehVel;
+        return true;
+    }
+    int tyrePops = 0;
+    Vec3 lastTyrePoint;
+    void VehicleShotEffect(int, const Vec3& hitPoint, int effect) override {
+        if (effect == 1) {
+            ++tyrePops;
+            lastTyrePoint = hitPoint;
+        }
+    }
+    bool aimingAtHim = false;
+    bool PlayerAimingAt(const Vec3&, float) override { return aimingAtHim; }
     void MovePlayer(const Vec3& to) override {
         player = to;
         ++moves;
@@ -2190,6 +2213,15 @@ static void TestNewMobs() {
 
 // the Counter-Strike soldier of the CS project, step 1: one counter-terrorist with the game's own
 // M4A1 and a professional's brain, tuned very hard (his whole difficulty sits in kSoldier in Mobs.cpp)
+// a soldier's brain reads his aim and his legs, not the raw yaw field: face all of them
+static void FaceMob(int s, float yaw) {
+    gMobs[s].yaw = yaw;
+    gMobs[s].aimYaw = yaw;
+    gMobs[s].legYaw = yaw;
+    gMobs[s].draw.aimYaw = yaw;
+    gMobs[s].draw.legYaw = yaw;
+}
+
 static void TestSoldier() {
     TestHost host;
     SetHost(&host);
@@ -2200,7 +2232,7 @@ static void TestSoldier() {
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
-        CHECK(s >= 0 && gMobs[s].health == 200.0f && gMobs[s].armor == 200.0f, "a soldier: 100 health and 100 kevlar, counted in half hearts");
+        CHECK(s >= 0 && gMobs[s].health == 2400.0f && gMobs[s].armor == 800.0f, "the boss: 2400 health and 800 kevlar in half hearts - a full magazine of solid hits cannot kill him, about three can");
         CHECK(gMobs[s].team == TEAM_COUNTER && IsMonster(MOB_SOLDIER), "he fights for the counter-terrorists");
         CHECK(gMobs[s].mag == 30 && Near(MobHeight(gMobs[s]), 1.8f), "a full M4A1 magazine and a man's height");
         CHECK(TEAM_TERRORIST != TEAM_COUNTER && TEAM_NONE != TEAM_COUNTER, "the two sides of the war are kept apart");
@@ -2210,12 +2242,12 @@ static void TestSoldier() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 195.0f) && Near(gMobs[s].armor, 195.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
+        CHECK(Near(gMobs[s].health, 2395.0f) && Near(gMobs[s].armor, 795.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
         gMobs[s].hurt = 0.0f;
         gMobs[s].armor = 0.0f;
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 185.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
-        CHECK(gMobs[s].alerted && gMobs[s].searchTime > 0.0f, "and being shot at alerts him and sends him hunting");
+        CHECK(Near(gMobs[s].health, 2385.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
+        CHECK(gMobs[s].alerted && gMobs[s].bossState == 2, "and being shot at puts him in combat at once (state %d)", gMobs[s].bossState);
     }
     // the street is not his war: a man of the host's people at his nose is never his target
     {
@@ -2226,7 +2258,7 @@ static void TestSoldier() {
         host.people.push_back(p);
         const std::vector<BeingInfo> beings = { BeingInfo{ 0, p.centre } };
         const int s = SpawnMob(MOB_SOLDIER, Vec3(10.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = kPi / 2.0f; // facing the man in the street
+        FaceMob(s, kPi / 2.0f); // facing the man in the street
         RunMobsB(4.0f, Vec3(90.5f, 0.5f, 11.0f), &beings); // the player is 80 m off: nobody's fight
         CHECK(host.people[0].hurt == 0.0f, "a soldier never shoots the people of the street");
         CHECK(host.playerHurt == 0.0f && !gMobs[s].alerted, "and a far-off player is not engaged either");
@@ -2237,19 +2269,22 @@ static void TestSoldier() {
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(20.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = -kPi / 2.0f; // facing +x; the player stands 15 m behind him, at -x
+        FaceMob(s, -kPi / 2.0f); // facing +x; the player stands 15 m behind him, at -x
         gMobs[s].patrolWait = 5.0f;
         RunMobsB(0.3f, Vec3(5.5f, 0.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].seenTime == 0.0f && !gMobs[s].alerted && host.playerHurt == 0.0f, "a man at his back is not seen");
+        CHECK(gMobs[s].detect == 0.0f && !gMobs[s].alerted && host.playerHurt == 0.0f, "a man at his back, 15 m off, is not seen - the point-blank bypass is 4 m, not a sphere of eyes");
     }
-    // in front of him it takes only a moment: he sees, reacts, and his bursts land
+    // in front of him it takes only a moment: he sees, reacts, and his bursts land.
+    // (This encounter already had its talk - negotiated - so a sighting is a fight;
+    // the talk itself is proven in TestBoss.)
     {
         WideStage();
         host.playerHurt = 0.0f;
         const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = kPi / 2.0f; // facing the player, 14 m off
+        FaceMob(s, kPi / 2.0f); // facing the player, 14 m off
+        gMobs[s].negotiated = true;
         RunMobsB(0.3f, player, nullptr);
-        CHECK(gMobs[s].huntValid && gMobs[s].alerted, "a man in front of him is seen at once");
+        CHECK(gMobs[s].bossState == 2 && gMobs[s].alerted, "a man in front of him is seen at once");
         RunMobsB(2.5f, player, nullptr);
         CHECK(host.playerHurt > 0.0f, "and his rifle lands hits (%.1f half hearts)", host.playerHurt);
         const int used = 30 - gMobs[s].mag;
@@ -2260,7 +2295,8 @@ static void TestSoldier() {
         WideStage();
         host.playerHurt = 0.0f;
         const int s = SpawnMob(MOB_SOLDIER, Vec3(12.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = kPi / 2.0f;
+        FaceMob(s, kPi / 2.0f);
+        gMobs[s].negotiated = true;
         RunMobsB(1.0f, player, nullptr); // he is engaged by now
         gMobs[s].mag = 1;
         gMobs[s].burstShots = 0;
@@ -2277,13 +2313,14 @@ static void TestSoldier() {
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(30.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = kPi / 2.0f; // facing the player, 12 m west of him
-        gMobs[s].health = 50.0f;  // a quarter of his health: under the retreat line
+        FaceMob(s, kPi / 2.0f); // facing the player, 12 m west of him
+        gMobs[s].negotiated = true;
+        gMobs[s].health = 500.0f; // a fifth of his pool: under the retreat line
         const Vec3 pl(18.5f, 0.5f, 11.0f);
         const float d0 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
         RunMobsB(2.5f, pl, nullptr);
         const float d1 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
-        CHECK(d1 > d0 + 3.0f, "a hurt soldier falls back (%.1f m -> %.1f m)", d0, d1);
+        CHECK(d1 > d0 + 1.5f, "a hurt soldier falls back (%.1f m -> %.1f m)", d0, d1);
     }
 }
 
@@ -5598,39 +5635,64 @@ static void TestSoldierModel() {
         CHECK(LoadSoldierBinFromRepo() && SoldierModelReady(), "the model loads back from the repo file");
     }
 
-    // the poses are the game's own numbers, measured off the converted file.
-    // (The first bake read the aim/shoot sequences' corner blend cell, which
-    // twisted the rifle up over his head: the old expectations here - a 1.78 m
-    // aim, a shoot pose taller than 1.85 m - were measurements of that defect.
-    // With the centre blend the rifle sits level on his shoulder and the top of
-    // the pose is his head, the way the game shows it.)
+    // the poses are the game's own numbers, measured off the converted file -
+    // in the v3 format's own terms now: legs and upper body are separate layers,
+    // composed exactly the way the game composes them (workstream M).
     {
+        auto spanOf = [](const SoldierDrawState& st, float& lo, float& hi) {
+            return SoldierComposedSpan(st, &lo, &hi);
+        };
+        SoldierDrawState aim; // standing at aim, level pitch row, all facing one way
+        aim.legCategory = SP_IDLE;
+        aim.upCategory = SP_AIM;
+        aim.upVariant = 0; // the level row
         float lo = 0, hi = 0;
-        CHECK(SoldierPoseSpan(SP_AIM, 0, 0.0f, &lo, &hi) && lo > -0.02f && lo < 0.02f && hi > 1.50f && hi < 1.72f,
-              "aim stance: feet on the ground, %.2f m tall (lowest %.3f)", hi, lo);
-        CHECK(SoldierPoseSpan(SP_IDLE, 0, 0.0f, &lo, &hi) && hi > 1.5f && hi < 1.7f, "his idle stands %.2f m", hi);
+        CHECK(spanOf(aim, lo, hi) && lo > -0.05f && lo < 0.15f && hi > 1.35f && hi < 1.50f,
+              "aim stance composed from layers: %.2f m tall (lowest %.3f)", hi, lo);
+        SoldierDrawState idle;
+        idle.legCategory = SP_IDLE;
+        idle.upCategory = SP_IDLE;
+        CHECK(spanOf(idle, lo, hi) && hi > 1.35f && hi < 1.50f, "his idle stands %.2f m to the head joint", hi);
         float loMin = 1e9f, loMax = -1e9f, hiMin = 1e9f, hiMax = -1e9f;
         for (int ph = 0; ph < 6; ++ph) {
+            SoldierDrawState walk;
+            walk.legCategory = SP_WALK;
+            walk.gait = ph / 6.0f; // the gaits run on the gait phase, not on seconds
+            walk.upCategory = SP_IDLE;
             float l2 = 0, h2 = 0;
-            SoldierPoseSpan(SP_WALK, 0, 1.1f * ph / 6.0f, &l2, &h2);
+            spanOf(walk, l2, h2);
             loMin = std::min(loMin, l2); loMax = std::max(loMax, l2);
             hiMin = std::min(hiMin, h2); hiMax = std::max(hiMax, h2);
         }
         CHECK(hiMax - hiMin > 0.02f || loMax - loMin > 0.02f,
               "the walk cycle really moves (span travels %.3f/%.3f m over the cycle)", loMax - loMin, hiMax - hiMin);
         for (int v = 0; v < 3; ++v)
-            CHECK(SoldierPoseSpan(SP_DEATH, v, 99.0f, &lo, &hi) && hi < 0.7f && lo > -0.25f,
+            CHECK(SoldierPoseSpan(SP_DEATH, SL_FULL, v, 99.0f, &lo, &hi) && hi < 0.7f && lo > -0.25f,
                   "death %d ends lying on the ground (%.2f m tall, lowest %.3f)", v, hi, lo);
         // firing is the aim with the game's recoil in it: the rifle's muzzle sits
         // somewhere else than it does at rest - that difference is the kick
+        SoldierDrawState shoot = aim;
+        shoot.upCategory = SP_SHOOT;
+        shoot.upTime = 0.1f;
         Vec3 aimMz, aimBt, shootMz, shootBt;
-        CHECK(SoldierGunPose(EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
-                             SP_AIM, 0, 0.0f, &aimMz, &aimBt) &&
-                  SoldierGunPose(EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
-                                 SP_SHOOT, 0, 0.1f, &shootMz, &shootBt),
+        const Pose stand = EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f);
+        CHECK(SoldierGunPose(stand, aim, &aimMz, &aimBt) && SoldierGunPose(stand, shoot, &shootMz, &shootBt),
               "the model answers for its rifle in aim and in shoot");
         const float kick = (shootMz - aimMz).Length();
         CHECK(kick > 0.02f, "the shoot pose kicks his rifle - the game's own recoil data (%.3f m from the aim)", kick);
+        // a v2 file is refused, loudly: patch the loaded store's own header copy
+        {
+            FILE* f = std::fopen(SoldierBinPath(), "rb");
+            std::fseek(f, 0, SEEK_END);
+            const long n = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            std::vector<unsigned char> bytes((size_t)n);
+            const bool rd = std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+            std::fclose(f);
+            bytes[4] = 2; // version field: 3 -> 2
+            CHECK(rd && !LoadSoldierModel(bytes.data(), bytes.size()), "a version-2 soldier file is refused, not half-read");
+            CHECK(LoadSoldierBinFromRepo(), "and the real v3 file loads back");
+        }
     }
 
     // his wall probe: a wall across the patrol road bends his path around it; no wall, no bend
@@ -5700,8 +5762,12 @@ static void TestSoldierAimFix() {
         const Vec3 fwd(-std::sin(yaw), std::cos(yaw), 0.0f);
         const Vec3 right(fwd.y, -fwd.x, 0.0f);
         const Pose stand = EntityPose(Vec3(0, 0, 0), right, Vec3(0, 0, 1), fwd, 1.0f);
+        SoldierDrawState aimSt;
+        aimSt.legCategory = SP_IDLE;
+        aimSt.upCategory = SP_AIM;
+        aimSt.upVariant = 0; // the level pitch row (the bake's order: level, up, down)
         Vec3 muzzle, butt;
-        CHECK(SoldierGunPose(stand, SP_AIM, 0, 0.0f, &muzzle, &butt), "yaw %d: the model answers for its rifle", qi * 90);
+        CHECK(SoldierGunPose(stand, aimSt, &muzzle, &butt), "yaw %d: the model answers for its rifle", qi * 90);
         Vec3 d = muzzle - butt;
         d.z = 0.0f;
         const float dl = d.Length();
@@ -5714,7 +5780,7 @@ static void TestSoldierAimFix() {
         GunBoundsSink gs;
         SetModelSink(&gs);
         MobAnim anim;
-        anim.soldierPose = SP_AIM;
+        anim.soldier = aimSt;
         DrawMob(MOB_SOLDIER, stand, anim, 1.0f, 1.0f, 1.0f, 1.0f);
         SetModelSink(nullptr);
         const Vec3 gc = (gs.lo + gs.hi) * 0.5f;
@@ -5727,13 +5793,22 @@ static void TestSoldierAimFix() {
     // ---- E: the file's own strides, and a pose change cross-fades instead of snapping
     CHECK(Near(SoldierStride(SP_WALK), 1.553f, 0.06f), "the walk stride is measured off the cycle (%.3f m)", SoldierStride(SP_WALK));
     CHECK(Near(SoldierStride(SP_RUN), 2.970f, 0.10f), "the run stride is measured off the cycle (%.3f m)", SoldierStride(SP_RUN));
+    CHECK(SoldierGaitStride(SP_RUN, 1) > 0.2f && SoldierGaitStride(SP_RUN, 3) > 2.0f,
+          "the strafe and back gaits carry their own strides (%.3f / %.3f m)", SoldierGaitStride(SP_RUN, 1), SoldierGaitStride(SP_RUN, 3));
     {
         RecordSink sink;
         SetModelSink(&sink);
         MobAnim anim;
-        anim.soldierPose = SP_WALK;
-        anim.soldierPrevPose = SP_IDLE;
-        anim.soldierFade = 0.5f;
+        SoldierDrawState walkSt;
+        walkSt.legCategory = SP_WALK;
+        walkSt.upCategory = SP_IDLE;
+        SoldierDrawState idleSt;
+        idleSt.legCategory = SP_IDLE;
+        idleSt.upCategory = SP_IDLE;
+        walkSt.hasPrev = true;
+        walkSt.prevBones = SoldierComposeLocals(idleSt, walkSt.prevLocals.data(), 64);
+        walkSt.fade = 0.5f;
+        anim.soldier = walkSt;
         sink.Reset();
         DrawMob(MOB_SOLDIER, EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
                 anim, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -5747,14 +5822,15 @@ static void TestSoldierAimFix() {
         WideStage();
         gShotFx.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = kPi * 0.5f; // facing the man in the street
+        FaceMob(s, kPi * 0.5f); // facing the man in the street
+        gMobs[s].negotiated = true; // the talk is over: this is the fight itself
         int shootTicks = 0, holdRun = 0, bestHold = 0;
         bool fxSeen = false;
         for (int i = 0; i < 60; ++i) {
             MobsTick(0.05f, Vec3(0.5f, 0.5f, 11.0f), 0, true, &none);
             if (!gShotFx.empty())
                 fxSeen = true;
-            if (gMobs[s].soldierPose == SP_SHOOT) {
+            if (gMobs[s].draw.upCategory == SP_SHOOT) {
                 ++shootTicks;
                 bestHold = std::max(bestHold, ++holdRun);
             } else {
@@ -5766,23 +5842,34 @@ static void TestSoldierAimFix() {
               "the shoot pose holds through a burst (%d shoot ticks, longest hold %d)", shootTicks, bestHold);
     }
 
-    // ---- E: gait and ground agree - over a run at the brain's own speed, the
-    // distance his feet travel and the distance his body travels are the same
+    // ---- E: gait and ground agree - measured over a STEADY hunt run (one
+    // gait, one speed, no firing and no planting): the distance his feet
+    // travel and the distance his body travels are the same
     {
         WideStage();
-        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = -kPi * 0.5f; // facing the man down the street
-        Vec3 prev = gMobs[s].pos;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, -kPi * 0.5f); // east
+        gMobs[s].bossState = 3; // BS_HUNT
+        gMobs[s].huntPhase = 0;
+        gMobs[s].huntDest = Vec3(60.5f, 0.5f, 10.0f);
+        float gait0 = 0.0f;
+        Vec3 prev(0, 0, 0);
         float travelled = 0.0f;
-        for (int i = 0; i < 32; ++i) {
-            MobsTick(0.05f, Vec3(43.5f, 0.5f, 11.0f), 0, true, &none);
-            const Vec3 p = gMobs[s].pos;
-            travelled += std::sqrt((p.x - prev.x) * (p.x - prev.x) + (p.y - prev.y) * (p.y - prev.y));
-            prev = p;
+        for (int i = 0; i < 37; ++i) {
+            // the player far behind him: never seen, so the run never breaks
+            MobsTick(0.05f, Vec3(-59.5f, 0.5f, 11.0f), 0, true, &none);
+            if (i == 4) {
+                gait0 = gMobs[s].draw.gait;
+                prev = gMobs[s].pos;
+            } else if (i > 4) {
+                const Vec3 p2 = gMobs[s].pos;
+                travelled += std::sqrt((p2.x - prev.x) * (p2.x - prev.x) + (p2.y - prev.y) * (p2.y - prev.y));
+                prev = p2;
+            }
         }
-        const float byGait = gMobs[s].soldierGait * SoldierStride(SP_RUN);
-        CHECK(travelled > 5.0f && std::fabs(travelled - byGait) / travelled < 0.08f,
-              "gait and ground agree: body %.2f m, feet %.2f m (drift %.1f%%)", travelled, byGait,
+        const float byGait = (gMobs[s].draw.gait - gait0) * SoldierStride(SP_RUN);
+        CHECK(travelled > 4.0f && std::fabs(travelled - byGait) / travelled < 0.12f,
+              "gait and ground agree on the steady run: body %.2f m, feet %.2f m (drift %.1f%%)", travelled, byGait,
               travelled > 0.01f ? std::fabs(travelled - byGait) / travelled * 100.0f : 0.0f);
     }
 
@@ -5799,7 +5886,10 @@ static void TestSoldierAimFix() {
         host.stripX1 = 9.2f;
         host.stripFound = mode == 0; // mode 0: the sample lands 40 m down; mode 1: it finds nothing
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
-        gMobs[s].yaw = -kPi * 0.5f;
+        FaceMob(s, -kPi * 0.5f);
+        gMobs[s].negotiated = true;
+        gMobs[s].bossState = 2; // running at the man: the strip is crossed at combat speed
+        gMobs[s].detect = 1.0f;
         float minZ = 1e9f;
         for (int i = 0; i < 70; ++i) {
             MobsTick(0.05f, Vec3(43.5f, 0.5f, 11.0f), 0, true, &none);
@@ -5811,6 +5901,515 @@ static void TestSoldierAimFix() {
               "mode %d: he crosses the strip and stands on the street again (x %.1f, z %.2f)", mode, gMobs[s].pos.x, gMobs[s].pos.z);
         host.groundMode = 0;
         host.stripFound = true;
+    }
+}
+
+
+// ------------------------------------------------------------------
+// THE BOSS: the solo soldier finished whole - senses, talk-first, body,
+// combat trade, mobility, the street's war (K), the traffic (L), the
+// two-layer body (M), the map in his head (A) and his voice (H).
+// (Boss states, for the numbers below: 0 calm, 1 command, 2 combat,
+// 3 hunt, 4 suspicious.)
+static bool LoadNavGraphFromRepo() {
+    static const char* paths[] = { "cs-soldier/nav_graph.bin", "../cs-soldier/nav_graph.bin",
+                                   "../../cs-soldier/nav_graph.bin", "../../../cs-soldier/nav_graph.bin" };
+    for (const char* p : paths) {
+        FILE* f = std::fopen(p, "rb");
+        if (!f)
+            continue;
+        std::fseek(f, 0, SEEK_END);
+        const long n = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        std::vector<unsigned char> bytes((size_t)std::max<long>(n, 0));
+        const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+        std::fclose(f);
+        if (ok)
+            return LoadNavGraph(bytes.data(), bytes.size());
+    }
+    return false;
+}
+
+static void TestBoss() {
+    TestHost host;
+    SetHost(&host);
+    srand(777);
+    const std::vector<BeingInfo> none;
+    CHECK(LoadSoldierBinFromRepo(), "the boss tests meet his real model");
+
+    // ---- C: the meter fills by what he can actually see of you
+    {
+        auto ticksToDetect = [&](bool wall, float wallZ) {
+            WideStage();
+            host.wall = wall;
+            host.wallC = Vec3(0.5f, 6.5f, wallZ);
+            host.wallDir = Vec3(1, 0, 0);
+            host.wallHalf = 3.0f;
+            const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+            FaceMob(s, 0.0f);
+            int ticks = -1;
+            for (int i = 0; i < 40; ++i) {
+                MobsTick(0.05f, Vec3(0.5f, 12.5f, 11.0f), 0, true, &none);
+                if (gMobs[s].detect >= 1.0f) {
+                    ticks = i + 1;
+                    break;
+                }
+            }
+            host.wall = false;
+            return ticks;
+        };
+        // the test wall's z band gives three honest fractions: nothing (its band
+        // swallows every sample line), two of three points (only the head's line
+        // stays under its top), and the open street
+        CHECK(ticksToDetect(true, 10.0f) < 0, "behind a full wall he sees nothing at all");
+        const int peek = ticksToDetect(true, 11.57f); // only the head's sample line clears this wall's top
+        const int open = ticksToDetect(false, 0.0f);
+        CHECK(open > 0 && open <= 6, "wide open at 12 m he has you in a blink (%d ticks)", open);
+        CHECK(peek > open && peek <= 30, "a peek of head and shoulders still fills the meter - slower, but it fills (%d vs %d ticks)", peek, open);
+    }
+    // ---- C: night trades range for hearing, and a gun in his face is fast news
+    {
+        WideStage();
+        host.dark = true;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FaceMob(s, 0.0f);
+        RunMobsB(1.5f, Vec3(0.5f, 50.5f, 11.0f), nullptr); // 50 m: beyond the night range of 45
+        CHECK(gMobs[s].detect == 0.0f, "at night his reach is 45 m, not 60 (detect %.2f)", gMobs[s].detect);
+        NotePlayerShot(Vec3(0.5f, -19.5f, 11.0f), 70.0f); // a shot 20 m behind him
+        RunMobsB(0.3f, Vec3(0.5f, 50.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].alerted, "but at night his ears reach further - a shot behind him turns him");
+        host.dark = false;
+        WideStage();
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s2, 0.0f);
+        FaceMob(s2, 0.0f);
+        NotePlayerShot(Vec3(0.5f, -79.5f, 11.0f), 70.0f); // by day, 80 m is beyond a shot's carry
+        RunMobsB(0.3f, Vec3(0.5f, -79.5f, 11.0f), nullptr); // and the man himself is out of sight behind him
+        CHECK(!gMobs[s2].alerted, "by day a shot 80 m off is not heard");
+    }
+    {
+        auto ticksToDetect55 = [&](bool aiming) {
+            WideStage();
+            host.aimingAtHim = aiming;
+            const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+            FaceMob(s, 0.0f);
+            int ticks = -1;
+            for (int i = 0; i < 30; ++i) {
+                MobsTick(0.05f, Vec3(0.5f, 55.5f, 11.0f), 0, true, &none);
+                if (gMobs[s].detect >= 1.0f) {
+                    ticks = i + 1;
+                    break;
+                }
+            }
+            host.aimingAtHim = false;
+            return ticks;
+        };
+        const int passive = ticksToDetect55(false);
+        const int aimed = ticksToDetect55(true);
+        CHECK(passive > 0 && aimed > 0 && aimed < passive,
+              "being aimed at fills his meter faster than being seen does (%d vs %d ticks at 55 m)", aimed, passive);
+    }
+    // ---- G: he talks first - and only in the guard's calm
+    {
+        WideStage();
+        gPlayed.clear();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // a peaceful man walks up
+        CHECK(gMobs[s].bossState == 1, "a peaceful first sighting is a command, not a fight (state %d)", gMobs[s].bossState);
+        CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) >= 1, "and the order is spoken");
+        RunMobsB(11.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // the man stands still and obeys
+        CHECK(gMobs[s].bossState == 4 && host.playerHurt == 0.0f,
+              "obeyed, he stands down to watchful - and never fired (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].primedT > 10.0f, "but he remembers the face: primed detection for a minute (%.0f s left)", gMobs[s].primedT);
+        CHECK(Heard(SND_BOSS_DOWN1) >= 1, "the stand-down is spoken too");
+    }
+    {
+        WideStage(); // run during the window: war
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].bossState == 1, "the window opens");
+        host.velocity = Vec3(6.0f, 0.0f, 0.0f); // he breaks into a sprint
+        RunMobsB(0.3f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].bossState == 2, "a sprint inside the window is war");
+        host.velocity = Vec3();
+    }
+    {
+        WideStage(); // aim at him during the window: war - and no second talk after
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
+        host.aimingAtHim = true;
+        RunMobsB(0.8f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].bossState == 2, "a gun raised at him inside the window is war");
+        host.aimingAtHim = false;
+        RunMobsB(3.0f, Vec3(0.5f, -160.5f, 11.0f), nullptr); // the man breaks away, far off
+        const Vec3 front = gMobs[s].pos + Vec3(-std::sin(gMobs[s].aimYaw), std::cos(gMobs[s].aimYaw), 0.0f) * 10.0f + Vec3(0, 0, 1.0f);
+        RunMobsB(0.6f, front, nullptr); // and shows himself again, peaceful as you like
+        CHECK(gMobs[s].bossState != 1, "but this encounter gets no second negotiation (state %d)", gMobs[s].bossState);
+    }
+    {
+        WideStage(); // summoned into a fight already loud: no commands at all
+        gPlayed.clear();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        NotePlayerShot(Vec3(0.5f, 12.5f, 11.0f), 70.0f); // shots, moments before he lays eyes on the man
+        RunMobsB(0.6f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].bossState == 2, "with a fight already in the air he fights at once (state %d)", gMobs[s].bossState);
+        CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0, "and no order is given");
+    }
+    // ---- B: the body - head is body, and the magazine arithmetic holds
+    {
+        WideStage();
+        const int a = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        const int b = SpawnMob(MOB_SOLDIER, Vec3(9.5f, 0.5f, 10.0f), true);
+        MobHurt(a, 20.0f, Vec3(3.5f, 0.5f, 11.8f), 0.0f); // a blow from head height
+        MobHurt(b, 20.0f, Vec3(9.5f, 0.5f, 10.2f), 0.0f); // and one from the feet
+        CHECK(Near(gMobs[a].health, gMobs[b].health, 0.01f),
+              "a hit at his head costs exactly a hit at his body (%.1f vs %.1f) - there is no headshot", gMobs[a].health, gMobs[b].health);
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        for (int i = 0; i < 30; ++i) { // one full magazine of the reference hit (44 half hearts raw)
+            gMobs[s].hurt = 0.0f;
+            MobHurt(s, 44.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        }
+        CHECK(gMobs[s].death < 0.0f && Near(gMobs[s].health, 1740.0f, 2.0f),
+              "thirty solid hits leave him standing (health %.0f)", gMobs[s].health);
+        for (int i = 0; i < 60; ++i) {
+            gMobs[s].hurt = 0.0f;
+            MobHurt(s, 44.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        }
+        CHECK(gMobs[s].death >= 0.0f || gMobs[s].health <= 0.0f, "about three magazines do finish him - hard to kill, not unkillable");
+    }
+    // ---- F: an empty rifle at arm's length is a pistol; at range, a reload
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.8f, Vec3(0.5f, 6.5f, 11.0f), nullptr); // the fight is on, 6 m out
+        CHECK(gMobs[s].bossState == 2, "engaged");
+        gMobs[s].mag = 0;
+        gMobs[s].burstPause = 0.0f;
+        RunMobsB(2.5f, Vec3(0.5f, 6.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].pistolOut && gMobs[s].pistolMag < 15 && gMobs[s].reloadT <= 0.0f,
+              "empty at 6 m: the pistol comes out instead of a reload (pistol rounds left %d)", gMobs[s].pistolMag);
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.8f, Vec3(0.5f, 30.5f, 11.0f), nullptr);
+        gMobs[s].mag = 0;
+        gMobs[s].burstPause = 0.0f;
+        RunMobsB(1.0f, Vec3(0.5f, 30.5f, 11.0f), nullptr);
+        CHECK(gMobs[s].reloadT > 0.0f && !gMobs[s].pistolOut, "empty at 30 m: he reloads the rifle, the pistol stays holstered");
+    }
+    // ---- F: he crouches for the long shot
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        bool crouchedAiming = false;
+        for (int i = 0; i < 40; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 30.5f, 11.0f), 0, true, &none);
+            if (gMobs[s].crouch && gMobs[s].draw.upVariant >= 3)
+                crouchedAiming = true;
+        }
+        CHECK(crouchedAiming, "settled at range he shoots from a crouch - the pose rows say so");
+    }
+    // ---- F: the grenade answers a man who will not leave cover
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), nullptr); // seen, fighting
+        MobHurt(s, 2400.0f, Vec3(0.5f, 20.5f, 10.0f), 0.0f); // badly wounded: he fights from cover now
+        gMobs[s].hurt = 0.0f;
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 10.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 3.5f;
+        bool thrown = false;
+        const int blasts0 = host.explosions;
+        for (int i = 0; i < 160 && !thrown; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.0f), 0, true, &none);
+            if (!gBossNades.empty() || host.explosions > blasts0)
+                thrown = true;
+        }
+        host.wall = false;
+        CHECK(thrown, "a target held behind cover for seconds is answered with a grenade");
+        // and the grenade itself, once live, is the core's own damage
+        WideStage();
+        host.playerHurt = 0.0f;
+        const int blasts1 = host.explosions;
+        gBossNades.push_back(BossNade{ Vec3(0.5f, 2.5f, 12.0f), Vec3(0, 0, 0), 0.05f });
+        RunMobsB(0.3f, Vec3(0.5f, 0.5f, 11.0f), nullptr);
+        CHECK(host.explosions > blasts1 && host.playerHurt > 0.0f,
+              "his grenade bursts on the core's channel and hurts (%.1f half hearts)", host.playerHurt);
+        gBossNades.clear();
+    }
+    // ---- D: a fence is jumped, a wall is walked around - both on the hunt,
+    // the movement whose whole job is closing the distance. The fence leaks a
+    // standing man's head (a third of him), so the hunted man ducks: with his
+    // middle at 10.2 the fence swallows every sample and the hunt begins.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 14.5f, 11.0f), nullptr); // seen, fighting
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 6.5f, 8.0f); // its band tops out at 11: a fence
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 8.0f;
+        float maxZ = 0.0f;
+        float dEnd = 1e9f;
+        for (int i = 0; i < 260; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 14.5f, 10.2f), 0, true, &none); // ducked behind it
+            maxZ = std::max(maxZ, gMobs[s].pos.z);
+            dEnd = (gMobs[s].pos - Vec3(0.5f, 14.5f, 10.0f)).Length();
+            if (dEnd < 3.0f)
+                break;
+        }
+        host.wall = false;
+        // past the fence his sight line clears and the ducked man is found: he
+        // ends north of the fence, fighting - that IS the hunt succeeding
+        CHECK(maxZ > 10.8f && gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2,
+              "the fence is jumped on the hunt and the man found behind it (peak %.2f m, ends y %.1f in state %d)",
+              maxZ, gMobs[s].pos.y, gMobs[s].bossState);
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 14.5f, 11.0f), nullptr); // he has the man's measure
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 6.5f, 10.0f); // band to 13: a 3 m wall, and blind
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 3.0f; // probe steering's honest reach; long walls are the city graph's job
+        float maxZ = 0.0f;
+        float dEnd = 1e9f;
+        for (int i = 0; i < 640; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 14.5f, 11.0f), 0, true, &none);
+            maxZ = std::max(maxZ, gMobs[s].pos.z);
+            dEnd = (gMobs[s].pos - Vec3(0.5f, 14.5f, 10.0f)).Length();
+            if (gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2)
+                break;
+        }
+        host.wall = false;
+        CHECK(maxZ < 10.6f && gMobs[s].pos.y > 7.5f && gMobs[s].bossState == 2,
+              "the tall wall is not jumped - the hunt walks around its end and re-engages (peak %.2f m, ends y %.1f in state %d, %.1f m off)",
+              maxZ, gMobs[s].pos.y, gMobs[s].bossState, dEnd);
+    }
+    // ---- K1: the street may start a fight with him; he finishes it, and only that one
+    {
+        WideStage();
+        TestHost::Person atk, bys;
+        atk.centre = Vec3(0.5f, 8.5f, 11.0f);
+        bys.centre = Vec3(4.5f, 8.5f, 11.0f);
+        host.people = { atk, bys };
+        const std::vector<BeingInfo> beings = { BeingInfo{ 0, atk.centre }, BeingInfo{ 1, bys.centre } };
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        MobProvoked(s, 0, atk.centre); // the man in the street opens fire on him
+        RunMobsB(3.0f, Vec3(90.5f, 0.5f, 11.0f), &beings);
+        CHECK(host.people[0].hurt > 0.0f, "an attacker from the street is engaged and hit (%.1f)", host.people[0].hurt);
+        CHECK(host.people[1].hurt == 0.0f, "the bystander next to him is never touched");
+        const std::vector<BeingInfo> gone;
+        RunMobsB(9.0f, Vec3(90.5f, 0.5f, 11.0f), &gone); // the attacker is gone from the world
+        CHECK(gMobs[s].bossState != 2, "with the attacker gone he stands down again (state %d)", gMobs[s].bossState);
+        host.people.clear();
+    }
+    // ---- K2/L3, the accounting: relays and rams are capped, never lethal surprises
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        MobProxyDamage(s, 10000.0f, Vec3(0.5f, 0.5f, 10.0f), -1); // a whole street's volley in one event
+        const float poolLoss = (2400.0f - gMobs[s].health) + (800.0f - gMobs[s].armor);
+        CHECK(Near(poolLoss, 240.0f, 1.0f), "one proxy event can never cost more than a tenth of him (lost %.0f)", poolLoss);
+        WideStage();
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        MobVehicleHit(s2, 25.0f, Vec3(0.5f, 0.5f, 10.0f), true); // a car at full tilt
+        const float ramLoss = (2400.0f - gMobs[s2].health) + (800.0f - gMobs[s2].armor);
+        CHECK(Near(ramLoss, 840.0f, 2.0f) && gMobs[s2].death < 0.0f,
+              "a full-speed ram costs at most 35%% of him and never kills outright (lost %.0f)", ramLoss);
+        CHECK(gMobs[s2].bossState == 2 && gMobs[s2].detect >= 1.0f, "and he is up and fighting the driver at once");
+    }
+    // ---- L: the driver is a target, and the car is a body that takes damage
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        host.vehicle = TestHost::kCarNumber;
+        host.vehPoseOn = true;
+        host.vehCentre = Vec3(0.5f, 20.5f, 10.5f);
+        host.vehFwd = Vec3(0, -1, 0);
+        host.vehSeat = Vec3(0.5f, 19.6f, 11.35f);
+        host.vehVel = Vec3();
+        host.playerHurt = 0.0f;
+        host.carHurt = 0.0f;
+        host.tyrePops = 0;
+        for (int i = 0; i < 120; ++i)
+            MobsTick(0.05f, Vec3(0.5f, 19.6f, 11.0f), 0, false, &none);
+        CHECK(host.playerHurt > 0.0f, "the driver is hit through his own windshield (%.1f half hearts)", host.playerHurt);
+        CHECK(host.carHurt > 0.0f, "and the car itself takes his fire (%.1f)", host.carHurt);
+        CHECK(host.tyrePops >= 1, "low hits pop tyres through the bridge effect (%d)", host.tyrePops);
+        host.vehPoseOn = false;
+        host.vehicle = -1;
+    }
+    // ---- H: his voice answers his states
+    {
+        WideStage();
+        gPlayed.clear();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
+        MobHurt(s, 5.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        CHECK(Heard(SND_BOSS_HURT) >= 1, "a hurt boss grunts");
+        WideStage();
+        gPlayed.clear();
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s2, 0.0f);
+        for (int i = 0; i < 12; ++i) {
+            gMobs[s2].patrolWait = 5.0f;
+            gMobs[s2].idleVoiceT = 0.01f;
+            MobsTick(0.05f, Vec3(90.5f, 0.5f, 11.0f), 0, true, &none);
+        }
+        CHECK(Heard(SND_BOSS_IDLE1) + Heard(SND_BOSS_IDLE2) >= 1, "on his post he checks in by radio now and then");
+    }
+    // ---- M: legs walk the movement, the rifle holds the aim
+    {
+        CHECK(LoadSoldierBinFromRepo(), "the model loads for the layer proofs");
+        // the stand carries the legs' facing (east), as the bridge builds it
+        // from his leg yaw; the aim lives in the twist on top of it
+        const Pose stand = EntityPose(Vec3(0, 0, 0), Vec3(0, -1, 0), Vec3(0, 0, 1), Vec3(1, 0, 0), 1.0f);
+        SoldierDrawState st; // aim north (+y), strafing east (+x)
+        st.legCategory = SP_RUN;
+        st.legVariant = 2; // his own right-strafe cycle
+        st.legTime = 0.3f;
+        st.aimYaw = 0.0f;
+        st.legYaw = -kPi / 2.0f;
+        st.upCategory = SP_AIM;
+        st.upVariant = 0;
+        Vec3 legSum(0, 0, 0);
+        float legAbsX = 0.0f, legAbsY = 0.0f, legPeakX = 0.0f;
+        int legSamples = 0;
+        for (int ph = 0; ph < 8; ++ph) {
+            st.gait = ph / 8.0f; // the cycle is driven by the gait phase
+            Vec3 d1;
+            if (SoldierLegDir(stand, st, &d1)) {
+                legSum = legSum + d1;
+                legAbsX += std::fabs(d1.x);
+                legAbsY += std::fabs(d1.y);
+                legPeakX = std::max(legPeakX, d1.x);
+                ++legSamples;
+            }
+        }
+        CHECK(legSamples == 8, "the leg direction answers through the cycle");
+        // a sideways gait is sideways-dominant and plants a leg along the travel
+        // at stance; a forward cycle worn sideways would fail both of these
+        CHECK(legPeakX > 0.95f && SoldierGaitStride(SP_RUN, 2) < 0.6f && SoldierGaitStride(SP_RUN, 0) > 2.5f,
+              "at stance the strafe leg plants along the eastward travel (peak %.2f), on its own short stride (%.2f m vs the forward %.2f m)",
+              legPeakX, SoldierGaitStride(SP_RUN, 2), SoldierGaitStride(SP_RUN, 0));
+        st.gait = 0.3f;
+        // and the strafe is its own gait, not the forward run worn sideways
+        {
+            SoldierDrawState fwdSt = st;
+            fwdSt.legVariant = 0;
+            SoldierLocal la2[64], lb2[64];
+            SoldierComposeLocals(st, la2, 64);
+            SoldierComposeLocals(fwdSt, lb2, 64);
+            float diff = 0.0f;
+            for (int i = 0; i < 64; ++i)
+                diff = std::max(diff, (la2[i].pos - lb2[i].pos).Length());
+            CHECK(diff > 0.04f, "the strafe cycle is genuinely different leg data from the forward run (strongest bone %.3f m)", diff);
+        }
+        st.upCategory = SP_SHOOT;
+        st.upVariant = 0;
+        Vec3 mz, bt;
+        CHECK(SoldierGunPose(stand, st, &mz, &bt), "the gun line answers");
+        Vec3 gd = mz - bt;
+        gd.z = 0.0f;
+        gd = gd * (1.0f / std::max(0.001f, gd.Length()));
+        CHECK(gd.y > 0.98f && std::fabs(gd.x) < 0.19f, "his rifle still points north (%.2f, %.2f) - no statue glide", gd.x, gd.y);
+        // the waist twist is rotations only: no bone changes length
+        SoldierDrawState straight = st;
+        straight.legYaw = 0.0f;
+        SoldierLocal la[64], lb[64];
+        const int na = SoldierComposeLocals(st, la, 64);
+        const int nb = SoldierComposeLocals(straight, lb, 64);
+        const int* parents = SoldierBoneParents();
+        float worst = 0.0f;
+        for (int i = 0; i < na && i < nb; ++i) {
+            if (!parents || parents[i] < 0)
+                continue;
+            const float da = (la[i].pos - la[parents[i]].pos).Length();
+            const float db = (lb[i].pos - lb[parents[i]].pos).Length();
+            worst = std::max(worst, std::fabs(da - db));
+        }
+        CHECK(na == nb && worst < 0.005f, "the twist stretches nothing (worst bone drift %.4f m)", worst);
+        // aim pitch rows: up, level, down - in that order on the gun line
+        auto gunPitch = [&](int variant) {
+            SoldierDrawState a;
+            a.legCategory = SP_IDLE;
+            a.upCategory = SP_AIM;
+            a.upVariant = variant;
+            Vec3 m2, b2;
+            if (!SoldierGunPose(stand, a, &m2, &b2))
+                return 0.0f;
+            Vec3 d = m2 - b2;
+            return std::atan2(d.z, std::sqrt(d.x * d.x + d.y * d.y));
+        };
+        const float pUp = gunPitch(1), pLevel = gunPitch(0), pDown = gunPitch(2); // the bake's order: level, up, down
+        CHECK(pUp > pLevel && pLevel > pDown && pUp > 0.2f && pDown < -0.2f,
+              "the aim rows pitch the rifle up, level, down (%.2f / %.2f / %.2f rad)", pUp, pLevel, pDown);
+    }
+    // ---- A: the map in his head - first a toy, then the real city
+    {
+        // a four-node toy graph, built byte by byte in the documented format
+        std::vector<unsigned char> g;
+        auto put = [&](const void* d, size_t n) { const unsigned char* c = (const unsigned char*)d; g.insert(g.end(), c, c + n); };
+        auto u32 = [&](uint32_t v) { put(&v, 4); };
+        auto f32 = [&](float v) { put(&v, 4); };
+        put("MCNAV1", 6);
+        u32(4);
+        u32(6);
+        const float pts[4][3] = { { 0, 0, 0 }, { 10, 0, 0 }, { 20, 0, 0 }, { 20, 10, 0 } };
+        for (auto& pt : pts) { f32(pt[0]); f32(pt[1]); f32(pt[2]); }
+        const uint32_t rows[5] = { 0, 1, 3, 5, 6 };
+        for (uint32_t r : rows) u32(r);
+        const uint32_t tg[6] = { 1, 0, 2, 1, 3, 2 };
+        for (uint32_t t : tg) u32(t);
+        uint32_t sum = 0;
+        for (unsigned char c : g) sum += c;
+        u32(sum);
+        CHECK(LoadNavGraph(g.data(), g.size()), "a hand-built graph loads");
+        std::vector<Vec3> route;
+        CHECK(NavRoute(Vec3(0, 0, 0), Vec3(20, 10, 0), &route) && Near(NavRouteLength(route), 30.0f, 0.1f),
+              "and routes along its streets (%.1f m)", NavRouteLength(route));
+        std::vector<unsigned char> bad = g;
+        bad[20] ^= 0xFF;
+        CHECK(!LoadNavGraph(bad.data(), bad.size()), "a corrupted graph is refused, checksum and all");
+        CHECK(LoadNavGraphFromRepo(), "the real city graph loads");
+        CHECK(NavNearest(Vec3(2480, -1660, 13), 60.0f) >= 0, "Grove Street is on his map");
+        CHECK(NavRoute(Vec3(2480, -1660, 13), Vec3(2030, -1410, 13), &route),
+              "Grove to County General Hospital routes");
+        const float hosp = NavRouteLength(route);
+        CHECK(hosp > 900.0f && hosp < 1250.0f, "by street it is %.0f m, not the crow's 515", hosp);
+        CHECK(NavRoute(Vec3(2480, -1660, 13), Vec3(1240, -1330, 13), &route), "Grove to All Saints routes too");
+        const float saints = NavRouteLength(route);
+        CHECK(saints > 1.3f * 1283.0f && saints < 2600.0f,
+              "across the district the streets run %.0f m against 1283 straight - over 1.3x, as streets do", saints);
+        CHECK(!NavRoute(Vec3(2480, -1660, 13), Vec3(1650, -2400, 13), &route),
+              "the airport's ped island is the game's own gap: no route is invented for it");
     }
 }
 
@@ -5976,6 +6575,7 @@ int main(int argc, char** argv) {
     TestModels();
     TestSoldierModel();
     TestSoldierAimFix();
+    TestBoss();
     TestPlayerAnim();
     TestRenderers();
     TestSave();

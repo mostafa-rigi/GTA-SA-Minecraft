@@ -1,0 +1,57 @@
+#pragma once
+// The boss's map of San Andreas: the game's OWN pedestrian path nodes (nodes*.dat
+// out of gta3.img), merged into one graph the core routes over. Built offline from
+// the extracted files (see nav-assets/ and CS-BOSS-fa.md for the extraction proof);
+// at runtime the bridge reads nav_graph.bin from the MinecraftSA folder and hands
+// the bytes here. The core itself never touches the disk.
+//
+// File format (little-endian, written by the offline builder):
+//   char[6] "MCNAV1"; u32 nodeCount; u32 edgeCount (directed);
+//   nodes: nodeCount * (f32 x, f32 y, f32 z) - world positions, metres;
+//   CSR: u32 rowOffsets[nodeCount + 1]; u32 targets[edgeCount];
+//   trailer: u32 checksum = sum of all preceding bytes mod 2^32.
+// A missing or corrupt file leaves the graph unloaded: the soldier falls back to
+// his probe steering and the log says so loudly. The mod itself stays healthy.
+
+#include "Core.h" // Vec3
+
+#include <cstddef>
+#include <vector>
+
+namespace mc {
+
+// Loads and validates the graph. Returns whether the graph is ready afterwards.
+bool LoadNavGraph(const unsigned char* data, size_t size);
+void UnloadNavGraph();
+bool NavReady();
+int NavNodeCount();
+int NavEdgeCount();
+
+// The graph node nearest to a world position (optionally only within maxDist).
+// -1 when the graph is not ready or nothing is close enough.
+int NavNearest(const Vec3& at, float maxDist);
+
+// The world position of one node. False for a bad index.
+bool NavNodePos(int node, Vec3* out);
+
+// A* over the graph from the node nearest `from` to the node nearest `to`.
+// Fills `out` with world waypoints (the target node last; `to` itself is NOT
+// appended - the caller walks the last metres off-graph). False when no route
+// exists (or the graph is not ready). A route whose ends snap to the same node
+// yields that single node.
+bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out);
+// The length of a route NavRoute produced, in metres.
+float NavRouteLength(const std::vector<Vec3>& route);
+
+// Named places the boss checks while hunting (Los Santos set; coordinates from
+// documented SA map knowledge, approximate - they are check-points, not doors).
+struct NavPoi {
+    const char* name;
+    Vec3 at;
+};
+int NavPoiCount();
+const NavPoi& NavPoiAt(int i);
+// The POI nearest to a position (index into NavPoiAt), or -1.
+int NavNearestPoi(const Vec3& at);
+
+} // namespace mc

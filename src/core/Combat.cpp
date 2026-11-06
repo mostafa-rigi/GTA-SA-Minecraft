@@ -244,6 +244,7 @@ void ShootArrow(float speed, float damage, bool crit, bool pickup) {
     pr.pickup = pickup;
     FromPlayer(pr);
     gProjectiles.push_back(pr);
+    NotePlayerShot(gGame.eyePos, 12.0f); // a bowstring carries: the boss's ears log it (Mobs)
 }
 
 void ShootBow(float power, bool crit) {
@@ -261,6 +262,7 @@ void ShootCrossbow() {
         FromPlayer(pr);
         gProjectiles.push_back(pr);
         PlaySfx(SND_FIREWORK_LAUNCH, nullptr, 1.0f);
+        NotePlayerShot(gGame.eyePos, 40.0f); // a rocket is loud: the boss's ears log it (Mobs)
     } else {
         ShootArrow(63.0f, 9.0f, false, gGame.gameMode == MODE_SURVIVAL);
     }

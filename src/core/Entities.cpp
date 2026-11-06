@@ -369,6 +369,7 @@ void PushLooseThings(const Vec3& at, float radius, float speed) {
 }
 
 void ExplodeAt(const Vec3& at, float radius, bool own, int kind) {
+    NoteExplosion(at); // every blast in the world is a fact for the boss's ears (Mobs)
     if (own) {
         // our own blast: the host does the fire ball and the damage, we do the rest right away
         TheHost().Explosion(at, kind);

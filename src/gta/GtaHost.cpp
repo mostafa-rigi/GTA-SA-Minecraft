@@ -143,6 +143,47 @@ struct GtaHost : Host {
         GtaNearbyBeings(centre, radius, out);
     }
     void HurtVehicle(int vehicle, float halfHearts) override { GtaHurtVehicle(vehicle, halfHearts); }
+    // ---- the boss's vehicle senses (workstream L)
+    bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {
+        CPlayerPed* ped = FindPlayerPed();
+        if (!ped || !ped->bInVehicle || !ped->m_pVehicle)
+            return false;
+        CVehicle* veh = ped->m_pVehicle;
+        CMatrix& mx = veh->GetMatrix();
+        *centre = mx.pos;
+        *forward = mx.at;
+        // the driver's chest is where the game itself seats him: his own ped
+        // position rides at the seat - plus a hand's breadth up his spine
+        *driverChest = ped->GetPosition() + CVector(0, 0, 0.35f);
+        *velocity = veh->m_vecMoveSpeed * 50.0f; // per-frame at 50 fps -> per second
+        return true;
+    }
+    void VehicleShotEffect(int vehicle, const Vec3& hitPoint, int effect) override {
+        if (effect != 1)
+            return; // 1 is the only effect: burst the tyre nearest the hit
+        CVehicle* veh = CPools::ms_pVehiclePool ? CPools::ms_pVehiclePool->GetAtRef(vehicle) : nullptr;
+        if (!veh)
+            return;
+        CMatrix& mx = veh->GetMatrix();
+        const Vec3 d = hitPoint - Vec3(mx.pos);
+        const float along = d.Dot(Vec3(mx.at));    // > 0: the front half
+        const float side = d.Dot(Vec3(mx.right));  // > 0: the car's own right
+        // SA's wheel component ids for BurstTyre: 0 front-left, 1 rear-left,
+        // 2 front-right, 3 rear-right
+        const int id = along > 0.0f ? (side < 0.0f ? 0 : 2) : (side < 0.0f ? 1 : 3);
+        veh->BurstTyre((unsigned char)id, true);
+    }
+    bool PlayerAimingAt(const Vec3& point, float radius) override {
+        CPlayerPed* ped = FindPlayerPed();
+        if (!ped || !ped->bIsAimingGun)
+            return false; // the game's own flag: he is pointing a gun at something
+        const Vec3 rel = point - gGame.eyePos;
+        const float t = rel.Dot(gGame.lookDir);
+        if (t < 0.0f)
+            return false;
+        const Vec3 closest = gGame.eyePos + gGame.lookDir * t;
+        return (closest - point).Length() < radius;
+    }
     HostHit BeingTrace(const Vec3& origin, const Vec3& dir, float reach) override {
         HostHit h;
         const PedHit ph = RaycastPeds(origin, dir, reach, FindPlayerPed(), false);

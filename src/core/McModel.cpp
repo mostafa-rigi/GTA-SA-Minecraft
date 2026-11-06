@@ -871,17 +871,7 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
         // his colours (the user's eye rejected that outright: "کلا مکعبی ماینکرافتیه").
         // Without the model file he never spawns, so a soldier reaching this draw has
         // his model; the call stays silent if the file ever failed to load.
-        SoldierDrawState st;
-        st.category = a.soldierPose;
-        st.variant = a.soldierPose == SP_DEATH ? a.soldierDeath : a.soldierVariant;
-        st.time = a.soldierPoseTime;
-        st.gait = a.soldierGait;
-        st.prevCategory = a.soldierPrevPose;
-        st.prevVariant = a.soldierPrevPose == SP_DEATH ? a.soldierPrevDeath : a.soldierPrevVariant;
-        st.prevTime = a.soldierPrevTime;
-        st.prevGait = a.soldierPrevGait;
-        st.fade = a.soldierFade;
-        DrawSoldierModel(base, st, light, r, g, b);
+        DrawSoldierModel(base, a.soldier, light, r, g, b);
         break;
     }
     case MOB_PIG: {

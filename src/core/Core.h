@@ -57,6 +57,7 @@ struct Vec3 {
     Vec3& operator+=(const Vec3& o) { x += o.x; y += o.y; z += o.z; return *this; }
     float Dot(const Vec3& o) const { return x * o.x + y * o.y + z * o.z; }
     float Length() const { return std::sqrt(x * x + y * y + z * z); }
+    float LengthSq() const { return x * x + y * y + z * z; }
 };
 
 inline Vec3 Cross(const Vec3& a, const Vec3& b) { return Vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
