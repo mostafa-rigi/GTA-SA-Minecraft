@@ -143,10 +143,11 @@ float SeatedFit(CPed* p, const CVector& up, float headAboveHipPx, CVector* hip) 
 
 void PedSkinsExcludePed(CPed* p) {
     auto* pool = CPools::ms_pPedPool;
-    // GetRef's slot arithmetic is only defined for pool members: on any
-    // other pointer (the boss's heap-built perception body) the index runs
-    // wild and the slot-map read lands out of bounds. He needs no exclusion
-    // anyway - this system only ever adopts peds out of the pool.
+    // GetRef's slot arithmetic is only defined for pool members, so the
+    // validity guard stays as discipline for any caller. The boss's
+    // perception body IS a pool member (a mission-marked CCopPed since the
+    // proxy fix - see GtaMobs), so his exclusion registers here by ref like
+    // any other ped's, and lifts by the same ref when he goes.
     if (p && pool && pool->IsObjectValid(p))
         gExcludedRefs.insert(pool->GetRef(p));
 }

@@ -4,6 +4,7 @@
 
 #include "CCamera.h"
 #include "CColPoint.h"
+#include "CCopPed.h"
 #include "CPad.h"
 #include "CPlayerPed.h"
 #include "CPools.h"
@@ -106,20 +107,54 @@ void CarsHitMobs() {
 // he never gets to walk anywhere), and he dies with the boss: no orphans.
 struct BossProxyState {
     CPed* ped = nullptr;
+    int ref = 0; // his pool handle (slot index + generation byte): the only name
+                 // the game itself trusts for a ped across frames
     uint32_t mobId = 0;
+    bool createFailed = false; // creation produced a non-pool body once: latched
+                               // off for the session rather than retried per frame
     float scanT = 0.0f;
     float cowerT = 0.0f;
 };
 BossProxyState gBossProxy;
 
-// He is a heap ped of our own making (new CPed at creation below), never a
-// slot of the game's fixed ped pool - so no pool handle can speak for him,
-// and the game's pool-based culling (population, streaming) cannot see him
-// either. What can be proven locally, every sync, is that the memory still
-// reads as the body we built: a ped entity, the cop type and the model 0 he
-// was created with. Anything else means the game has taken him (a session
-// teardown clears the whole world) or the block was reused, and one more
-// touch through the pointer is how you crash.
+// CPed::m_nCreatedBy, the game's own ownership bookkeeping: a ped the
+// population system spawned for the street is RANDOM (1) and population may
+// despawn it whenever the player leaves its area; a ped a script created is
+// MISSION (2) and only its owner may remove it - every story character in
+// the game lives across the whole map on exactly this marking.
+constexpr unsigned char kCreatedByMission = 2;
+
+// Where his body really comes from (this corrects the record of the crash
+// audit, which read the C++ surface and stopped one layer too early):
+// `new CPed` in this build does NOT reach the CRT heap. CPed declares a
+// class operator new (plugin-sdk CPed.h), the build compiles the SDK's
+// CPed.cpp in (CMake globs all of plugin_sa), and that operator new is a
+// call into the game's own CPed::operator new (0x5E4720) - which, like
+// every entity class in this engine generation (reversed III/VC sources
+// spell it out: return CPools::GetPedPool()->New()), hands out the next
+// slot of CPools::ms_pPedPool, an array of CCopPed-sized slots. He was a
+// pool ped all along. The defects were in HOW he was put there:
+//   (1) The bare CPed base was constructed in a CCopPed-sized slot, so the
+//       cop tail (0x79C..0x7C4: cop type, partner pointer, the criminals
+//       array) stayed stale bytes from the slot's previous tenant, for any
+//       cop system that reaches a PED_TYPE_COP body by cast to read and
+//       write through.
+//   (2) His m_nCreatedBy kept the bare constructor's default, so in the
+//       game's eyes he was population's own random cop, and population
+//       could lawfully despawn him - at distance, on an area rebuild after
+//       a hospital respawn - while we went on holding the pointer.
+//   (3) He was held by raw pointer alone. After such a despawn the slot is
+//       destructed (its intelligence and RwObject already freed or handed
+//       to a new tenant) while the address still reads as a ped for a
+//       while: every glued touch (Teleport, SetPedDrawn's clump walk,
+//       UpdateRpHAnim) writes through freed-or-recycled structures, and a
+//       late delete runs the destructor a second time on a body the game
+//       already destroyed. Silent corruption, detonating wherever the
+//       damaged pointer is next followed - the user-bisected signature.
+// The fix is to build him the way the game builds its own and hold him the
+// way scripts hold theirs: a CCopPed, marked MISSION at birth, resolved by
+// pool ref before every touch. The field check below survives only as a
+// second belt, and is only ever read after the ref has resolved.
 bool BossProxyIsOurs(CPed* ped) {
     return ped && ped->m_nType == ENTITY_TYPE_PED && ped->m_nPedType == PED_TYPE_COP &&
            ped->m_nModelIndex == 0;
@@ -130,28 +165,86 @@ bool BossProxyAlive(CPed* ped) {
            ped->m_ePedState != PEDSTATE_DIE && ped->m_ePedState != PEDSTATE_DEAD;
 }
 
-// Drop the pointer and touch NOTHING through it. For the states where the
-// game has already taken the body: removing or deleting through a pointer
-// in that state is a double-free waiting for a frame.
+// Drop the pointer and the ref and touch NOTHING through either. For the
+// states where the game has already taken the body (its slot freed or
+// recycled under us): removing or deleting through the pointer in that
+// state is a double-destruction waiting for a frame.
 void BossProxyForget() {
     if (gBossProxy.ped)
-        Log("boss proxy: his body is gone or no longer reads as ours - forgetting the pointer, hands off");
+        Log("boss proxy: his body no longer resolves by its pool ref - forgetting it, hands off");
     gBossProxy.ped = nullptr;
+    gBossProxy.ref = 0;
     gBossProxy.mobId = 0;
+}
+
+// The one lawful question about a ped held across frames: does his ref
+// still resolve, and to the same body? GetAtRef compares the slot's full
+// flag byte (generation + occupied) against the ref, so a freed slot and a
+// recycled slot both answer no - without a single read through the pointer
+// itself. (The game's refs have one documented weakness, its own: the
+// generation byte wraps after 128 reuses of the same slot. Every script
+// character in the game lives under the same limit.)
+CPed* BossProxyResolve() {
+    auto* pool = CPools::ms_pPedPool;
+    if (!pool || !gBossProxy.ped || !gBossProxy.ref)
+        return nullptr;
+    CPed* p = pool->GetAtRef(gBossProxy.ref);
+    return p == gBossProxy.ped ? p : nullptr;
 }
 
 void BossProxyKill() {
     if (gBossProxy.ped) {
-        if (!BossProxyIsOurs(gBossProxy.ped)) {
-            BossProxyForget(); // not ours any more: hands off entirely
+        CPed* ped = BossProxyResolve();
+        if (!ped) {
+            BossProxyForget(); // the game already took him: hands off entirely
             return;
         }
-        PedSkinsIncludePed(gBossProxy.ped); // his pool ref may be reused: unmark before he goes
-        CWorld::Remove(gBossProxy.ped);
-        delete gBossProxy.ped;
+        PedSkinsIncludePed(ped); // his ref goes back to the slot's next tenant clean
+        CWorld::Remove(ped);
+        delete ped; // CPed::operator delete returns the slot to the pool
         gBossProxy.ped = nullptr;
+        gBossProxy.ref = 0;
     }
     gBossProxy.mobId = 0;
+}
+
+// Build him the way the game builds its own cops and hand him to us the
+// way scripts hold their characters. Returns false when no body could be
+// stood up this frame (pool exhausted is transient; a body that fails the
+// pool check latches the createFailed flag instead - see BossProxyState).
+bool BossProxyCreate(const Mob& m) {
+    auto* pool = CPools::ms_pPedPool;
+    if (!pool)
+        return false;
+    CCopPed* cop = new CCopPed(COP_TYPE_CITYCOP); // pool slot, fully constructed cop body
+    CPed* ped = cop;
+    if (!ped)
+        return false; // pool full right now: the next sync tries again
+    ped->SetModelIndex(0);
+    ped->SetCharCreatedBy(kCreatedByMission); // ours alone to remove: population never despawns him
+    ped->ClearWeapons();                      // a sensor, as before: the street shoots him, he never shoots
+    CWorld::Add(ped);
+    // The acceptance fact, checked with the pool's own arithmetic: his
+    // address must be a live slot of the ped pool, and the slot must be him.
+    const int idx = pool->GetIndex(ped);
+    if (idx < 0 || idx >= pool->m_nSize || pool->GetAt(idx) != ped || pool->IsFreeSlotAtIndex(idx)) {
+        CWorld::Remove(ped);
+        delete ped;
+        gBossProxy.createFailed = true;
+        Log("boss proxy: creation did not land in the ped pool (index %d) - proxy stays off for this session", idx);
+        return false;
+    }
+    gBossProxy.ped = ped;
+    gBossProxy.ref = pool->GetRef(ped);
+    gBossProxy.mobId = m.id;
+    ped->bIsVisible = false;
+    PedSkinsExcludePed(ped);  // by ref, like every pool ped: the villager system must never adopt or draw him
+    SetPedDrawn(ped, false);  // ...and his clump's atomics lose their render flags at once
+    ped->m_fMaxHealth = 1000.0f;
+    ped->m_fHealth = 1000.0f;
+    Log("boss proxy: pool index %d, ref %d - one invisible mission cop body carries the street's fire for him",
+        idx, gBossProxy.ref);
+    return true;
 }
 
 void BossProxySync(float dt, CPlayerPed* player) {
@@ -176,25 +269,23 @@ void BossProxySync(float dt, CPlayerPed* player) {
         return;
     }
     Mob& m = gMobs[bi];
-    if (gBossProxy.ped && !BossProxyIsOurs(gBossProxy.ped))
-        BossProxyForget(); // the game took him (session teardown): never touch that pointer again
     if (gBossProxy.ped && gBossProxy.mobId != m.id)
         BossProxyKill();
-    if (!gBossProxy.ped) {
-        CPed* ped = new CPed(PED_TYPE_COP);
-        if (!ped)
-            return;
-        ped->SetModelIndex(0);
-        CWorld::Add(ped);
-        ped->bIsVisible = false;
-        PedSkinsExcludePed(ped);  // the villager system must never adopt or draw him
-        SetPedDrawn(ped, false);  // ...and his clump's atomics lose their render flags at once
-        ped->m_fMaxHealth = 1000.0f;
-        ped->m_fHealth = 1000.0f;
-        gBossProxy.ped = ped;
-        gBossProxy.mobId = m.id;
-        Log("boss proxy up: one invisible cop-type body carries the street's fire for him");
+    if (gBossProxy.ped && !BossProxyResolve()) {
+        // The game took him after all. A MISSION body should be beyond
+        // population's reach, but a session teardown clears everyone, and
+        // any path that did take him must find us holding nothing: resolve
+        // first, touch second, and here the answer was no - never touch
+        // that pointer again, obtain a fresh body below.
+        Log("boss proxy: the game recycled his body - obtaining a fresh one");
+        BossProxyForget();
     }
+    if (!gBossProxy.ped && !gBossProxy.createFailed) {
+        if (!BossProxyCreate(m))
+            return;
+    }
+    if (!gBossProxy.ped)
+        return;
     CPed* ped = gBossProxy.ped;
     if (!BossProxyAlive(ped)) {
         // He died in the game: the health top-up only runs while we sync,
@@ -306,12 +397,15 @@ void BossProxySync(float dt, CPlayerPed* player) {
 
 void BossProxySessionReset() {
     // a new session (load / new game): the game has torn every ped in the
-    // world down, this heap body included - forget the pointer without a
-    // single touch through it. PedSkinsForget has done exactly this for the
-    // villager system since long ago; the proxy was missing from that list,
-    // and the first sync after a load would have killed through the stale
-    // pointer (Remove + delete on a body the game already destroyed).
+    // world down, this body included - forget the pointer and the ref
+    // without a single touch through either. PedSkinsForget has done
+    // exactly this for the villager system since long ago; the proxy was
+    // missing from that list, and the first sync after a load would have
+    // killed through the stale pointer (Remove + delete on a body the game
+    // already destroyed). A latched creation failure belongs to the old
+    // session too: the new one gets its own attempt.
     BossProxyForget();
+    gBossProxy.createFailed = false;
 }
 
 // Host::SpawnGround: grass, earth or sand of the GTA map (rarely anything else), not too steep, not under water
