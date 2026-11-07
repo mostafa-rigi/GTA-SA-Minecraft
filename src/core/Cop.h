@@ -188,4 +188,54 @@ int CopBlockCount();
 int CopWantedCount();
 float CopCutoffDistance();
 
+// ---------------------------------------------------------------------------
+// Piece 3: his OWN constants, decoded from the disc - CHICAGO.LCF's
+// CAR_COSMETICS row for external model 0, the cop (the row is the cop's
+// by the rebuild's own identifications: CarHasSiren in GAMESND.C returns
+// nonzero exactly when a resident slot holds model 0, MapCarIndexToBank
+// maps model 0 to the cop's engine bank, and ProcessCosmeticsLump in
+// COSMETIC.C indexes the LCF offset table by external model id).
+// Decoded by tools/decode_lcf.py from the user's own disc image; the
+// full row is in driver2-assets/chicago-lcf.json. FixCarCos (HANDLING.C)
+// shifts wheelDisp/cPoints vz by -( (235 + -194 - 14) / 2 ) = -13 at
+// load and touches nothing else without cheats, so the wheel placements
+// below are the POST-fix values the game itself drives with.
+struct CopProfileData {
+    int powerRatio;   // 4096 - his full-throttle thrust coefficient,
+                      // 12-bit fixed point: exactly 1.0, the reference
+                      // car of his city (the field runs 2666..4500)
+    int traction;     // 4096 - his friction multiplier, 1.0
+    int susCoeff;     // 4096 - suspension coefficient, 1.0
+    int mass;         // 4096 - his mass unit, 1.0
+    int wheelSize;    // 49 - his wheel size (CARS.C scales the drawn
+                      // wheel model by wheelSize * 14142 / 10000)
+    int frictionScaleRatio; // 68 - handling type 4, the hardest
+                      // difficulty's cop type (InitCopState, COP_AI.C):
+                      // WHEELFORCES.C applies it as frontFS/rearFS
+                      // scale * 68 / 32 on top of traction / 4096
+    float wheelDisp[4][3]; // his wheel placements, metres at 256 units
+                      // = 1 m, POST-FixCarCos: (x, y, z) per wheel in
+                      // the LCF's own order [0..3]
+    float colBox[3];  // his collision cage half-extents (129, 88, 382)
+    float cog[3];     // his centre of gravity, POST-fix (0, -95, 13)
+};
+const CopProfileData& CopProfile();
+// powerRatio as a gain on the pedal: in his physics the delivered
+// thrust is the coefficient times the demand (HANDLING.C's player path:
+// thrust = FIXEDH(powerRatio * 4915) at full pedal; the AI's thrust cap
+// in CopControl1 is written in the same thrust units). The pre-LCF
+// normaliser silently assumed the 4096 car; now it is his data.
+float CopProfilePowerGain(); // powerRatio / 4096
+// His total tyre friction scale: (68 / 32) * (traction / 4096) = 2.125.
+// Carried as his data - see Cop.cpp for why it has no second expression
+// on this host (the difficulty's pace row already carries the step).
+float CopProfileGrip();
+// The one wired consumer: the pursuit drive law's pedal, gained by his
+// own power coefficient and clamped. Both thrust sites ride it.
+float CopProfilePedal(float pedal);
+// Test hook: pretend the LCF row carried another powerRatio, to pin the
+// gain's law in the sims. -1 restores the decoded row. Nothing else in
+// the build calls this.
+void CopProfileOverrideForTest(int powerRatio);
+
 } // namespace mc

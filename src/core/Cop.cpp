@@ -142,6 +142,52 @@ constexpr float kBlockAhead = 48.0f;  // where on the found road the block
 // SA reading of "about to meet", named here rather than hidden.
 constexpr float kBlockWakeDist = 45.0f;
 
+// ---- piece 3: his own constants, decoded from the disc -------------
+// CHICAGO.LCF, CAR_COSMETICS row of external model 0 (offset 52 in the
+// file; the table's offsets are [52, 288, 524, ...] - one 236-byte row
+// per model, back to back). The row is the cop's by the rebuild's own
+// identifications (see Cop.h). What each number does in HIS physics,
+// and what becomes of it here:
+// - powerRatio 4096: his full-throttle thrust coefficient, 12-bit
+//   fixed point 1.0 - the reference car of his city (the weakest
+//   Chicago car carries 2666, the strongest 4500). WIRED: it gains the
+//   pursuit pedal (CopProfilePedal below), the same place the
+//   coefficient sits in his physics - between the driver's demand and
+//   the delivered thrust. Before this piece the normaliser silently
+//   assumed a 4096 car; the assumption is now his decoded data, and a
+//   different row would change his pull by exactly its ratio.
+// - traction 4096 (1.0) and the handling type's frictionScaleRatio 68:
+//   his total tyre friction scale is (68/32) x (4096/4096) = 2.125
+//   (WHEELFORCES.C multiplies the friction scales by both). CARRIED,
+//   NOT WIRED: the difficulty row that selects type 4 is the same row
+//   that selects speed1/speed2, and the pace half of that step already
+//   rides the desired speeds above - applying the grip half a second
+//   time as a speed multiplier would double-count his own difficulty
+//   and break the "within his numbers" ceiling. On a host whose car
+//   physics we do not integrate, his grip is data, named here like
+//   piece 1's handling note named its own limit.
+// - susCoeff 4096, mass 4096, twistRate (224, 224, 1120 in the raw
+//   row): his suspension, his collision mass, his body-roll rates -
+//   all properties of HIS integrator, which the host's car replaces.
+//   Carried in the decode (driver2-assets/chicago-lcf.json), not
+//   re-expressed here; the host resolves suspension and collisions.
+// - wheelSize 49 and wheelDisp: WIRED in the body (piece 3's drawn
+//   mesh puts his wheels where his LCF says, at his size - CARS.C's
+//   own placement law), so they live in the profile below.
+// - colBox (129, 88, 382) and the 12 cPoints: his collision cage.
+//   Carried as measurement; collision stays the host car's (the body
+//   step states what the eye sees vs what collides).
+const CopProfileData kCopProfile = {
+    4096, 4096, 4096, 4096, 49, 68,
+    { { 122.0f / 256.0f, -30.0f / 256.0f, 222.0f / 256.0f },
+      { 125.0f / 256.0f, -30.0f / 256.0f, -207.0f / 256.0f },
+      { -123.0f / 256.0f, -30.0f / 256.0f, 222.0f / 256.0f },
+      { -126.0f / 256.0f, -30.0f / 256.0f, -207.0f / 256.0f } },
+    { 129.0f / 256.0f, 88.0f / 256.0f, 382.0f / 256.0f },
+    { 0.0f, -95.0f / 256.0f, 13.0f / 256.0f },
+};
+int sProfilePowerOverride = -1; // the sims' hook; -1 = the decoded row
+
 // The system page: slot 0's felony-side fields. In the original the
 // felony lives on the player's own record; here slot 0 carries the page
 // for the whole force (see Cop.h).
@@ -611,7 +657,7 @@ void CopControl(CopState& c, float dt) {
         // SA's pedal surface has no torque split to express them in)
         if (c.speed < 48 * kV)
             thrust *= (c.speed / kV + 80.0f) / 128.0f;
-        float pedal = Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f);
+        float pedal = CopProfilePedal(Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f));
         const float g = pedal > 0.0f ? pedal : 0.0f;
         const float b = pedal < 0.0f ? -pedal : 0.0f;
         Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
@@ -684,7 +730,7 @@ void CopControl(CopState& c, float dt) {
         thrust = err / kV * maxPower / 50.0f;
     if (c.speed < 48 * kV)
         thrust *= (c.speed / kV + 80.0f) / 128.0f;
-    const float pedal = Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f);
+    const float pedal = CopProfilePedal(Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f));
     const float g = pedal > 0.0f ? pedal : 0.0f;
     const float b = pedal < 0.0f ? -pedal : 0.0f;
     c.target = target;
@@ -1395,6 +1441,28 @@ void CopTick(float dt, const Vec3& playerPos) {
     gThreat.copAlive = alive;
     gThreat.copPursuing = pursuing;
     gThreat.copPos = leadPos;
+}
+
+// ---- piece 3: the decoded profile's accessors -------------------------
+const CopProfileData& CopProfile() { return kCopProfile; }
+
+float CopProfilePowerGain() {
+    const int pr = sProfilePowerOverride >= 0 ? sProfilePowerOverride
+                                              : kCopProfile.powerRatio;
+    return (float)pr / 4096.0f;
+}
+
+float CopProfileGrip() {
+    return (kCopProfile.frictionScaleRatio / 32.0f) *
+           (kCopProfile.traction / 4096.0f);
+}
+
+float CopProfilePedal(float pedal) {
+    return Clamp(pedal * CopProfilePowerGain(), -1.0f, 1.0f);
+}
+
+void CopProfileOverrideForTest(int powerRatio) {
+    sProfilePowerOverride = powerRatio;
 }
 
 } // namespace mc

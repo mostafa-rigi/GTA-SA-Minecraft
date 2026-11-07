@@ -10356,6 +10356,84 @@ static void TestCop() {
               (int)gCop.informed, gCop.felony);
         MobsClear();
     }
+
+    // ---- (w) piece 3: his own constants from the disc - the decoded
+    // CHICAGO.LCF row (external model 0, the cop) rides the profile, and
+    // his power coefficient gains the pursuit pedal by exactly its ratio
+    {
+        const CopProfileData& prof = CopProfile();
+        CHECK(prof.powerRatio == 4096 && prof.traction == 4096 && prof.susCoeff == 4096 &&
+                  prof.mass == 4096 && prof.wheelSize == 49 && prof.frictionScaleRatio == 68,
+              "the profile is the decoded row: power/traction/sus/mass 4096, wheel 49, friction 68");
+        CHECK(std::fabs(prof.wheelDisp[0][2] - 222.0f / 256.0f) < 1e-4f &&
+                  std::fabs(prof.wheelDisp[1][2] + 207.0f / 256.0f) < 1e-4f &&
+                  std::fabs(prof.wheelDisp[0][2] - prof.wheelDisp[1][2] - 429.0f / 256.0f) < 1e-4f,
+              "his wheels sit at the post-FixCarCos placements (wheelbase %.3f m)",
+              prof.wheelDisp[0][2] - prof.wheelDisp[1][2]);
+        CHECK(CopProfilePowerGain() == 1.0f,
+              "his power coefficient is the reference 1.0 - the gain is exactly one");
+        CHECK(std::fabs(CopProfileGrip() - 2.125f) < 1e-6f,
+              "his grip is (68/32) x (4096/4096) = 2.125 (%.4f)", CopProfileGrip());
+        CHECK(std::fabs(CopProfilePedal(0.457f) - 0.457f) < 1e-6f,
+              "at the decoded row the pedal passes through ungained");
+        CopProfileOverrideForTest(2666); // the weakest Chicago car's row
+        CHECK(std::fabs(CopProfilePowerGain() - 2666.0f / 4096.0f) < 1e-6f,
+              "a 2666 row gains the pedal by exactly 2666/4096 (%.4f)", CopProfilePowerGain());
+        CHECK(std::fabs(CopProfilePedal(0.457f) - 0.457f * 2666.0f / 4096.0f) < 1e-5f,
+              "the pedal scales by the decoded ratio (%.4f)", CopProfilePedal(0.457f));
+        CopProfileOverrideForTest(4500); // the strongest row
+        CHECK(CopProfilePedal(0.95f) == 1.0f,
+              "a 4500 row at near-full pedal clamps at his own ceiling, never above");
+        CopProfileOverrideForTest(-1);
+        CHECK(CopProfilePowerGain() == 1.0f, "the override restores the decoded row");
+
+        // in the drive itself: close pursuit of a stationary man on foot,
+        // the cop staged mid-band (error 8 of his units = 1.45 m/s under
+        // the cornering pace) - the gas on the fake body is the law's own
+        // arithmetic, gained by the profile and nothing else
+        CopReset();
+        float copS = road.NearestDist(Vec3(2480, -1660, 13)) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the profile cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        const float manS = copS + 25.0f;
+        host.vehicle = 42;
+        {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.velocity = md * 35.0f;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE, "the profile chase is live");
+        auto stagedGas = [&]() {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            const Vec3 cp = road.PosAt(manS - 8.0f, &md);
+            host.PlaceCar(cp, std::atan2(md.x, md.y) * 57.29578f);
+            host.carVel = md * (217.0f * (25.0f / 138.0f) - 1.45f); // speed1 - 8 units
+            host.carSpeed = host.carVel.Length();
+            host.vehicle = -1; // the man on foot: no pacing blend
+            host.velocity = Vec3();
+            host.player = mp;
+            CopTick(dt, mp);
+            return host.cmdGas;
+        };
+        const float gasHis = stagedGas();
+        CHECK(std::fabs(gasHis - 8.0f / 17.5f) < 0.03f,
+              "his own row drives the band pedal (gas %.3f, law %.3f)", gasHis, 8.0f / 17.5f);
+        CopProfileOverrideForTest(2666);
+        const float gasWeak = stagedGas();
+        CHECK(std::fabs(gasWeak - gasHis * 2666.0f / 4096.0f) < 0.03f,
+              "a weaker row pulls exactly its ratio in the drive (gas %.3f vs %.3f)",
+              gasWeak, gasHis * 2666.0f / 4096.0f);
+        CopProfileOverrideForTest(-1);
+    }
     CopReset();
     SetHost(nullptr);
 }
