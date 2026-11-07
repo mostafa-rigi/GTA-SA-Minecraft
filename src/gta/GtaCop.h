@@ -23,7 +23,8 @@ void CopBodyPost();
 int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face);
 bool GtaCopBodyReport(int veh, Host::CopBody* out);
 void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren);
-void GtaCopBodyRetire(int veh);
+void GtaCopBodySetHealth(int veh, float book01);
+void GtaCopBodyRetire(int veh, bool burnOut);
 float GtaPlayerVehicleImpact();
 
 } // namespace mc

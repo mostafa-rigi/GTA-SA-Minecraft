@@ -61,8 +61,26 @@ constexpr float kBatterFelony = 2457.0f;   // the ladder's top rung (piece 2
     // original's gBatterPlayer is a per-mission flag, and top pressure is
     // the honest stand-in, named as such)
 constexpr float kLostAfter = 256 * kTick;  // 5.12 s unseen = position lost
-constexpr float kWreckLine = 27000.0f;     // the original's totalDamage cap;
-    // our analogue: (1 - health) * 36000, so the line falls at health 0.25
+constexpr float kWreckLine = 27000.0f;     // the original's retirement line
+    // (COP_AI.C: totalDamage > 27000 && !immortal - the dying sequence)
+// His damage book's prices (BCOLLIDE.C's ApplyDamage / DamageCar3D, the
+// user's order 2026-11-07: survival law = HIS, display = the city's):
+// - collisions price off the impact's own velocity change, on the shape
+//   of DamageCar3D's curve: under its strike threshold nothing bills at
+//   all (light taps are free), the price climbs with the strike and is
+//   capped per impact, and a pursuer at the hardest difficulty pays the
+//   original's own discount (ApplyDamage: x2 for a non-player car, then
+//   x7/16 at gCopDifficultyLevel 2 - net x0.875: his toughness IS his).
+// - everything the host prices in its own health points (bullets, blast,
+//   fire, hits on the driver) converts at one anchor: 27000 of his
+//   points == the host body's own 1000-point life, 27 per point. An RPG
+//   that would take ~300 host points off the body bills ~8100 of his:
+//   expensive, and three-plus direct hits from retiring him - never one.
+constexpr float kImpactFree = 2.8f;    // m/s of velocity change: free
+constexpr float kImpactRate = 340.0f;  // his points per m/s past it
+constexpr float kImpactCap = 1500.0f;  // per single impact, before discount
+constexpr float kPursuerToughness = 0.875f; // ApplyDamage, difficulty 2
+constexpr float kSaBookRate = 27.0f;   // host health point -> his points
 
 // FELONY.C's own tables.
 constexpr int kPlacid[12] = { 659, 659, 659, 659, 659, 1318, 659, 659, 659, 659, 659, 4096 };
@@ -88,7 +106,7 @@ bool CopSees(const Vec3& copPos, const Vec3& copFwd, bool hot) {
     if (dist > front)
         return false;
     if (dist <= periph)
-        return !Host().LineBlocked(copPos, gThreat.playerPos);
+        return !TheHost().LineBlocked(copPos, gThreat.playerPos);
     Vec3 flat = to;
     flat.z = 0.0f;
     const float len = flat.Length();
@@ -104,7 +122,7 @@ bool CopSees(const Vec3& copPos, const Vec3& copFwd, bool hot) {
     const float cosHalf = std::cos((hot ? 1024 : 512) * (6.2831853f / 4096.0f));
     if (flat.Dot(f) < cosHalf)
         return false;
-    return !Host().LineBlocked(copPos, gThreat.playerPos);
+    return !TheHost().LineBlocked(copPos, gThreat.playerPos);
 }
 
 // FELONY.C's NoteFelony, whole: occurrence warm-up and re-occurrence delay
@@ -143,15 +161,53 @@ float WheelToward(float wheel, float desired, float dt) {
     return wheel + d;
 }
 
+// Every drive out of this brain passes here: the steering sign the
+// spike's calibration settled is applied at this one choke point, and
+// the magnitude rides kSteerScale - chosen so both readings of the
+// field's unit stay sane (radians: 0.6 rad is a full city lock;
+// normalised: 0.6 of lock still turns a chase). The spike's in-game
+// behaviour is the scale's judge, named here rather than hidden.
+constexpr float kSteerScale = 0.6f;
+void Drive(float gas, float brake, float wheelNorm, bool siren) {
+    CopState& c = gCop;
+    const float steer = (c.steerFlip ? -wheelNorm : wheelNorm) * kSteerScale;
+    TheHost().CopBodyDrive(c.veh, gas, brake, steer, siren);
+}
+
 // ---------------------------------------------------------------------------
-// Piece 0's spike controller: follow the block route by pure pursuit on the
-// waypoints the road graph itself hands back. Deliberately dumb - its one
-// job is proving the body answers gas, brake and steering, with the
-// read-back (the bridge's, from the vehicle itself) logged every second.
+// Piece 0's spike controller: first the steering calibration (one second
+// of commanded turn, read back off the car's own nose), then the block
+// route by pure pursuit on the waypoints the road graph itself hands
+// back. Deliberately dumb beyond that - its job is proving the body
+// answers gas, brake and steering, with the read-back (the bridge's,
+// from the vehicle itself) logged every second.
 void SpikeDrive(float dt) {
     CopState& c = gCop;
+    if (!c.steerCalDone) {
+        if (c.calT == 0.0f)
+            c.calFwd = c.fwd;
+        c.calT += dt;
+        const float gas = c.speed < 3.0f ? 0.5f : 0.0f;
+        TheHost().CopBodyDrive(c.veh, gas, 0.0f, 0.6f * kSteerScale, false);
+        c.gas = gas;
+        // the cross product of the nose then and now is sin(yawThen -
+        // yawNow): NEGATIVE when the car turned RIGHT on the map (yaw
+        // grows rightward in this frame), positive when it turned left.
+        // The brain's convention is +command = right turn; if the raw
+        // +0.6 turned him left, the session flips every command.
+        const float cross = c.calFwd.x * c.fwd.y - c.calFwd.y * c.fwd.x;
+        if ((c.calT > 0.5f && std::fabs(cross) > 0.02f) || c.calT > 3.0f) {
+            c.steerCalDone = true;
+            c.steerFlip = cross > 0.02f;
+            Log("cop spike: steer calibration - command +0.6 turned the car %s (cross %.3f); session flip %s",
+                cross < -0.02f ? "RIGHT" : cross > 0.02f ? "LEFT" : "NOT MEASURABLY",
+                cross, c.steerFlip ? "ON" : "off");
+        }
+        return;
+    }
     if (c.spikeIdx >= c.spikeRoute.size()) {
-        Host().CopBodyDrive(c.veh, 0.0f, 1.0f, 0.0f, false);
+        Drive(0.0f, c.speed > 1.0f ? 1.0f : 0.0f, 0.0f, false); // brake while
+            // rolling only - a held brake at rest is reverse on this host
         if (!c.spikeDone) {
             c.spikeDone = true;
             Log("cop spike: route finished - final read-back: pos (%.1f, %.1f, %.1f), speed %.1f m/s. "
@@ -165,7 +221,7 @@ void SpikeDrive(float dt) {
     Vec3 to = wp - c.pos;
     to.z = 0.0f;
     const float dist = to.Length();
-    if (dist < 6.0f) {
+    if (dist < 7.0f) {
         ++c.spikeIdx;
         return;
     }
@@ -173,21 +229,41 @@ void SpikeDrive(float dt) {
     const float cross = c.fwd.x * to.y - c.fwd.y * to.x;
     const float dot = c.fwd.x * to.x + c.fwd.y * to.y;
     const float err = std::atan2(cross, dot);
-    const float steer = Clamp(-err * 1.4f, -1.0f, 1.0f);
-    const float want = 11.0f; // a city pace: the block, not a chase
+    // in the rear hemisphere the angle error wraps at +-pi and its sign
+    // is noise: commit to a full-lock turn toward the side the point is
+    // on (the cross product's sign, which never wraps) and hold it until
+    // the point is well into the front hemisphere (dot > 0.45), where
+    // the proportional law is continuous again
+    float steer;
+    if (c.spikeLatch != 0.0f) {
+        steer = c.spikeLatch;
+        if (dot > 0.45f)
+            c.spikeLatch = 0.0f;
+    } else if (dot < 0.0f) {
+        c.spikeLatch = cross >= 0.0f ? -1.0f : 1.0f;
+        steer = c.spikeLatch;
+    } else {
+        steer = Clamp(-err * 1.4f, -1.0f, 1.0f);
+    }
+    // a city pace, easing off as the point nears or the turn grows: a
+    // cruiser's turn radius at full pace is wider than a waypoint's
+    // capture circle, and an orbiting spike proves nothing
+    float want = 11.0f;
+    if (dist < 25.0f || std::fabs(err) > 0.7f)
+        want = 6.0f;
     float gas = 0.0f, brake = 0.0f;
     if (c.speed < want)
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
-    Host().CopBodyDrive(c.veh, gas, brake, steer, false);
+    Drive(gas, brake, steer, false);
     c.gas = gas;
     c.brake = brake;
     c.spikeLogT -= dt;
     if (c.spikeLogT <= 0.0f) {
         c.spikeLogT = 1.0f;
         Host::CopBody rep;
-        if (Host().CopBodyReport(c.veh, &rep) && rep.ok)
+        if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok)
             Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f",
                 rep.pos.x, rep.pos.y, rep.pos.z,
                 rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z,
@@ -212,12 +288,12 @@ void CopControl(float dt) {
     c.probeT -= dt;
     if (c.probeT <= 0.0f) {
         c.probeT = 8 * kTick;
-        Vec3 right(-c.fwd.y, c.fwd.x, 0.0f);
+        Vec3 right(c.fwd.y, -c.fwd.x, 0.0f); // his TRUE right: (fwd.y, -fwd.x) in this frame - facing north it points east
         const float rl = right.Length();
         right = rl > 0.001f ? right * (1.0f / rl) : Vec3(1, 0, 0);
         const Vec3 base = c.pos + c.fwd * (400 * kM);
-        c.frontLClear = !Host().LineBlocked(c.pos, base - right * (150 * kM));
-        c.frontRClear = !Host().LineBlocked(c.pos, base + right * (150 * kM));
+        c.frontLClear = !TheHost().LineBlocked(c.pos, base - right * (150 * kM));
+        c.frontRClear = !TheHost().LineBlocked(c.pos, base + right * (150 * kM));
     }
 
     // the recovery runs its own clock first (the original checks it before
@@ -226,21 +302,36 @@ void CopControl(float dt) {
         c.recoveryT -= dt;
         const float strat = (float)(((c.recoverStrategy * 5) & 6) - 3) * 128.0f;
         c.wheel = WheelToward(c.wheel, strat, dt);
-        c.desiredSpeed = c.speed >= -0.5f ? -kRecoverSpeed : kRecoverSpeed;
+        // the direction was chosen ONCE, when the recovery started
+        // (opposite the way he was stuck facing); re-deriving it from
+        // the live speed each tick cancels the manoeuvre the moment
+        // the reverse bites - the original holds it for the 22 ticks
         const float err = c.desiredSpeed - c.speed;
         float pedal = Clamp(err / (50 * kV), -1.0f, 1.0f);
         c.gas = pedal > 0.0f ? pedal : 0.0f;
         c.brake = pedal < 0.0f ? -pedal : 0.0f;
-        Host().CopBodyDrive(c.veh, c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
         return;
     }
 
     // stuck: wanting to move and not moving, ten ticks of it (the
-    // original: hd.speed < 6 with a nonzero desire, stuckTimer > 10)
-    if (std::fabs(c.speed) < 6 * kV && c.desiredSpeed != 0.0f)
-        c.stuckT += dt;
-    else
-        c.stuckT = 0.0f;
+    // original: hd.speed < 6 with a nonzero desire, stuckTimer > 10).
+    // One witness the original gets for free from its own physics and
+    // we must state: a car accelerating hard toward its desire is not
+    // stuck, even while its speed is still inside the band - without
+    // the gaining test, the swing out of a recovery (which ends at
+    // several m/s of reverse) re-fires the clock mid-acceleration and
+    // he cycles recovery-to-recovery forever, never leaving the spot.
+    {
+        const float gaining = (c.speed - c.prevSpeed) *
+                              (c.desiredSpeed >= 0.0f ? 1.0f : -1.0f);
+        if (std::fabs(c.speed) < 6 * kV && std::fabs(c.desiredSpeed) > 6 * kV &&
+            gaining < 2.0f * dt)
+            c.stuckT += dt;
+        else
+            c.stuckT = 0.0f;
+        c.prevSpeed = c.speed;
+    }
     if (c.stuckT > 10 * kTick) {
         c.stuckT = 0.0f;
         c.recoveryT = 22 * kTick; // the original's 22-tick recovery
@@ -284,17 +375,25 @@ void CopControl(float dt) {
                 pFwd = flat * (1.0f / flat.Length());
             } else if (playerInCar) {
                 Vec3 c, f, chest, v;
-                if (Host().PlayerVehiclePose(&c, &f, &chest, &v)) {
+                if (TheHost().PlayerVehiclePose(&c, &f, &chest, &v)) {
                     f.z = 0.0f;
                     if (f.Length() > 0.01f)
                         pFwd = f * (1.0f / f.Length());
                 }
             }
         }
-        const Vec3 pRight(-pFwd.y, pFwd.x, 0.0f);
+        const Vec3 pRight(pFwd.y, -pFwd.x, 0.0f);
         if (c.batter)
             target = intercept + pRight * (5.0f * 0.5f); // his flank: 5 units,
                 // the matrix arithmetic of the original lands at ~2.5 m
+        else if (!playerInCar)
+            target = intercept; // SA adaptation, the user's order
+                // (2026-11-07): the hunt binds to the MAN, never to his
+                // car - bailed out on foot, there is no tail to stand
+                // behind, so he drives at the man himself and blocks his
+                // path with the car. In Driver 2 the man is never out of
+                // a car and FELONY.C's gates all read the car; the
+                // player-binding is ours, named as such in the step report
         else
             target = intercept - pFwd * 2.5f; // the CarTail: behind his rear
     } else {
@@ -325,7 +424,7 @@ void CopControl(float dt) {
         c.target = target;
         // steer and thrust for the far target ride the shared tail below
         const Vec3 toF = target - c.pos;
-        Vec3 right(-c.fwd.y, c.fwd.x, 0.0f);
+        Vec3 right(c.fwd.y, -c.fwd.x, 0.0f); // his TRUE right: (fwd.y, -fwd.x) in this frame - facing north it points east
         const float f = toF.x * c.fwd.x + toF.y * c.fwd.y;
         const float l = toF.x * right.x + toF.y * right.y;
         const float latVel = c.vel.x * right.x + c.vel.y * right.y;
@@ -355,7 +454,7 @@ void CopControl(float dt) {
         float pedal = Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f);
         c.gas = pedal > 0.0f ? pedal : 0.0f;
         c.brake = pedal < 0.0f ? -pedal : 0.0f;
-        Host().CopBodyDrive(c.veh, c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
         return;
     }
 
@@ -363,7 +462,7 @@ void CopControl(float dt) {
     // are world units along and across the nose; the ratios are scale-free
     // and port as-is, the speeds ride kV.
     const Vec3 toT = target - c.pos;
-    Vec3 right(-c.fwd.y, c.fwd.x, 0.0f);
+    Vec3 right(c.fwd.y, -c.fwd.x, 0.0f); // his TRUE right: (fwd.y, -fwd.x) in this frame - facing north it points east
     const float rl = right.Length();
     right = rl > 0.001f ? right * (1.0f / rl) : Vec3(1, 0, 0);
     const float t = toT.x * c.fwd.x + toT.y * c.fwd.y;
@@ -387,8 +486,10 @@ void CopControl(float dt) {
     if (zone == ZONE_FRONT) {
         c.desiredSpeed = kSpeed1[kDifficulty];
         // the anti-rear-end pacing: close and not battering, blend the
-        // desire toward just under the man's own speed
-        if (cost < kPaceCost && !c.batter) {
+        // desire toward just under the man's own speed. Car-to-car only:
+        // on foot the man gets the full pressure speed (the same user
+        // order - a swap or a bail-out cleanses nothing)
+        if (cost < kPaceCost && !c.batter && playerInCar) {
             const float pSpeed = pVel.Length();
             const float w = cost / kPaceCost;
             const float paced = std::fmax(pSpeed - 20 * kV, 20 * kV);
@@ -427,7 +528,7 @@ void CopControl(float dt) {
     c.gas = pedal > 0.0f ? pedal : 0.0f;
     c.brake = pedal < 0.0f ? -pedal : 0.0f;
     c.target = target;
-    Host().CopBodyDrive(c.veh, c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+    Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
 }
 
 } // namespace
@@ -443,13 +544,13 @@ bool CopActive() { return gCop.mode != COP_NONE && gCop.veh >= 0; }
 
 bool CopSummon(const Vec3& at, const Vec3& playerPos) {
     if (gCop.veh >= 0)
-        Host().CopBodyRetire(gCop.veh); // one cop: a re-summon stands a
-                                        // fresh body up and forgets the old
+        TheHost().CopBodyRetire(gCop.veh, false); // one cop: a re-summon
+                                        // stands a fresh body up, old removed
     CopState fresh;
     // face the man: the original's justPinged heading snap
     Vec3 d = playerPos - at;
     const float heading = std::atan2(d.x, d.y) * 57.29578f;
-    const int veh = Host().SpawnCopBody(at, heading, playerPos);
+    const int veh = TheHost().SpawnCopBody(at, heading, playerPos);
     if (veh < 0)
         return false;
     gCop = fresh;
@@ -486,8 +587,8 @@ void CopTick(float dt, const Vec3& playerPos) {
     CopState& c = gCop;
     // the feed: both brains read the same man from the same record
     gThreat.playerPos = playerPos;
-    gThreat.playerVel = Host().PlayerVelocity();
-    gThreat.playerVehicle = Host().PlayerVehicle();
+    gThreat.playerVel = TheHost().PlayerVelocity();
+    gThreat.playerVehicle = TheHost().PlayerVehicle();
     gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
     if (c.mode == COP_NONE || c.veh < 0) {
         gThreat.copAlive = false;
@@ -495,7 +596,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         return;
     }
     Host::CopBody rep;
-    if (!Host().CopBodyReport(c.veh, &rep) || !rep.ok) {
+    if (!TheHost().CopBodyReport(c.veh, &rep) || !rep.ok) {
         // the body is gone from the world (streamed out, removed): the
         // brain forgets the car, exactly the boss body's own discipline -
         // no dangling hands, no invented state
@@ -510,18 +611,36 @@ void CopTick(float dt, const Vec3& playerPos) {
     c.fwd = rep.fwd;
     c.vel = rep.vel;
     c.speed = rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z;
-    c.health = rep.health;
-    c.totalDamage = (1.0f - rep.health) * 36000.0f;
     gThreat.copPos = rep.pos;
     gThreat.copAlive = true;
     gThreat.felony = c.felony;
 
-    // a wreck retires him, as in the original (totalDamage past its line):
-    // the body is handed back to the host and the brain forgets the car
+    // ---- his damage book, priced HERE on the original's scale (the SA
+    // body's health is a display the bridge holds for us - it never rules
+    // his survival). Collisions bill by their own strike, the rest by the
+    // host's health points at the anchor conversion; a hit on the DRIVER
+    // bills the same book - car and driver are one unit, and he is not
+    // independently killable (the user's order; in Driver 2 no separate
+    // driver death exists at all).
+    if (rep.impactDv > kImpactFree) {
+        float price = (rep.impactDv - kImpactFree) * kImpactRate;
+        if (price > kImpactCap)
+            price = kImpactCap;
+        c.totalDamage += price * kPursuerToughness;
+    }
+    c.totalDamage += rep.struckShot * kSaBookRate;
+    c.totalDamage += rep.struckWorld * kSaBookRate;
+    c.totalDamage += rep.struckDriver * kSaBookRate;
+    c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
+    TheHost().CopBodySetHealth(c.veh, c.health); // the display follows
+
+    // a spent book retires him, as in the original: the display is handed
+    // to the host's fire and the brain forgets the car
     if (c.totalDamage > kWreckLine && c.mode != COP_WRECKED) {
         c.mode = COP_WRECKED;
-        Log("cop: wrecked (totalDamage %.0f past %.0f) - he retires", c.totalDamage, kWreckLine);
-        Host().CopBodyRetire(c.veh);
+        Log("cop: his book is spent (totalDamage %.0f past %.0f) - he retires and burns", c.totalDamage, kWreckLine);
+        TheHost().CopBodySetHealth(c.veh, 0.0f);
+        TheHost().CopBodyRetire(c.veh, true);
         c.veh = -1;
         c.mode = COP_NONE;
         gThreat.copAlive = false;
@@ -564,7 +683,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (gThreat.playerVel.Length() > 25.0f * 19.0f / 16.0f)
             NoteFelony(2, 0);
         // he hit something hard: his own car's damage is the ledger
-        const float impact = Host().PlayerVehicleImpact();
+        const float impact = TheHost().PlayerVehicleImpact();
         if (impact > 12.0f)
             NoteFelony(4, impact >= 25.0f ? 4096 : (int)(impact * 160.0f));
     }
@@ -594,19 +713,25 @@ void CopTick(float dt, const Vec3& playerPos) {
     }
     gThreat.felony = c.felony;
 
-    // pursuit state: over the trigger with the position known. Losing him
-    // (known=false) stands the driving down; the felony decides the rest.
-    // PIECE GATE (piece 0's commit): the pursuit transition stays shut
-    // until piece 1 lands the CopControl1 port in the next commit - the
-    // spike build watches felony rise and stands on the handbrake.
-    const bool wantPursue = false && c.felony > kFelonyTrigger && c.known;
+    // pursuit state. The 256-tick loss gates the felony and the
+    // stand-down, NOT the steering (the work order's own reading, and the
+    // original's shape: an active pursuer's steering is omniscient -
+    // CopControl1 always drives at the live position). He stands down
+    // only when the position is lost AND the man is genuinely gone: past
+    // the original's own ping-out distance (24000 units = 93.75 m, where
+    // CheckPingsOut removes a car from the world - ours stands down
+    // instead of vanishing). Back in sight or back in range, with the
+    // felony intact, the pursuit resumes on its own.
+    const float distToMan = (playerPos - c.pos).Length();
+    const bool lost = !c.known && distToMan > 24000 * kM;
+    const bool wantPursue = c.felony > kFelonyTrigger && !lost;
     if (c.mode == COP_IDLE && wantPursue) {
         c.mode = COP_PURSUE;
         Log("cop: felony %.0f over the trigger - pursuit", c.felony);
     } else if (c.mode == COP_PURSUE && !wantPursue) {
         c.mode = COP_IDLE;
-        Log("cop: pursuit stood down (felony %.0f, position %s)", c.felony,
-            c.known ? "known" : "lost");
+        Log("cop: pursuit stood down (felony %.0f, position %s, %.0f m)", c.felony,
+            c.known ? "known" : "lost", distToMan);
     }
     c.batter = c.felony >= kBatterFelony;
     gThreat.copPursuing = c.mode == COP_PURSUE;
@@ -629,10 +754,18 @@ void CopTick(float dt, const Vec3& playerPos) {
     case COP_PURSUE:
         CopControl(dt);
         break;
-    default: // COP_IDLE: he stands by on the handbrake, felony watching
-        Host().CopBodyDrive(c.veh, 0.0f, 1.0f, 0.0f, false);
+    default: // COP_IDLE: he stands by, felony watching. The stop is
+        // pedal-free once he is slow: on this host a held brake at a
+        // standstill is a reverse gear, not a handbrake - he brakes
+        // only while he is still rolling
+        if (std::fabs(c.speed) > 1.0f) {
+            Drive(0.0f, 0.7f, 0.0f, false);
+            c.brake = 0.7f;
+        } else {
+            Drive(0.0f, 0.0f, 0.0f, false);
+            c.brake = 0.0f;
+        }
         c.gas = 0.0f;
-        c.brake = 1.0f;
         break;
     }
 }

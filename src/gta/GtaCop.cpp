@@ -33,9 +33,24 @@ struct CopBodyState {
     bool seated = false;
     float seatT = 0.0f;      // seconds since spawn; the enter task's budget
     bool seatRetried = false;
-    float lastHealth = 1000.0f;
+    // his survival book lives in the core; this bridge only DISPLAYS it:
+    // book01 in (0,1] shows as 380..1000 host points (damage stages ride
+    // the host's own bands; the fire band under ~300 is never entered
+    // while his book lives), and every loss is measured against the last
+    // displayed value before Post re-asserts it
+    float book01 = 1.0f;
+    float lastSetHealth = 1000.0f;
     float struckRam = 0.0f;  // priced since the last report, consumed by it
     float struckShot = 0.0f;
+    float struckWorld = 0.0f;
+    // the one-unit law: the driver is not a separate life. Hits on him
+    // are measured here and billed to the cop's book by the core; his
+    // health is topped back up every frame (the boss body's discipline)
+    float driverHitAcc = 0.0f;
+    // the hardest impact since the last report, as velocity change
+    Vec3 prevVel;
+    bool prevVelOk = false;
+    float impactPeak = 0.0f;
     // the core's last command, re-asserted by Post every frame
     float gas = 0.0f, brake = 1.0f, steer = 0.0f;
     bool siren = false;
@@ -62,6 +77,8 @@ CPed* LiveDriver() {
     return p == s.driver ? p : nullptr;
 }
 
+float DisplayHealth(float book01) { return book01 > 0.0f ? 380.0f + 620.0f * book01 : 90.0f; }
+
 void ApplyCommand(CVehicle* veh) {
     // The control surface, verified against the SDK headers in-tree:
     // m_fGasPedal 0x49C, m_fBreakPedal right behind it, m_fSteerAngle
@@ -74,6 +91,11 @@ void ApplyCommand(CVehicle* veh) {
     veh->bIsLawEnforcer = s.siren; // he is, while he pursues
     if (s.seated)
         veh->bEngineOn = true;
+    // the displayed health is re-asserted with the pedals: the host's own
+    // damage may have bitten into it this frame, and the core's Report
+    // (which runs before Post) is where that bite was measured and priced
+    if (s.book01 > 0.0f)
+        veh->m_fHealth = DisplayHealth(s.book01);
 }
 
 } // namespace
@@ -85,6 +107,14 @@ void CopSessionReset() {
 
 void CopBodyPre(float dt) {
     (void)dt;
+    // the one-unit law, every frame: what the driver lost since the last
+    // frame is measured for the cop's book, and his health is held back
+    // up - he goes down only when the unit retires, never on his own
+    if (CPed* driver = LiveDriver()) {
+        if (driver->m_fHealth < 1000.0f)
+            s.driverHitAcc += 1000.0f - driver->m_fHealth;
+        driver->m_fHealth = 1000.0f;
+    }
     // the player's own car, priced per frame: the felony system's ears
     // for "he hit something" are his own car's health steps, peaked so a
     // hard hit is still on the books when the core asks once per tick
@@ -164,7 +194,8 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     veh->UpdateRwMatrix();
     s.veh = veh;
     s.vehRef = vpool->GetRef(veh);
-    s.lastHealth = veh->m_fHealth;
+    s.book01 = 1.0f;
+    s.lastSetHealth = veh->m_fHealth;
 
     // the driver: the game's own cop kind, pool-built and contained from
     // birth - the boss body's discipline, word for word (PED_EMPTY, senses
@@ -193,6 +224,9 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
         driver->m_pIntelligence->SetSeeingRange(0.0f);
         driver->m_pIntelligence->SetHearingRange(0.0f);
     }
+    driver->m_fMaxHealth = 1000.0f; // held at the top by Pre, like the
+    driver->m_fHealth = 1000.0f;    // boss's body: he is the unit's face,
+                                    // not a life of his own
     // stand him at his own door and give him the game's own enter task -
     // the one door the SDK opens into a car (the drive task itself is not
     // in the SDK, and no task is ever built from raw addresses here)
@@ -212,14 +246,14 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     CVehicle* v = LiveVeh(veh);
     if (!v || !out)
         return false;
-    CPed* driver = LiveDriver();
-    if (driver && driver->m_fHealth <= 0.0f)
-        return false; // a dead driver drives nothing: the body is done
+    // note: no driver-death check - there is none. The driver is held by
+    // Pre and goes down only with the unit (the one-unit law).
     out->ok = true;
     out->pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
     out->fwd = Vec3(v->m_matrix->up.x, v->m_matrix->up.y, v->m_matrix->up.z);
     out->vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
-    out->health = v->m_fHealth / 1000.0f;
+    out->health = v->m_fHealth / 1000.0f; // the DISPLAY's fraction; the
+                                          // book itself lives in the core
     // READ BACK from the vehicle itself - never the stored command. If the
     // game's own processing overwrote a pedal between our two asserts,
     // this is the number that says so.
@@ -227,13 +261,24 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->brake = v->m_fBreakPedal;
     out->steer = v->m_fSteerAngle;
     out->siren = v->bSirenOrAlarm;
-    // the damage since the last report, split by how it arrived: his car
-    // close (his own vehicle within 6 m) prices a ram; the player's gun
-    // fresh (< 1 s, the boss relay's own clock) prices a shot; a loss far
-    // from both is the world's own crash and bills nobody
-    const float lost = s.lastHealth - v->m_fHealth;
+    // the impact channel: the car's own velocity change since the last
+    // report - the collision signature the core prices his book by (his
+    // own acceleration is ~0.15 m/s a frame; a strike stands out whole)
+    if (s.prevVelOk) {
+        const float dv = (out->vel - s.prevVel).Length();
+        if (dv > s.impactPeak)
+            s.impactPeak = dv;
+    }
+    s.prevVel = out->vel;
+    s.prevVelOk = true;
+    out->impactDv = s.impactPeak;
+    s.impactPeak = 0.0f;
+    // the health the display lost since it was last set, split by how it
+    // arrived: his car close (his own vehicle within 6 m) prices a ram
+    // for the felony; the player's gun fresh (< 1 s, the boss relay's own
+    // clock) prices a shot; the residue is the world's (walls, fire)
+    const float lost = s.book01 > 0.0f ? s.lastSetHealth - v->m_fHealth : 0.0f;
     if (lost > 0.0f) {
-        s.lastHealth = v->m_fHealth;
         CPlayerPed* player = FindPlayerPed();
         CVehicle* pv = FindPlayerVehicle();
         bool ram = false;
@@ -246,14 +291,29 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
             s.struckRam += lost;
         else if (BridgePlayerShotAge() < 1.0f)
             s.struckShot += lost;
-    } else if (v->m_fHealth > s.lastHealth) {
-        s.lastHealth = v->m_fHealth; // a repair re-baselines the ledger
+        else
+            s.struckWorld += lost;
     }
     out->struckRam = s.struckRam;
     out->struckShot = s.struckShot;
+    out->struckWorld = s.struckWorld;
+    out->struckDriver = s.driverHitAcc;
     s.struckRam = 0.0f;
     s.struckShot = 0.0f;
+    s.struckWorld = 0.0f;
+    s.driverHitAcc = 0.0f;
     return true;
+}
+
+void GtaCopBodySetHealth(int veh, float book01) {
+    if (veh != s.vehRef)
+        return;
+    s.book01 = book01;
+    CVehicle* v = LiveVeh(veh);
+    if (v) {
+        v->m_fHealth = DisplayHealth(book01);
+        s.lastSetHealth = v->m_fHealth;
+    }
 }
 
 void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {
@@ -269,11 +329,24 @@ void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {
         ApplyCommand(v); // now; Post asserts it again after the game
 }
 
-void GtaCopBodyRetire(int veh) {
+void GtaCopBodyRetire(int veh, bool burnOut) {
     if (veh != s.vehRef)
         return;
     CVehicle* v = LiveVeh(veh);
     CPed* driver = LiveDriver();
+    if (burnOut) {
+        // his book is spent: the unit goes down together - the driver
+        // slumps in his seat by the game's own hand (health zeroed, the
+        // corpse is the city's to clean) and the car is handed to the
+        // fire at burn-band health. Nothing of ours is left pointing at
+        // either body.
+        if (driver)
+            driver->m_fHealth = 0.0f;
+        if (v)
+            v->m_fHealth = 90.0f;
+        CopSessionReset();
+        return;
+    }
     if (driver) {
         CWorld::Remove(driver);
         delete driver;

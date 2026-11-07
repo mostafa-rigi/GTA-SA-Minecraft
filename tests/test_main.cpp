@@ -23,6 +23,7 @@
 #include "Items.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "Cop.h"
 #include "Atlas.h"
 #include "NavGraph.h"
 #include "SoldierModel.h"
@@ -9849,6 +9850,516 @@ static void TestAtlas() {
     UnloadNavGraph();
 }
 
+// ---------------------------------------------------------------- the Driver 2 cop (step 1)
+// A fake body with the one steering sign the SDK does not document INVERTED
+// on purpose (command + turns him LEFT here): the spike's calibration must
+// catch it and flip the session, or every sim below steers him backwards.
+struct CopFakeHost : TestHost {
+    bool carUp = false;
+    Vec3 carPos, carVel;
+    float carYaw = 0.0f; // fwd = (sin yaw, cos yaw, 0)
+    float carSpeed = 0.0f;
+    float carHealth = 1.0f;
+    float cmdGas = 0, cmdBrake = 0, cmdSteer = 0;
+    bool cmdSiren = false;
+    float struckRamQ = 0, struckShotQ = 0, impactQ = 0;
+    float struckWorldQ = 0, struckDriverQ = 0, impactDvQ = 0;
+    float displayHealth = 1000.0f; // the last book display the core commanded
+    bool burnedOut = false, driverDown = false;
+    bool freeze = false; // the stuck sim's wall: the body answers nothing
+    int SpawnCopBody(const Vec3& at, float, const Vec3& face) override {
+        carUp = true;
+        carPos = at;
+        carVel = Vec3();
+        carSpeed = 0.0f;
+        carHealth = 1.0f;
+        cmdGas = cmdBrake = cmdSteer = 0.0f;
+        const Vec3 d = face - at;
+        carYaw = std::atan2(d.x, d.y);
+        return 7;
+    }
+    bool CopBodyReport(int, CopBody* out) override {
+        if (!carUp)
+            return false;
+        out->ok = true;
+        out->pos = carPos;
+        out->fwd = Vec3(std::sin(carYaw), std::cos(carYaw), 0.0f);
+        out->vel = carVel;
+        out->health = carHealth;
+        out->gas = cmdGas;
+        out->brake = cmdBrake;
+        out->steer = cmdSteer;
+        out->siren = cmdSiren;
+        out->struckRam = struckRamQ;
+        out->struckShot = struckShotQ;
+        out->struckWorld = struckWorldQ;
+        out->struckDriver = struckDriverQ;
+        out->impactDv = impactDvQ;
+        struckRamQ = struckShotQ = struckWorldQ = struckDriverQ = impactDvQ = 0.0f;
+        return true;
+    }
+    void CopBodySetHealth(int, float book01) override {
+        displayHealth = book01 > 0.0f ? 380.0f + 620.0f * book01 : 90.0f;
+    }
+    void CopBodyRetire(int, bool burnOut) override {
+        carUp = false;
+        burnedOut = burnOut;
+        driverDown = burnOut; // the unit goes down together, or not at all
+    }
+    int steerFlips = 0;
+    float lastSteerSign = 0.0f;
+    void CopBodyDrive(int, float gas, float brake, float steer, bool siren) override {
+        if (steer != 0.0f && lastSteerSign != 0.0f && (steer > 0.0f) != (lastSteerSign > 0.0f))
+            ++steerFlips;
+        if (steer != 0.0f)
+            lastSteerSign = steer;
+        cmdGas = gas;
+        cmdBrake = brake;
+        cmdSteer = steer;
+        cmdSiren = siren;
+    }
+    float PlayerVehicleImpact() override {
+        const float q = impactQ;
+        impactQ = 0.0f;
+        return q;
+    }
+    void PlaceCar(const Vec3& at, float yawDeg) {
+        carPos = at;
+        carYaw = yawDeg * 0.0174533f;
+        carSpeed = 0.0f;
+        carVel = Vec3();
+    }
+    void StepCar(float dt) {
+        if (!carUp || freeze) {
+            carVel = Vec3();
+            carSpeed = 0.0f; // the wall stops him whole, driveline too
+            return;
+        }
+        if (cmdGas > 0.0f)
+            carSpeed += cmdGas * 9.0f * dt;
+        if (cmdBrake > 0.0f) {
+            if (carSpeed > 0.3f)
+                carSpeed -= cmdBrake * 13.0f * dt;
+            else {
+                carSpeed -= cmdBrake * 12.0f * dt; // at rest the pedal is
+                    // reverse gear, and it pulls hard - the original's
+                    // recovery reverses at full thrust, so the body must too
+                if (carSpeed < -9.0f)
+                    carSpeed = -9.0f;
+            }
+        }
+        carSpeed -= carSpeed * 0.30f * dt;
+        if (carSpeed > 56.0f)
+            carSpeed = 56.0f;
+        const float sf = Clamp(carSpeed / 8.0f, -1.0f, 1.0f);
+        carYaw -= cmdSteer * 3.4f * sf * dt; // INVERTED on purpose: raw
+            // +steer turns this body LEFT on the map - the spike's
+            // calibration must catch it and flip the session
+        const Vec3 f(std::sin(carYaw), std::cos(carYaw), 0.0f);
+        carPos = carPos + f * carSpeed * dt;
+        carVel = f * carSpeed;
+    }
+};
+
+// walk a point along a road-route polyline by arc distance
+struct RoadWalker {
+    std::vector<Vec3> pts;
+    std::vector<float> cum; // cumulative length at each point
+    float total = 0.0f;
+    void Build(const std::vector<Vec3>& p) {
+        pts = p;
+        cum.assign(pts.size(), 0.0f);
+        for (size_t i = 1; i < pts.size(); ++i) {
+            Vec3 d = pts[i] - pts[i - 1];
+            d.z = 0.0f;
+            total += d.Length();
+            cum[i] = total;
+        }
+    }
+    Vec3 PosAt(float s, Vec3* dirOut) const {
+        if (pts.empty())
+            return Vec3();
+        s = Clamp(s, 0.0f, total);
+        size_t i = 1;
+        while (i < cum.size() && cum[i] < s)
+            ++i;
+        if (i >= pts.size())
+            i = pts.size() - 1;
+        const float segLen = cum[i] - cum[i - 1];
+        const float t = segLen > 0.001f ? (s - cum[i - 1]) / segLen : 0.0f;
+        Vec3 d = pts[i] - pts[i - 1];
+        d.z = 0.0f;
+        if (dirOut)
+            *dirOut = d.Length() > 0.001f ? d * (1.0f / d.Length()) : Vec3(0, 1, 0);
+        return pts[i - 1] + (pts[i] - pts[i - 1]) * t;
+    }
+    float NearestDist(const Vec3& p) const {
+        float best = 0.0f, bestD = 1e18f;
+        for (size_t i = 1; i < pts.size(); ++i) {
+            Vec3 a = pts[i - 1], b = pts[i];
+            Vec3 ab = b - a;
+            ab.z = 0.0f;
+            const float L2 = ab.x * ab.x + ab.y * ab.y;
+            float t = L2 > 0.001f ? ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / L2 : 0.0f;
+            t = Clamp(t, 0.0f, 1.0f);
+            const Vec3 q = a + ab * t;
+            const float d = (p - q).Length();
+            if (d < bestD) {
+                bestD = d;
+                best = cum[i - 1] + std::sqrt(L2) * t;
+            }
+        }
+        return best;
+    }
+};
+
+static void TestCop() {
+    CopFakeHost host;
+    SetHost(&host);
+    WideStage();
+    CopReset();
+    CHECK(LoadVehicleGraphFromRepo(), "the cop sims ride the real vehicle graph");
+    const float dt = 0.02f;
+    const Vec3 grove(2486.0f, -1654.0f, 13.5f);
+    std::vector<Vec3> roadPts;
+    CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(1690, -2280, 13), &roadPts, nullptr) && roadPts.size() > 4,
+          "the Grove-to-airport road exists for the chase sims");
+    RoadWalker road;
+    road.Build(roadPts);
+
+    // ---- piece 0's spike, end to end on the fake body: calibration flips
+    // the inverted sign, the block route runs, the body stops at its end
+    {
+        host.PlaceCar(grove, 0.0f); // staging only; the summon re-stands him
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        host.hasPlayer = true;
+        host.player = man;
+        host.vehicle = -1;
+        host.velocity = Vec3();
+        CHECK(CopSummon(grove, man), "the cop's body stands up");
+        const Vec3 start = host.carPos;
+        for (int i = 0; i < 60 * 50 && !gCop.spikeDone; ++i) {
+            CopTick(dt, man);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.spikeDone, "the spike route ran to its end");
+        CHECK(gCop.steerCalDone && gCop.steerFlip,
+              "steer calibration caught this body's inverted sign (flip %d)", (int)gCop.steerFlip);
+        CHECK((host.carPos - start).Length() > 120.0f,
+              "the body actually drove the block (%.0f m)", (host.carPos - start).Length());
+        CHECK(gCop.mode == COP_IDLE, "after the spike he stands by, felony watching");
+    }
+
+    // ---- (a) pursuit: a fleeing car on the real road graph - the field
+    // brings him down the road, the intercept takes over, distance closes
+    // ---- (f) bail-out mid-chase: the hunt stays on the MAN
+    // ---- (g) a fresh car mid-chase: the swap cleanses nothing
+    {
+        float copS = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CopReset();
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the chase cop stands up");
+        // the spike would drive him off; this sim prices the chase, so the
+        // block is skipped the way a second summon in a live chase would
+        // find him: straight to standby with the calibration already his
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true; // this fake body is inverted, as calibrated above
+        gCop.spikeDone = true;
+        float manS = copS + 25.0f;
+        host.vehicle = 42;
+        auto runChase = [&](float seconds, float manSpeed, bool onFoot) {
+            float minDist = 1e9f;
+            bool pursuedThroughout = true;
+            for (float t = 0.0f; t < seconds; t += dt) {
+                manS += manSpeed * dt;
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * manSpeed;
+                host.player = mp;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+                host.carPos.z = road.PosAt(road.NearestDist(host.carPos), &md).z;
+                // the fake integrates x/y only; the real body rides the
+                // ground, so its z is the road's z under it - without
+                // this the original's own 5.9 m sight-height gate blinds
+                // him on every ramp, which is the fake lying, not him
+                const float d = Dist2D(host.carPos, mp);
+                if (d < minDist)
+                    minDist = d;
+                if (t > 1.0f && gCop.mode != COP_PURSUE)
+                    pursuedThroughout = false;
+            }
+            return std::pair<float, bool>(minDist, pursuedThroughout);
+        };
+        // ignition: 25 m ahead, 35 m/s past him - speeding, seen, noted
+        {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.velocity = md * 35.0f;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.felony >= 659.0f, "speeding past him is noted at the placid value (felony %.0f)", gCop.felony);
+        // the chase itself at 20 m/s of flight
+        const auto chase = runChase(30.0f, 20.0f, false);
+        CHECK(chase.second, "the pursuit never stood down during the chase");
+        CHECK(chase.first < 13.0f, "he closed on the fleeing car (closest %.1f m)", chase.first);
+        CHECK(gThreat.copPursuing, "the shared record carries his pursuit for the boss");
+        // (b) batter: felony at the ladder's top - the target leaves the
+        // tail and sits on the man's flank
+        {
+            gCop.felony = 3000.0f;
+            bool flankSeen = false;
+            for (float t = 0.0f; t < 2.0f; t += dt) {
+                manS += 15.0f * dt;
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * 15.0f;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+                const Vec3 rel = gCop.target - mp;
+                const float side = rel.x * md.y + rel.y * -md.x; // his TRUE right
+                if (gCop.batter && side > 1.2f)
+                    flankSeen = true;
+            }
+            CHECK(flankSeen, "batter mode puts his aim on the flank, not the tail");
+            gCop.felony = 700.0f;
+            bool tailSeen = false;
+            for (float t = 0.0f; t < 2.0f; t += dt) {
+                manS += 15.0f * dt;
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * 15.0f;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+                const Vec3 rel = gCop.target - mp;
+                const float along = rel.x * md.x + rel.y * md.y;
+                if (!gCop.batter && along < -1.2f)
+                    tailSeen = true;
+            }
+            CHECK(tailSeen, "at ordinary felony the CarTail is behind him again");
+        }
+        // (c) stuck: the body frozen mid-chase - the reverse recovery
+        // fires on the original's clock, and frees him when the wall goes
+        {
+            host.freeze = true;
+            bool recoverySeen = false;
+            for (float t = 0.0f; t < 2.0f && !recoverySeen; t += dt) {
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * 15.0f;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+                if (gCop.recoveryT > 0.0f)
+                    recoverySeen = true;
+            }
+            CHECK(recoverySeen, "frozen against the wall, the recovery clock fired");
+            host.freeze = false; // freed WHILE the recovery still runs:
+                                 // its reverse is what the next check prices
+            bool reversed = false;
+            for (float t = 0.0f; t < 1.0f; t += dt) {
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * 15.0f;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+                if (host.carSpeed < -1.0f)
+                    reversed = true;
+            }
+            CHECK(reversed, "the recovery drives him backwards out (speed %.1f)", host.carSpeed);
+        }
+        // (f) bail-out: the man leaves the car and runs - the hunt stays
+        // on HIM: no stand-down, no felony mercy, and the car reaches him.
+        // Staged mid-chase, as the amendment names it: driving at him,
+        // 25 m back, pursuit live - THEN he bails.
+        {
+            // staged on the road itself: the cop placed behind the man's
+            // mark, facing down it - the (a) staging, reused honestly
+            manS = road.NearestDist(host.carPos) + 60.0f;
+            Vec3 cd;
+            const Vec3 copAt2 = road.PosAt(manS - 25.0f, &cd);
+            host.PlaceCar(copAt2, std::atan2(cd.x, cd.y) * 57.29578f);
+            host.vehicle = 42;
+            const auto warm = runChase(2.0f, 18.0f, false);
+            CHECK(warm.second, "the bail-out is staged from a live chase");
+            host.vehicle = -1;
+            const auto foot = runChase(9.0f, 6.0f, true);
+            CHECK(foot.second, "on foot, the pursuit never stood down");
+            CHECK(foot.first < 2.5f, "the car reached the man himself (closest %.1f m) - no mercy bubble", foot.first);
+            CHECK(gCop.felony > 658.0f, "no felony decay merely for being on foot (%.0f)", gCop.felony);
+        }
+        // (g) the swap: a fresh car, mid-chase - felony and pursuit ride
+        // straight onto it; a swap cleanses nothing
+        {
+            host.vehicle = 99;
+            const float felonyAtSwap = gCop.felony;
+            const auto swap = runChase(10.0f, 15.0f, false);
+            CHECK(swap.second, "in a fresh car, the pursuit never stood down");
+            CHECK(gCop.felony >= felonyAtSwap && gCop.felony > 658.0f,
+                  "the felony crossed the swap intact (%.0f -> %.0f)", felonyAtSwap, gCop.felony);
+            CHECK(swap.first < 16.0f, "he closed on the swapped car too (closest %.1f m)", swap.first);
+        }
+    }
+
+    // ---- (d) the felony lifecycle: noted, pursuit, the position lost,
+    // the slow bleed at and under the trigger (the original's own rates)
+    {
+        CopReset();
+        host.PlaceCar(grove, 180.0f);
+        const Vec3 man = grove + Vec3(0.0f, -20.0f, 0.0f);
+        CHECK(CopSummon(grove, man), "the felony cop stands up");
+        host.vehicle = 42;
+        host.velocity = Vec3(0.0f, -35.0f, 0.0f);
+        CopTick(dt, man);
+        CHECK(gCop.felony >= 659.0f, "the speeding note landed whole (%.0f)", gCop.felony);
+        // finish the spike with the man parked at the summon spot
+        host.vehicle = -1;
+        host.velocity = Vec3();
+        for (int i = 0; i < 60 * 50 && !gCop.spikeDone; ++i) {
+            CopTick(dt, man);
+            host.StepCar(dt);
+        }
+        // seen again at standby range: the pursuit opens
+        const Vec3 fwd(std::sin(host.carYaw), std::cos(host.carYaw), 0.0f);
+        const Vec3 nearMan = host.carPos + fwd * 15.0f;
+        host.vehicle = 42;
+        CopTick(dt, nearMan);
+        CHECK(gCop.mode == COP_PURSUE, "over the trigger and seen: he pursues");
+        // gone: 400 m off, on foot, still - the original's 256 ticks lose
+        // the position and the driving stands down; the felony itself does
+        // NOT bleed above the trigger (AdjustFelony's own arithmetic)
+        const Vec3 gone = host.carPos + Vec3(400.0f, 0.0f, 0.0f);
+        host.vehicle = -1;
+        for (float t = 0.0f; t < 6.0f; t += dt) {
+            CopTick(dt, gone);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_IDLE, "256 unseen ticks: position lost, pursuit stood down");
+        CHECK(gCop.felony >= 658.0f, "above the trigger the felony does not bleed (%.0f)", gCop.felony);
+        gCop.felony = 600.0f;
+        for (float t = 0.0f; t < 3.1f; t += dt) {
+            CopTick(dt, gone);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.felony <= 596.0f, "at the trigger the felony bleeds 1 per 31 ticks (%.0f)", gCop.felony);
+    }
+
+    // ---- (h) his survival book: priced on the original's scale, the SA
+    // body only displays it. An RPG-priced hit is expensive, not death;
+    // bullets retire him only at the book's own total; fire drains at
+    // the priced rate and no faster.
+    // ---- (i) the one-unit law: a headshot-priced hit on the DRIVER
+    // lands in the same book and the driver does not die.
+    {
+        CopReset();
+        host.burnedOut = false;
+        host.driverDown = false;
+        float copS = road.NearestDist(Vec3(2480, -1660, 13)) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the survival cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        float manS = copS + 25.0f;
+        host.vehicle = 42;
+        auto tickChase = [&](float seconds) {
+            for (float t = 0.0f; t < seconds; t += dt) {
+                manS += 15.0f * dt;
+                Vec3 md;
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.velocity = md * 15.0f;
+                host.player = mp;
+                CopTick(dt, mp);
+                host.StepCar(dt);
+            }
+        };
+        {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.velocity = md * 35.0f;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE || gCop.felony >= 659.0f, "the survival chase is live");
+        // an RPG-priced blast: 300 of the host's points at the anchor = 8100 of his
+        host.struckShotQ = 300.0f;
+        tickChase(0.1f);
+        CHECK(gCop.totalDamage > 7900.0f && gCop.totalDamage < 8300.0f,
+              "the RPG hit billed his book at the anchor (%.0f)", gCop.totalDamage);
+        CHECK(CopActive() && !host.burnedOut, "one RPG does not retire him - he fights on");
+        CHECK(host.displayHealth > 700.0f && host.displayHealth <= 1000.0f,
+              "the display rides his book, above the city's burn band (%.0f)", host.displayHealth);
+        // (i) a headshot-priced hit on the driver: 100 of his points bill
+        // the unit's book; the driver himself does not die
+        const float bookBefore = gCop.totalDamage;
+        host.struckDriverQ = 100.0f;
+        tickChase(0.1f);
+        CHECK(gCop.totalDamage - bookBefore > 2600.0f && gCop.totalDamage - bookBefore < 2800.0f,
+              "the driver hit billed the unit's book (%.0f)", gCop.totalDamage - bookBefore);
+        CHECK(CopActive() && !host.driverDown, "the driver does not die on his own - one unit");
+        // fire: five seconds of the world's drain at 25 host points a
+        // second bills exactly the anchor rate, no faster
+        {
+            const float before = gCop.totalDamage;
+            for (int i = 0; i < 250; ++i) {
+                host.struckWorldQ += 0.5f; // 25/s at dt
+                tickChase(dt);
+            }
+            const float billed = gCop.totalDamage - before;
+            CHECK(billed > 3300.0f && billed < 3450.0f,
+                  "five seconds of fire billed at the priced rate (%.0f)", billed);
+            CHECK(CopActive(), "the fire interval did not retire him early");
+        }
+        // sustained bullets: 30 host points a tick retires him only when
+        // the book itself crosses 27000 - and then he burns, as one unit
+        {
+            int ticks = 0;
+            while (CopActive() && ticks < 60) {
+                host.struckShotQ = 30.0f;
+                tickChase(dt);
+                ++ticks;
+            }
+            CHECK(!CopActive() && host.burnedOut && host.driverDown,
+                  "bullets retired him at his book's total, burning as one unit (book %.0f)", gCop.totalDamage);
+            CHECK(gCop.totalDamage > 27000.0f, "the retirement line is his own 27000 (%.0f)", gCop.totalDamage);
+        }
+    }
+
+    // ---- (e) shared knowledge: the boss in combat, a fresh cop starts
+    // informed; the record is one, read both ways
+    {
+        CopReset();
+        WideStage();
+        CHECK(LoadSoldierBinFromRepo(), "the shared-knowledge proof meets his real model");
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        CHECK(s >= 0, "the boss stands for the shared-knowledge proof");
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 16.5f, 11.0f);
+        const std::vector<BeingInfo> noBeings;
+        ProvokeByAim(host, man, &noBeings);
+        bool engaged = false;
+        for (int i = 0; i < 400 && !engaged; ++i) {
+            MobsTick(0.05f, man, 0, true, &noBeings);
+            engaged = gThreat.bossEngaged;
+        }
+        CHECK(engaged, "the boss's fight is on the shared record");
+        const Vec3 copAt(8.5f, 0.5f, 10.0f);
+        CHECK(CopSummon(copAt, man), "a cop summoned mid-fight stands up");
+        CHECK(gCop.informed && gCop.felony == 659.0f,
+              "he starts informed by the record, at the fight's own felony (informed %d, felony %.0f)",
+              (int)gCop.informed, gCop.felony);
+        MobsClear();
+    }
+    CopReset();
+    SetHost(nullptr);
+}
+
 int main(int argc, char** argv) {
     if (argc > 1)
         return InspectWorldFile(argv[1]);
@@ -10009,6 +10520,7 @@ int main(int argc, char** argv) {
     TestBossTenacity();
     TestBossOffPath();
     TestBossCoreJump();
+    TestCop();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

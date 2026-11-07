@@ -165,9 +165,21 @@ struct Host {
         bool siren = false;       // read back: the vehicle's own siren flag
         // damage since the last report that the host attributes to the
         // player, split by how it arrived (the boss relay's discipline:
-        // a blow is priced once, by the channel that saw it)
+        // a blow is priced once, by the channel that saw it). These price
+        // the FELONY. His survival book is priced separately, below.
         float struckRam = 0.0f;   // host health points lost to his vehicle
         float struckShot = 0.0f;  // host health points lost to his gunfire
+        float struckWorld = 0.0f; // host health points lost to everything
+                                  // else (walls, fire, the world's own hits)
+        // health points the seated DRIVER lost since the last report. He
+        // is not a separate life: the cop is one unit (car + driver, as in
+        // Driver 2, where no separate driver death exists) - the bridge
+        // holds his health up and bills every hit on him to the cop's book
+        float struckDriver = 0.0f;
+        // the hardest single impact since the last report, as the car's
+        // own velocity change (m/s): the collision signature the core
+        // prices his damage book by, on the original's own curve
+        float impactDv = 0.0f;
     };
     // Stand the body up at `at` facing `headingDeg`, its nose turned toward
     // `face` (the original's justPinged: a fresh cop starts facing his man).
@@ -177,7 +189,17 @@ struct Host {
     // gas/brake 0..1, steer -1..1 of full lock. Siren: the host's own siren
     // flag follows `siren` while the body is driven.
     virtual void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {}
-    virtual void CopBodyRetire(int veh) {}
+    // His survival law is HIS, not the host's (the user's order): the core
+    // keeps his damage book on the original's scale and commands the
+    // body's DISPLAYED health from it - book01 in (0,1] maps into the
+    // host's safe band (damage stages show, the burn band is never
+    // entered); book01 == 0 hands the body to the fire. The bridge holds
+    // the displayed value against the host's own damage every frame.
+    virtual void CopBodySetHealth(int veh, float book01) {}
+    // burnOut: his book is spent - the driver is taken out and the body is
+    // left to the host's own fire, not deleted. Otherwise both bodies are
+    // removed outright (a re-summon, a session's end).
+    virtual void CopBodyRetire(int veh, bool burnOut) {}
     // The strongest impact the player's own vehicle took since the last call
     // (host health points it lost in one step), consumed by the call - the
     // felony system's ears for "he hit something", read off his own car's

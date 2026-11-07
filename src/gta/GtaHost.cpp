@@ -247,7 +247,8 @@ struct GtaHost : Host {
     void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) override {
         GtaCopBodyDrive(veh, gas, brake, steer, siren);
     }
-    void CopBodyRetire(int veh) override { GtaCopBodyRetire(veh); }
+    void CopBodySetHealth(int veh, float book01) override { GtaCopBodySetHealth(veh, book01); }
+    void CopBodyRetire(int veh, bool burnOut) override { GtaCopBodyRetire(veh, burnOut); }
     float PlayerVehicleImpact() override { return GtaPlayerVehicleImpact(); }
     // ---- the boss's vehicle senses (workstream L)
     bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {

@@ -60,8 +60,12 @@ struct CopState {
     // the body's last report (the bridge reads these back from the car)
     Vec3 pos, fwd{ 0, 1, 0 }, vel;
     float speed = 0.0f;        // signed, m/s along his nose
-    float health = 1.0f;       // 0..1
-    float totalDamage = 0.0f;  // the original's scale: retires past 27000
+    float prevSpeed = 0.0f;    // last tick's speed: the stuck witness
+    float health = 1.0f;       // his BOOK's fraction left, 0..1 (not the
+                               // host body's health - the bridge displays
+                               // the book on the body, the book rules)
+    float totalDamage = 0.0f;  // his damage book, the original's own scale
+                               // (BCOLLIDE.C pricing): retires past 27000
     // the felony system (FELONY.C's own numbers, 0..4096)
     float felony = 0.0f;
     float felonyClock = 0.0f;  // the 31-tick AdjustFelony clock, in seconds
@@ -88,6 +92,20 @@ struct CopState {
     size_t spikeIdx = 0;
     bool spikeDone = false;    // the route ran out: the body answered (or not)
     float spikeLogT = 0.0f;
+    // the steering sign is the one fact the SDK headers do not state:
+    // which way m_fSteerAngle turns the car. The spike retires it in its
+    // first second - command +0.6, read the turn off the vehicle's own
+    // forward vector, and set the session's flip so that from then on a
+    // positive command from this brain means a right turn, as CopControl1
+    // means it. Until calibration lands, commands go out unflipped.
+    bool steerFlip = false;
+    bool steerCalDone = false;
+    float calT = 0.0f;
+    Vec3 calFwd{ 0, 1, 0 };
+    float spikeLatch = 0.0f;   // the committed turn direction while the
+                               // waypoint sits dead behind (the pure-
+                               // pursuit error wraps at +-pi there and
+                               // would bang the wheel lock-to-lock)
     // the far mode's field throttle
     float fieldT = 0.0f;
     Vec3 fieldGoal;
