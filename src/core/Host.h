@@ -23,6 +23,22 @@ struct BlastedCell {
     bool surface; // it could be seen
 };
 
+// What a struck surface is made of, in the coarse classes bullet penetration
+// prices by (CsRules). The bridge reads it off the collision at the trace
+// point; a host that cannot say leaves HS_NONE, and nothing is penetrated on
+// faith - an unknown surface stops a bullet like a wall.
+enum HitSurface {
+    HS_NONE = 0,
+    HS_GLASS,
+    HS_WOOD_THIN,
+    HS_WOOD,
+    HS_FENCE,   // chain-link and grates
+    HS_FOLIAGE, // hedges and bushes
+    HS_METAL,
+    HS_STONE,   // concrete, brick, rock: the world's own walls
+    HS_OBJECT   // a loose object (door, crate, prop) of no clearer material
+};
+
 // What a blow or a shot met among the host's own things.
 struct HostHit {
     bool hit = false;       // a wall, a vehicle, somebody
@@ -34,6 +50,10 @@ struct HostHit {
     int being = -1;         // somebody was hit (the host's number for him); he may sit behind what was hit, in a vehicle
     float beingDist = 1e9f;
     Vec3 beingPoint;
+    int surface = HS_NONE;  // what the first struck surface is made of (HitSurface)
+    float depth = 0.0f;     // how deep the trace point sits inside that surface's
+                            // shape, in metres - a thickness hint for penetration;
+                            // 0 when the host cannot say
 };
 
 // One of the host's own people near a point: his number, and where he is.
@@ -89,6 +109,11 @@ struct Host {
     virtual int PlayerVehicle() { return -1; }                               // its number for the vehicle he sits in, -1: on foot
     virtual void MovePlayer(const Vec3& to) {}                               // an ender pearl took him there
     virtual void HurtPlayer(float halfHearts) {}
+    // the player's own body armour, on the host's 0..100 scale, and its wear:
+    // the core prices kevlar law itself (its damage channel bypasses the
+    // game's own armour), so it reads the vest here and wears it down there
+    virtual float PlayerArmor() { return 0.0f; }
+    virtual void WearPlayerArmor(float halfHearts) {}
     // ---- its own people and vehicles in a fight
     // how far the first of them is along the ray; `nothing` when there is none within reach
     virtual float AimDistance(const Vec3& origin, const Vec3& dir, float reach, float nothing) { return nothing; }

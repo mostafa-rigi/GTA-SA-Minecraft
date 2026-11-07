@@ -173,6 +173,10 @@ struct Mob {
     float holdT = 0.0f;        // boss: the stand-down hold left
     float aimViolT = 0.0f;     // boss: seconds the player has been aiming at him during the talk
     float shootClock = 0.0f;   // boss: seconds into the shoot upper (recoil cycles on it)
+    float sprayIndex = 0.0f;   // boss: shots into the current spray (the recoil pattern reads it; it recovers when the trigger rests)
+    float sprayIdle = 0.0f;    // boss: seconds since his last shot (the recovery clock)
+    int spraySeed = 1;         // boss: this spray's sway seed (1.6's recoil is semi-random: a new spray sways anew)
+    bool sprayPistol = false;  // boss: the spray index belongs to the pistol (switching weapons resets it)
     float moveSpeed = 0.0f;    // boss: the speed his movement chose this tick
     Vec3 aimGoal{ 0, 0, 0 };   // boss: the point his eyes go to (states leave their wish here)
     float aimRate = 4.0f;      // boss: how fast the aim turns toward aimGoal

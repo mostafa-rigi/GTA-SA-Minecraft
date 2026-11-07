@@ -8,6 +8,7 @@
 #include "BossTest.h"
 #include "BlockRules.h"
 #include "Combat.h"
+#include "CsRules.h"
 #include "Doors.h"
 #include "Entities.h"
 #include "GameState.h"
@@ -807,29 +808,28 @@ struct SoldierTune {
     float shotInterval; // 600 rounds a minute
     int burstMin, burstMax; // a professional's burst: three to five rounds, then a breath
     float burstPauseMin, burstPauseMax;
-    float damage;     // half hearts a bullet does up close (the M4A1's 33, on this host's scale)
-    float damageFar;  // the share of it left at sightRange (Counter-Strike's falloff with distance)
+    float damage;     // half hearts a bullet does up close (the M4A1's 33, on this host's scale) -
+                      // since the rulebook pour this is the SCALE ANCHOR of CsRules (33 CS = 6 hh)
+                      // and the vehicle-scaling reference; a bullet's price itself is CsRules' work
     float spreadSettled; // his aim error in degrees: standing settled...
     float spreadStrafe;  // ...drifting sideways...
     float spreadRun;     // ...and at a run (Counter-Strike punishes shooting on the move the same way)
     float firstShot;     // the first bullet of a burst is this much tighter (tap discipline)
     float retreatUnder;  // below this share of his health he falls back while he fights
     float searchSeconds; // how long he hunts a lost enemy before he gives him up
-    float armorAbsorb;   // kevlar swallows this share of every hit while it lasts (Counter-Strike: half)
 };
 const SoldierTune kSoldier = {
     60.0f, 0.5f, 4.0f, // sight (the boss's range; his cone/meter live in kBoss)
     0.15f,             // reaction: the boss's post-detection trigger discipline
     3.0f,              // strafe
     13.0f,             // patrol radius
-    30, 3.0f, 0.1f,    // the M4A1
+    30, 3.07f, 0.09f,  // the M4A1: CS's own reload (3.07 s) and cycle (0.09 s, ~667 rpm)
     3, 5, 0.35f, 0.6f, // bursts
-    6.0f, 0.55f,       // damage and falloff
+    6.0f,              // the anchor (above)
     1.1f, 2.8f, 5.5f,  // spread: settled, strafing, running
     0.6f,              // first shot of a burst
     0.30f,             // retreat under 30% health
     5.0f,              // search seconds
-    0.5f,              // kevlar absorbs half
 };
 
 // The boss table: body, senses, hunt, combat craft, talk-first, voice.
@@ -856,7 +856,9 @@ struct BossTune {
     float hearGunshot;   // hearing radii, metres (direction + alert only; walls muffle by LOS)
     float hearExplosion;
     float hearSprint;
-    float hearWalk;
+    float hearRun;       // a jog: Counter-Strike's running footstep, honestly audible
+    float hearWalk;      // ZERO by CS's own law: shift-walking and creeping make no
+                         // footstep sound at all - a slow man is a silent man
     float hearWeapon;    // a bowstring / crossbow at this range
     float hearVehicle;   // an engine at this range primes him; faster = louder
     // D - mobility
@@ -881,13 +883,16 @@ struct BossTune {
     float crouchSpread;  // crouched spread multiplier
     float peekMin, peekMax; // seconds exposed while peek-firing from cover
     int pistolMag;       // the USP's fifteen
-    float pistolDamage;  // half hearts per USP bullet up close
-    float pistolInterval;
+    float pistolDamage;  // half hearts per USP bullet up close: the USP's TRUE price since the
+                         // rulebook pour (34 CS on the anchor scale) - it was a deliberate 3.4
+                         // before; BossShoot prices through CsRules, this is the vehicle reference
+    float pistolInterval; // his cadence on the pistol: a brain's pacing, not a weapon cap
     float pistolRange;   // inside this, an empty rifle becomes the pistol instead of a reload
     float nadeMin, nadeMax; // the HE grenade's throwing window (target held in cover)
     float nadeFuse;
     float nadeRadius;
-    float nadeDamage;    // half hearts at the grenade's heart, through the core channel
+    float nadeDamage;    // the HE's heart, in CS points (96 unarmoured by the measured guide);
+                         // CsRules prices the curve from it, through the core channel
     float nadeHeldTime;  // the target must sit in cover this long before a grenade is worth throwing
     float suppWindow;    // suppressive fire covers a corner this long after the target slips behind it
     float woundedShare;  // below this health share he fights more carefully (longer cover, shorter peeks)
@@ -910,13 +915,13 @@ const BossTune kBoss = {
     75.0f, 60.0f, 70.0f, 60.0f,                // cone and pitch
     0.75f, 1.3f,                               // night trading
     7.0f, 2.4f, 1.5f, 0.7f, 1.35f, 3.5f, 0.25f, 0.45f, // detection fill
-    70.0f, 90.0f, 16.0f, 8.0f, 12.0f, 30.0f,   // hearing
+    70.0f, 90.0f, 16.0f, 13.0f, 0.0f, 12.0f, 30.0f, // hearing (walk is silent: CS's law)
     1.1f, 8.6f, 6.4f,                          // jump + the chase sprint (smart pack)
     6000, 1.0f, 4.0f, 1.5f,                    // combat navigation: A* budget, repath throttle, goal move, stall
     45.0f, 12.0f,                              // hunt
     25.0f, 0.55f, 0.6f, 1.0f,                  // crouch + peek
-    15, 3.4f, 0.28f, 8.0f,                     // the USP
-    8.0f, 30.0f, 1.8f, 5.0f, 12.0f, 2.5f, 2.5f, 0.35f, // the grenade + suppression + wounded
+    15, 6.18f, 0.28f, 8.0f,                    // the USP at its true price (34 CS on the anchor)
+    8.0f, 30.0f, 1.8f, 5.5f, 96.0f, 2.5f, 2.5f, 0.35f, // the grenade (CS heart: 96) + suppression + wounded
     0.12f, 9.0f, 2.0f, 0.5f,                   // the settle + vehicle damage (smart pack)
     1.6f, 4.0f, 60.0f,                         // talk first
     45.0f, 90.0f, 150.0f,                      // presence
@@ -1025,7 +1030,9 @@ void BossStrike(Mob& m, const BossTarget& t, const Vec3& dir, float halfHearts) 
 
 // One bullet of his rifle (or, with the pistol flag, of the USP). Counter-Strike's
 // rifles are hitscan: the shot is a line from his muzzle through an aim point
-// scattered by his spread, and it lands where the line first meets the world.
+// scattered by his spread and walked by his recoil, and it lands where the
+// line first meets the world - or, through a thin surface, on the far side
+// of it, at Counter-Strike's own price (the rulebook pour: CsRules).
 //
 // THE SMART PACK'S HIT RESOLUTION (the workstream-L repair): the shipped build
 // never traced this line at all. It tested three body points by hand and, only
@@ -1040,6 +1047,7 @@ void BossStrike(Mob& m, const BossTarget& t, const Vec3& dir, float halfHearts) 
 // car included, zoned by BossVehicleZone - a wall stops it, and only a line
 // that reaches the body strikes the man (a driver still through his glass).
 void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride = nullptr, bool noDamage = false) {
+    const CsWeapon& weap = CsWeaponAt(pistol ? CSW_USP : CSW_M4A1); // his two, at their true rules
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
     const Vec3 fwd = Flat(t.feet - m.pos);
     const Vec3 from = eye + fwd * 0.6f;
@@ -1058,14 +1066,32 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         spread *= kSoldier.firstShot;
     if (pistol)
         spread *= 1.6f; // the USP is a sidearm, not a rifle
+    // Counter-Strike's recoil rides on top of the spread: the pattern says
+    // where this shot of the spray walks (the rifles' climb, then the seeded
+    // sway; the USP's straight vertical line), and he - a professional -
+    // pulls against most of it, so a tenth of the climb and under half the
+    // sway survive his compensation. The index is the spray's own: it climbs
+    // while he fires and the brain recovers it while he rests; the pistol's
+    // spray is counted apart from the rifle's, as the game's accuracy is.
+    if (pistol != m.sprayPistol) {
+        m.sprayPistol = pistol;
+        m.sprayIndex = 0.0f;
+    }
+    const CsRecoil rec = CsRecoilPattern(pistol ? CSW_USP : CSW_M4A1, (int)m.sprayIndex, (uint32_t)m.spraySeed);
+    m.sprayIndex += 1.0f;
+    m.sprayIdle = 0.0f;
     const Vec3 aimPoint = aimOverride ? *aimOverride : (t.inVehicle ? t.vehSeat : t.mid);
     const float err = std::tan(spread * kPi / 180.0f) * dist;
     const float a = Rand01() * 6.2831853f, rr = err * std::sqrt(Rand01());
-    const Vec3 aim = aimPoint + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err);
+    const Vec3 rightF(fwd.y, -fwd.x, 0.0f);
+    const Vec3 patOff = rightF * (std::tan(rec.yawDeg * 0.45f * kPi / 180.0f) * dist) +
+                        Vec3(0, 0, std::tan(rec.pitchDeg * 0.12f * kPi / 180.0f) * dist);
+    const Vec3 aim = aimPoint + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err) + patOff;
     Vec3 dir = aim - from;
     const float len = dir.Length();
     bool hit = false;       // the line reaches the target's body
     float tBody = 1e9f;     // ...at this distance along the line
+    int zone = CSZ_CHEST;   // the zone the line crosses the body at (a driver: his chest, by the seat)
     HostHit tr;             // the host's own trace of the same line
     bool haveTrace = false;
     if (len > 0.1f) {
@@ -1097,30 +1123,74 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         by.shooter = -3; // his mark: the bridge skips nobody for it, the line is honest
         tr = TheHost().ShotTrace(from, dir, dist + 3.0f, by);
         haveTrace = true;
+        if (hit && !t.inVehicle)
+            zone = CsZoneFromHeight(CsHitHeight(from, dir, t.feet, tBody));
     }
-    // ---- resolution: what the round actually meets first
+    // ---- resolution: what the round actually meets first, surface by
+    // surface. The smart pack's law stands - the first thing on the line
+    // decides - and Counter-Strike's signature rides on it now: a round that
+    // meets a THIN surface does not die there. It pays the surface's price
+    // out of its damage (CsPenetrate, FireBullets3's shape) and flies on,
+    // up to the weapon's penetration count; the trace is re-asked past each
+    // surface it passes. A thick wall still stops the round cold, a vehicle
+    // in the line still takes it whole, and a man the trace itself struck is
+    // a hit, not a wall. Suppressive fire never buys passage: it stops at
+    // the first surface, as it always did - its whole job is the noise.
     const int targetVeh = t.inVehicle ? TheHost().PlayerVehicle() : -1;
-    const bool vehHit = haveTrace && tr.vehicle >= 0;
     int resVeh = -1;      // a vehicle takes this round
     Vec3 resPoint;        // ...at this point on it
     bool resWall = false; // the round dies on the world before any body
-    // a wall on the line kills the round before any body point behind it -
-    // unless the trace's own body IS the surface it struck (a man hit square
-    // is a hit; a man behind a wall the line also grazed is not)
-    if (haveTrace && tr.hit && tr.vehicle < 0 && tr.dist < (hit ? tBody - 0.3f : dist + 2.0f) &&
-        !(tr.being >= 0 && std::fabs(tr.beingDist - tr.dist) < 0.5f)) {
-        hit = false;
-        resWall = true;
-    }
-    if (hit) {
-        if (vehHit && tr.vehicle != targetVeh && tr.dist < tBody - 0.05f) {
-            resVeh = tr.vehicle; // another vehicle shields the man: it takes his round
-            resPoint = tr.point;
-            hit = false;
+    Vec3 wallPoint;       // ...on this surface
+    float penMul = 1.0f;  // the damage share left after the surfaces it passed
+    if (haveTrace) {
+        HostHit seg = tr;
+        float segBase = 0.0f; // how far along the line this segment starts
+        int surfaces = 0;
+        while (true) {
+            const float segAbs = segBase + seg.dist;
+            if (seg.vehicle >= 0 && (!hit || (seg.vehicle != targetVeh && segAbs < tBody - 0.05f))) {
+                resVeh = seg.vehicle; // a vehicle shields the man, or is simply
+                resPoint = seg.point; // in the line: it takes his round. (The
+                // target's own car never shields its driver - his glass is
+                // priced in the damage - but a round that misses the man
+                // still lands on his car.)
+                hit = false;
+                break;
+            }
+            const bool wallHere = seg.hit && seg.vehicle < 0 &&
+                segAbs < (hit ? tBody - 0.3f : dist + 2.0f) &&
+                !(seg.being >= 0 && std::fabs(seg.beingDist - seg.dist) < 0.5f);
+            if (!wallHere)
+                break; // the line is clear to the body (or to nothing)
+            if (noDamage || surfaces >= weap.penSurfaces) {
+                resWall = true;
+                wallPoint = seg.point;
+                hit = false;
+                break;
+            }
+            const CsPen pen = CsPenetrate(weap, seg.surface, seg.depth);
+            if (!pen.passes) {
+                resWall = true;
+                wallPoint = seg.point;
+                hit = false;
+                break;
+            }
+            penMul *= pen.dmgMul;
+            ++surfaces;
+            const float step = pen.thicknessM + 0.06f;
+            const float remain = (dist + 3.0f) - (segAbs + step);
+            if (remain <= 0.05f) {
+                resWall = true;
+                wallPoint = seg.point;
+                hit = false;
+                break;
+            }
+            ShotOwner by;
+            by.hostile = true;
+            by.shooter = -3;
+            seg = TheHost().ShotTrace(seg.point + dir * step, dir, remain, by);
+            segBase = segAbs + step;
         }
-    } else if (vehHit) {
-        resVeh = tr.vehicle; // no body on the line, but a vehicle is: it is worked over
-        resPoint = tr.point;
     }
     m.attackAnim = 1.0f;
     m.shootShow = 0.18f; // the shoot pose holds a breath past the shot, so a burst reads as firing
@@ -1138,7 +1208,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
             const float tt = Clamp((aimPoint - muzzle).Dot(dir), 0.0f, len);
             end = muzzle + dir * tt;
         } else if (resVeh >= 0 || resWall) {
-            end = resVeh >= 0 ? resPoint : tr.point; // the tracer ends where the round ended
+            end = resVeh >= 0 ? resPoint : wallPoint; // the tracer ends where the round ended
         } else {
             end = muzzle + dir * (dist + 2.0f);
         }
@@ -1151,14 +1221,33 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
     if (noDamage)
         return; // suppressive fire: noise and tracers on a corner, never damage - the standing label
     if (hit) {
-        float dmg = pistol ? kBoss.pistolDamage : kSoldier.damage;
-        if (dist > 10.0f) {
-            const float f = Clamp((dist - 10.0f) / (kSoldier.sightRange - 10.0f), 0.0f, 1.0f);
-            dmg *= 1.0f - (1.0f - kSoldier.damageFar) * f;
+        // Counter-Strike prices the bullet now, whole (CsRules): the weapon's
+        // base damage, the range modifier over the true distance, the zone
+        // the line crossed the body at - and, for the player, kevlar where
+        // the game's own vest is actually on him: the armoured zones pay the
+        // ratio's half-share to his health and wear the vest by the same law
+        // (this channel bypasses the game's armour, so the core keeps the
+        // vest's books itself, through the host). A street being wears
+        // nothing. A driver takes the chest price through his windshield -
+        // the glass keeps its tax, as it always has on this host.
+        float dmg;
+        if (t.being >= 0) {
+            dmg = CsShotHh(weap, dist, zone, false, 0.0f, nullptr) * penMul;
+            BossStrike(m, t, fwd, dmg);
+        } else {
+            const float armourPts = TheHost().PlayerArmor();
+            float wear = 0.0f;
+            dmg = CsShotHh(weap, dist, zone, armourPts > 0.5f, armourPts * 0.2f, &wear);
+            if (t.inVehicle) {
+                dmg *= 0.85f; // the windshield's tax
+                wear *= 0.85f;
+            }
+            dmg *= penMul;
+            wear *= penMul;
+            BossStrike(m, t, fwd, dmg);
+            if (wear > 0.0f)
+                TheHost().WearPlayerArmor(wear);
         }
-        if (t.inVehicle)
-            dmg *= 0.85f; // the windshield's tax
-        BossStrike(m, t, fwd, dmg);
     } else if (resVeh >= 0) {
         // his fire genuinely works the vehicle over: zoned damage through the
         // bridge on whichever vehicle the line met - the player's car, a
@@ -1173,7 +1262,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         } else {
             have = TheHost().VehiclePose(resVeh, &centre, &vfwd);
         }
-        const float base = kBoss.vehDamage * ((pistol ? kBoss.pistolDamage : kSoldier.damage) / kSoldier.damage);
+        const float base = kBoss.vehDamage * ((pistol ? kBoss.pistolDamage : kSoldier.damage) / kSoldier.damage) * penMul;
         if (!have) {
             TheHost().HurtVehicle(resVeh, base); // no frame to zone by: the plain body price
         } else {
@@ -1483,6 +1572,16 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.loudT = std::min(99.0f, m.loudT + dt);
     m.firePlantT = std::max(0.0f, m.firePlantT - dt);
     m.fallbackBanT = std::max(0.0f, m.fallbackBanT - dt);
+    // Counter-Strike's recoil recovery: while the trigger rests, the spray
+    // index walks back down (fast, the rifles' own habit) and a spray that
+    // fully recovers is over - the next one sways on a fresh seed, the way
+    // 1.6's semi-random pattern starts anew
+    m.sprayIdle += dt;
+    if (m.sprayIdle > 0.30f && m.sprayIndex > 0.0f) {
+        m.sprayIndex = std::max(0.0f, m.sprayIndex - dt * 14.0f);
+        if (m.sprayIndex <= 0.0f)
+            m.spraySeed = 1 + (int)(Rand01() * 2000000000.0f);
+    }
     m.reposT = std::max(0.0f, m.reposT - dt);
     // the settle clock: how long his feet have honestly been still - fire
     // control prices his spread off it (Counter-Strike's stop-shoot recovery)
@@ -1651,8 +1750,10 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 noiseR = kBoss.hearVehicle * (0.7f + std::min(1.0f, sp / 14.0f));
         } else if (playerSpeed > 4.2f)
             noiseR = kBoss.hearSprint;
+        else if (playerSpeed > 2.2f)
+            noiseR = kBoss.hearRun;
         else if (playerSpeed > 1.2f)
-            noiseR = kBoss.hearWalk;
+            noiseR = kBoss.hearWalk; // zero: CS's law - a creeping man makes no sound
         if (noiseR > 0.0f) {
             float r = noiseR * hearMul;
             if (TheHost().LineBlocked(eye, playerPos))
@@ -2792,10 +2893,19 @@ void BossNadesTick(float dt, const Vec3& playerPos) {
 }
 
 void BossNadeBlastPlayer(const Vec3& at, const Vec3& playerPos) {
+    // Counter-Strike's own HE curve (CsHeHh): the measured heart of 96,
+    // falling linearly to nothing at the radius' edge, halved by armour -
+    // and priced through walls, as 1.6 prices it: a man behind a door is
+    // not safe from a grenade, only farther from its heart. The game's own
+    // vest, when worn, takes its wear through the host.
     const float d = (playerPos - at).Length();
-    if (d < kBoss.nadeRadius) {
-        const float f = 1.0f - d / kBoss.nadeRadius;
-        TheHost().HurtPlayer(kBoss.nadeDamage * f * f + 1.0f);
+    const float armourPts = TheHost().PlayerArmor();
+    float wear = 0.0f;
+    const float hh = CsHeHh(d, kBoss.nadeRadius, kBoss.nadeDamage, armourPts > 0.5f, armourPts * 0.2f, &wear);
+    if (hh > 0.0f) {
+        TheHost().HurtPlayer(hh);
+        if (wear > 0.0f)
+            TheHost().WearPlayerArmor(wear);
     }
 }
 
@@ -2877,6 +2987,7 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
         // his legs both on the way he was summoned facing
         m.team = TEAM_COUNTER;
         m.armor = kBoss.armor;
+        m.spraySeed = 1 + (int)(Rand01() * 2000000000.0f); // his first spray sways his own way
         m.anchor = feet;
         m.mag = kSoldier.magazine;
         m.pistolMag = kBoss.pistolMag;
@@ -2941,16 +3052,21 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
         return; // dead, or still invulnerable from the last hit
     float dmg = halfHearts;
     if (m.kind == MOB_SOLDIER) {
-        // Counter-Strike's kevlar: while it lasts it swallows half of every hit, and what is left reaches
-        // the man. There is no hit-zone anywhere in this road - a hit is a hit, head or body alike, and
-        // no multiplier exists for it to take (the boss's no-headshot law is structural, not a rule).
+        // Counter-Strike's kevlar, at the game's own law (CsArmorSplit): the health share of a hit
+        // is the damage times the armour ratio over two - for the rounds that reach him here the
+        // ratio is 1.0, the generic one, since the player's weapons are not CS weapons with ratios
+        // of their own - and the vest wears at (damage - health) x 0.5, half the rate the old flat
+        // law drained it, spilling to health as it dies. There is no hit-zone anywhere in this
+        // road - a hit is a hit, head or body alike, and no multiplier exists for it to take (the
+        // boss's no-headshot law is structural, the user's standing design choice, not a CS rule).
         // A professional in armour is also barely shoved by a blow. And being hurt tells him where his
         // enemy is: he is alerted, his detection is full, and he hunts the blow's origin.
         knock *= 0.25f;
         if (m.armor > 0.0f) {
-            const float absorbed = std::min(m.armor, dmg * kSoldier.armorAbsorb);
-            m.armor -= absorbed;
-            dmg -= absorbed;
+            float wear = 0.0f;
+            const float health = CsArmorSplit(dmg, 1.0f, m.armor, &wear);
+            m.armor -= wear;
+            dmg = health;
         }
         m.alerted = true;
         m.alertFade = 0.0f;

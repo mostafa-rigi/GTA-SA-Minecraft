@@ -3,6 +3,7 @@
 #include "CCamera.h"
 #include "CColPoint.h"
 #include "CFireManager.h"
+#include "eSurfaceType.h"
 #include "CObject.h"
 #include "CPed.h"
 #include "CPlayerPed.h"
@@ -259,6 +260,37 @@ HostHit GtaBlowTrace(const CVector& origin, const CVector& dir, float reach) {
     return out;
 }
 
+// What the core's penetration law may know about a struck surface: the GTA
+// collision material at the trace point, in the core's coarse classes
+// (Host.h's HitSurface). A world surface it cannot name stays HS_STONE - a
+// wall, which an unknown depth never lets a bullet through; a loose object
+// it cannot name is HS_OBJECT, the non-BSP class of Counter-Strike's law.
+int ShotSurfaceClass(unsigned char s, bool isObject) {
+    switch (s) {
+    case SURFACE_GLASS: case SURFACE_GLASS_WINDOWS_LARGE: case SURFACE_GLASS_WINDOWS_SMALL:
+    case SURFACE_UNBREAKABLE_GLASS:
+        return HS_GLASS;
+    case SURFACE_WOOD_THIN: case SURFACE_WOOD_PICKET_FENCE: case SURFACE_WOOD_SLATTED_FENCE:
+    case SURFACE_WOOD_RANCH_FENCE:
+        return HS_WOOD_THIN;
+    case SURFACE_WOOD_SOLID: case SURFACE_WOOD_CRATES: case SURFACE_WOOD_BENCH:
+    case SURFACE_FLOORBOARD: case SURFACE_STAIRSWOOD: case SURFACE_DOOR:
+        return HS_WOOD;
+    case SURFACE_METAL_CHAIN_FENCE:
+        return HS_FENCE;
+    case SURFACE_HEDGE: case SURFACE_VEGETATION: case SURFACE_P_BUSHY: case SURFACE_P_BUSHYMIX:
+    case SURFACE_P_BUSHYDRY: case SURFACE_P_BUSHYMID:
+        return HS_FOLIAGE;
+    case SURFACE_THICK_METAL_PLATE: case SURFACE_GARAGE_DOOR: case SURFACE_METAL_GATE:
+    case SURFACE_GIRDER: case SURFACE_CONTAINER: case SURFACE_SCAFFOLD_POLE:
+    case SURFACE_LAMP_POST: case SURFACE_THIN_METAL_SHEET: case SURFACE_METAL_BARREL:
+    case SURFACE_METAL_DUMPSTER: case SURFACE_FLOORMETAL: case SURFACE_STAIRSMETAL:
+        return HS_METAL;
+    default:
+        return isObject ? HS_OBJECT : HS_STONE;
+    }
+}
+
 HostHit GtaShotTrace(const CVector& from, const CVector& dir, float len, const ShotOwner& by) {
     HostHit out;
     CPlayerPed* ped = FindPlayerPed();
@@ -280,6 +312,15 @@ HostHit GtaShotTrace(const CVector& from, const CVector& dir, float len, const S
     }
     if (vehicleHit)
         out.vehicle = CPools::GetVehicleRef(static_cast<CVehicle*>(ent));
+    if (hit && !vehicleHit && !(ent && ent->m_nType == ENTITY_TYPE_PED)) {
+        // the struck surface itself, for the core's penetration law: its
+        // material class and how deep the point sits inside its shape
+        const bool isObject = ent && ent->m_nType == ENTITY_TYPE_OBJECT;
+        out.surface = ShotSurfaceClass(cp.m_nSurfaceTypeA, isObject);
+        out.depth = cp.m_fDepth;
+        if (isObject)
+            out.object = CPools::GetObjectRef(static_cast<CObject*>(ent));
+    }
     if (ph.ped) {
         out.being = CPools::GetPedRef(ph.ped);
         out.beingDist = ph.dist;

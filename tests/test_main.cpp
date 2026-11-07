@@ -15,6 +15,7 @@
 #include "Inventory.h"
 #include "BlockMesh.h"
 #include "Combat.h"
+#include "CsRules.h"
 #include "Fishing.h"
 #include "Hands.h"
 #include "Hud.h"
@@ -679,6 +680,20 @@ struct TestHost : Host {
     // itself (the geometry belongs to the bridge; the decision is the core's)
     bool traceScriptOn = false;
     HostHit traceScript;
+    // a scripted answer for exactly the FIRST trace after arming (the rest
+    // fall through to the natural trace): a surface standing in one shot's
+    // line, for the penetration proofs. traceCalls is reset when arming.
+    bool traceFirstOn = false;
+    HostHit traceFirst;
+    int traceCalls = 0;
+    // the player's vest, for the kevlar proofs (the bridge's own scale:
+    // PlayerArmor reads points, WearPlayerArmor takes half hearts)
+    float armorPoints = 0.0f, armorWorn = 0.0f;
+    float PlayerArmor() override { return armorPoints; }
+    void WearPlayerArmor(float halfHearts) override {
+        armorWorn += halfHearts;
+        armorPoints = std::max(0.0f, armorPoints - halfHearts * 5.0f);
+    }
     int tyrePops = 0;
     Vec3 lastTyrePoint;
     void VehicleShotEffect(int veh, const Vec3& hitPoint, int effect) override {
@@ -716,6 +731,9 @@ struct TestHost : Host {
     HostHit BlowTrace(const Vec3& origin, const Vec3& dir, float reach) override { return Trace(origin, dir, reach, false); }
     HostHit ShotTrace(const Vec3& from, const Vec3& dir, float len, const ShotOwner& by) override {
         shotVehicle = by.vehicle;
+        ++traceCalls;
+        if (traceFirstOn && traceCalls == 1)
+            return traceFirst;
         if (traceScriptOn)
             return traceScript;
         return Trace(from, dir, len, by.hostile);
@@ -2294,21 +2312,26 @@ static void TestSoldier() {
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
-        CHECK(s >= 0 && gMobs[s].health == 4000.0f && gMobs[s].armor == 1200.0f, "the boss: 4000 health and 1200 kevlar in half hearts - a full magazine of solid hits cannot kill him, about four can");
+        CHECK(s >= 0 && gMobs[s].health == 4000.0f && gMobs[s].armor == 1200.0f, "the boss: 4000 health and 1200 kevlar in half hearts - a full magazine of solid hits cannot kill him, about five can");
         CHECK(gMobs[s].team == TEAM_COUNTER && IsMonster(MOB_SOLDIER), "he fights for the counter-terrorists");
         CHECK(gMobs[s].mag == 30 && Near(MobHeight(gMobs[s]), 1.8f), "a full M4A1 magazine and a man's height");
         CHECK(TEAM_TERRORIST != TEAM_COUNTER && TEAM_NONE != TEAM_COUNTER, "the two sides of the war are kept apart");
     }
-    // kevlar swallows half of every hit while it lasts; without it the man takes the whole blow
+    // Counter-Strike's kevlar law, exact: half the blow reaches health, and
+    // the vest wears at (damage - health) x 0.5 - half the old flat rate.
+    // A vest that dies inside a hit spills the uncovered rest to health.
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 3995.0f) && Near(gMobs[s].armor, 1195.0f), "kevlar takes half the hit (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
+        CHECK(Near(gMobs[s].health, 3995.0f) && Near(gMobs[s].armor, 1197.5f), "CS kevlar: half to health, a quarter's wear (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
         gMobs[s].hurt = 0.0f;
-        gMobs[s].armor = 0.0f;
+        gMobs[s].armor = 1.0f; // a breath of vest left: it covers 2 of the blow, the other 8 land whole
         MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
-        CHECK(Near(gMobs[s].health, 3985.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
+        CHECK(Near(gMobs[s].health, 3987.0f) && Near(gMobs[s].armor, 0.0f), "a dying vest spills the rest (health %.1f, armour %.1f)", gMobs[s].health, gMobs[s].armor);
+        gMobs[s].hurt = 0.0f;
+        MobHurt(s, 10.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
+        CHECK(Near(gMobs[s].health, 3977.0f), "with the kevlar gone the whole blow lands (health %.1f)", gMobs[s].health);
         CHECK(gMobs[s].alerted && gMobs[s].bossState == 2, "and being shot at puts him in combat at once (state %d)", gMobs[s].bossState);
     }
     // the street is not his war: a man of the host's people at his nose is never his target
@@ -6542,11 +6565,14 @@ static void TestBoss() {
         }
         CHECK(gMobs[s].death < 0.0f && Near(gMobs[s].health, 3340.0f, 2.0f),
               "thirty solid hits leave him standing (health %.0f)", gMobs[s].health);
-        for (int i = 0; i < 90; ++i) {
+        // the rulebook's kevlar wears at half the old flat rate, so the vest
+        // lasts about twice as long and the whole man takes ~6400 raw to
+        // finish: the count is five magazines now, not four - CS's own law
+        for (int i = 0; i < 120; ++i) {
             gMobs[s].hurt = 0.0f;
             MobHurt(s, 44.0f, Vec3(0.5f, 0.5f, 10.0f), 0.0f);
         }
-        CHECK(gMobs[s].death >= 0.0f || gMobs[s].health <= 0.0f, "about four magazines do finish him - hard to kill, not unkillable");
+        CHECK(gMobs[s].death >= 0.0f || gMobs[s].health <= 0.0f, "about five magazines do finish him - hard to kill, not unkillable");
     }
     // ---- F: an empty rifle at arm's length is a pistol; at range, a reload
     {
@@ -6718,13 +6744,13 @@ static void TestBoss() {
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobProxyDamage(s, 10000.0f, Vec3(0.5f, 0.5f, 10.0f), -1); // a whole street's volley in one event
         const float poolLoss = (4000.0f - gMobs[s].health) + (1200.0f - gMobs[s].armor);
-        CHECK(Near(poolLoss, 400.0f, 1.0f), "one proxy event can never cost more than a tenth of him (lost %.0f)", poolLoss);
+        CHECK(Near(poolLoss, 300.0f, 1.0f), "the cap is a tenth of his health INCOMING; CS kevlar pricing lands 300 of pool for it - 200 health, 100 wear (lost %.0f)", poolLoss);
         WideStage();
         const int s2 = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         MobVehicleHit(s2, 25.0f, Vec3(0.5f, 0.5f, 10.0f), true); // a car at full tilt
         const float ramLoss = (4000.0f - gMobs[s2].health) + (1200.0f - gMobs[s2].armor);
-        CHECK(Near(ramLoss, 1400.0f, 2.0f) && gMobs[s2].death < 0.0f,
-              "a full-speed ram costs at most 35%% of him and never kills outright (lost %.0f)", ramLoss);
+        CHECK(Near(ramLoss, 1050.0f, 2.0f) && gMobs[s2].death < 0.0f,
+              "a full-speed ram is capped at 35%% of his health incoming; CS kevlar pricing lands 1050 of pool - and never kills outright (lost %.0f)", ramLoss);
         CHECK(gMobs[s2].bossState == 2 && gMobs[s2].detect >= 1.0f, "and he is up and fighting the driver at once");
     }
     // ---- L: the driver is a target, and the car is a body that takes damage.
@@ -6916,6 +6942,225 @@ static void TestBoss() {
 // pursuit, the chase sprint, the deeper pool, vehicle damage his eye can see,
 // and the Counter-Strike polish - each pinned where it can be proven here.
 // What only the game can prove is listed in CS-BOSS-fa.md's acceptance script.
+// ------------------------------------------------------------------
+// The rulebook pour: Counter-Strike 1.6's own numbers, priced in the core.
+// Every family pinned on the pure laws (CsRules) first, then end to end
+// through the boss's fight where the plumbing is the point.
+static void TestCsRules() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    const CsWeapon& m4 = CsWeaponAt(CSW_M4A1);
+    const CsWeapon& usp = CsWeaponAt(CSW_USP);
+
+    // ---- the armory table itself: the two he carries, and the shape of the rest
+    {
+        CHECK(CSW_COUNT == 25, "the full armory is on the table: 24 firearms and the knife (%d rows)", CSW_COUNT);
+        CHECK(Near(m4.baseDamage, 33.0f) && Near(m4.rangeMod, 0.97f) && m4.mag == 30 && m4.reserve == 90 &&
+                  Near(m4.reloadSec, 3.07f) && m4.price == 3100 && m4.penPower == 35 && m4.penSurfaces == 2 &&
+                  Near(m4.cycleSec, 0.09f),
+              "the M4A1's row is the game's own (33 dmg, RM 0.97, 30/90, 3.07 s, $3100, 5.56 pen 35 x2, cycle 0.09)");
+        CHECK(Near(usp.baseDamage, 34.0f) && Near(usp.baseDamageSil, 30.0f) && Near(usp.rangeMod, 0.79f) &&
+                  usp.mag == 12 && usp.price == 500 && usp.penSurfaces == 1 && usp.thinOnly,
+              "the USP's row likewise (34/30 silenced, RM 0.79, 12 rounds, thin surfaces only)");
+        CHECK(Near(CsWeaponAt(CSW_AK47).baseDamage, 36.0f) && Near(CsWeaponAt(CSW_AWP).baseDamage, 115.0f) &&
+                  Near(CsWeaponAt(CSW_AWP).rangeMod, 0.99f) && CsWeaponAt(CSW_DEAGLE).penSurfaces == 2 &&
+                  !CsWeaponAt(CSW_DEAGLE).thinOnly && CsWeaponAt(CSW_M3).penSurfaces == 0,
+              "and the rest of the table carries the measured constants (AK 36, AWP 115/0.99, the Deagle penetrates like a rifle, the shotgun not at all)");
+    }
+    // ---- the range law: Damage x RM ^ (distance / 500 units), 500 units = 12.7 m
+    {
+        CHECK(Near(CsRangeFalloff(m4, 0.0f), 1.0f), "point blank is whole");
+        CHECK(Near(CsRangeFalloff(m4, 12.7f), 0.97f, 0.001f), "one 500-unit step costs exactly the modifier (%.4f)", CsRangeFalloff(m4, 12.7f));
+        CHECK(Near(CsRangeFalloff(m4, 25.4f), 0.9409f, 0.001f), "two steps square it (%.4f)", CsRangeFalloff(m4, 25.4f));
+        CHECK(CsRangeFalloff(m4, 300.0f) == 0.0f, "beyond the weapon's own range the bullet never arrives");
+        CHECK(Near(CsShotHh(m4, 0.0f, CSZ_CHEST, false, 0.0f, nullptr), 6.0f, 0.01f),
+              "the anchor holds: an M4A1 chest hit up close is the 6 half hearts it always was");
+        CHECK(Near(CsShotHh(m4, 60.0f, CSZ_CHEST, false, 0.0f, nullptr), 5.20f, 0.02f),
+              "at 60 m the true curve still pays 5.20 - the old linear fudge paid 3.3 (%.2f)",
+              CsShotHh(m4, 60.0f, CSZ_CHEST, false, 0.0f, nullptr));
+        CHECK(Near(CsShotHh(usp, 25.4f, CSZ_CHEST, false, 0.0f, nullptr), 3.86f, 0.02f),
+              "the USP at 25.4 m: 34 x 0.79^2 on the anchor scale (%.2f)", CsShotHh(usp, 25.4f, CSZ_CHEST, false, 0.0f, nullptr));
+    }
+    // ---- the zones: 4 / 1 / 1.25 / 0.75, classified by the hit's true height
+    {
+        CHECK(CsZoneFromHeight(1.70f) == CSZ_HEAD && CsZoneFromHeight(1.20f) == CSZ_CHEST &&
+                  CsZoneFromHeight(0.90f) == CSZ_STOMACH && CsZoneFromHeight(0.40f) == CSZ_LEGS,
+              "heights classify: head, chest, stomach, legs");
+        CHECK(Near(CsShotHh(m4, 0.0f, CSZ_HEAD, false, 0.0f, nullptr), 24.0f, 0.01f) &&
+                  Near(CsShotHh(m4, 0.0f, CSZ_STOMACH, false, 0.0f, nullptr), 7.5f, 0.01f) &&
+                  Near(CsShotHh(m4, 0.0f, CSZ_LEGS, false, 0.0f, nullptr), 4.5f, 0.01f),
+              "point blank: a head hit pays 24, a stomach 7.5, a leg 4.5 - the 4x / 1.25x / 0.75x of the game");
+        const float hLevel = CsHitHeight(Vec3(0.5f, 0.5f, 11.5f), Vec3(0, 1, 0), Vec3(0.5f, 10.5f, 10.0f), 10.0f);
+        CHECK(Near(hLevel, 1.5f, 0.01f) && CsZoneFromHeight(hLevel) == CSZ_HEAD,
+              "a level line at head height prices as a head hit (%.2f m)", hLevel);
+        Vec3 d = Vec3(0, 10, -0.5f);
+        d = d * (1.0f / d.Length());
+        const float hChest = CsHitHeight(Vec3(0.5f, 0.5f, 11.6f), d, Vec3(0.5f, 10.5f, 10.0f), 10.0f);
+        CHECK(Near(hChest, 1.1f, 0.02f) && CsZoneFromHeight(hChest) == CSZ_CHEST,
+              "a line falling to the chest prices as a chest hit (%.2f m)", hChest);
+    }
+    // ---- kevlar: the split, the wear, the spill, and what it never covers
+    {
+        float wear = 0.0f;
+        CHECK(Near(CsArmorSplit(33.0f, 1.35f, 1000.0f, &wear), 22.275f, 0.01f) && Near(wear, 5.3625f, 0.01f),
+              "M4A1 vs kevlar: 22.28 of 33 reaches health, the vest wears 5.36 (health %.2f, wear %.2f)",
+              CsArmorSplit(33.0f, 1.35f, 1000.0f, &wear), wear);
+        CHECK(Near(CsArmorSplit(33.0f, 1.0f, 2.0f, &wear), 29.0f, 0.01f) && Near(wear, 2.0f),
+              "a vest with 2 left dies inside the hit and spills the rest: 29 to health");
+        float wearHh = 0.0f;
+        CHECK(Near(CsShotHh(m4, 0.0f, CSZ_CHEST, true, 20.0f, &wearHh), 4.05f, 0.01f) && Near(wearHh, 0.975f, 0.01f),
+              "the player in the game's vest: a point-blank chest hit costs him 4.05 and wears 0.98 off the vest");
+        CHECK(Near(CsShotHh(m4, 0.0f, CSZ_LEGS, true, 20.0f, &wearHh), 4.5f, 0.01f) && Near(wearHh, 0.0f),
+              "but his legs were never armoured - full price, no wear");
+        CHECK(Near(CsShotHh(m4, 0.0f, CSZ_HEAD, true, 20.0f, &wearHh), 24.0f, 0.01f) && Near(wearHh, 0.0f),
+              "and the game's vest has no helmet: a head hit is whole");
+    }
+    // ---- penetration, the pure law (FireBullets3's shape on SA's surfaces)
+    {
+        const CsPen thin = CsPenetrate(m4, HS_WOOD_THIN, 0.0f);
+        CHECK(thin.passes && Near(thin.dmgMul, 0.6f), "the M4A1 passes a wooden fence and keeps 60%%");
+        CHECK(CsPenetrate(m4, HS_WOOD, 0.2f).passes && !CsPenetrate(m4, HS_WOOD, 2.0f).passes,
+              "solid wood: 0.2 m of it passes, 2 m stops the 5.56 dead (its power is 0.89 m)");
+        CHECK(!CsPenetrate(m4, HS_STONE, 0.0f).passes, "a world wall of unknown thickness is a wall - nothing passes on faith");
+        const CsPen lip = CsPenetrate(m4, HS_STONE, 0.1f);
+        CHECK(lip.passes && Near(lip.dmgMul, 0.5f), "but a measured 0.1 m concrete lip passes at the concrete tax (power x0.25 = 0.22 m)");
+        CHECK(CsPenetrate(m4, HS_METAL, 0.1f).passes && !CsPenetrate(m4, HS_METAL, 0.2f).passes,
+              "metal taxes the power to 0.13 m: a thin sheet passes, a plate does not");
+        CHECK(CsPenetrate(usp, HS_GLASS, 0.0f).passes && Near(CsPenetrate(usp, HS_GLASS, 0.0f).dmgMul, 0.75f),
+              "the USP passes glass at the object price of 75%%");
+        CHECK(!CsPenetrate(usp, HS_WOOD, 0.05f).passes && CsPenetrate(usp, HS_WOOD_THIN, 0.0f).passes,
+              "but never a real wooden wall (the pre-Source class law) - a thin fence only");
+        CHECK(!CsPenetrate(usp, HS_OBJECT, 0.5f).passes && CsPenetrate(usp, HS_OBJECT, 0.3f).passes,
+              "a prop thicker than the .45's power (0.38 m) stops it; a thinner one does not");
+        CHECK(!CsPenetrate(CsWeaponAt(CSW_M3), HS_GLASS, 0.0f).passes, "the shotgun penetrates nothing");
+    }
+    // ---- the HE curve: the measured heart, linear to the edge, halved by armour
+    {
+        CHECK(Near(CsHeHh(0.0f, 5.5f, 96.0f, false, 0.0f, nullptr), 17.45f, 0.01f),
+              "at the grenade's heart: the full 96, on the anchor scale");
+        CHECK(Near(CsHeHh(2.75f, 5.5f, 96.0f, false, 0.0f, nullptr), 8.73f, 0.01f), "halfway out: half of it");
+        CHECK(CsHeHh(5.5f, 5.5f, 96.0f, false, 0.0f, nullptr) == 0.0f && CsHeHh(9.0f, 5.5f, 96.0f, false, 0.0f, nullptr) == 0.0f,
+              "at the edge and beyond: nothing");
+        float wear = 0.0f;
+        CHECK(Near(CsHeHh(0.0f, 5.5f, 96.0f, true, 20.0f, &wear), 8.73f, 0.01f) && Near(wear, 4.36f, 0.01f),
+              "in a vest the heart pays half to health - the measured 48 - and wears the vest by the law");
+    }
+    // ---- the recoil patterns: deterministic shape, seeded sway
+    {
+        const CsRecoil r0 = CsRecoilPattern(CSW_M4A1, 0, 42);
+        CHECK(r0.pitchDeg == 0.0f && r0.yawDeg == 0.0f, "the first shot of a spray is never moved by recoil");
+        bool climb = true, bounded = true;
+        float prev = 0.0f;
+        for (int i = 1; i <= 30; ++i) {
+            const CsRecoil r = CsRecoilPattern(CSW_M4A1, i, 42);
+            if (r.pitchDeg < prev - 1e-6f)
+                climb = false;
+            prev = r.pitchDeg;
+            if (std::fabs(r.yawDeg) > 2.4f + 1e-6f)
+                bounded = false;
+        }
+        CHECK(climb && Near(CsRecoilPattern(CSW_M4A1, 10, 42).pitchDeg, 5.3f, 0.01f),
+              "the rifle climbs steadily to 5.3 degrees by the tenth shot");
+        CHECK(bounded && Near(CsRecoilPattern(CSW_M4A1, 30, 42).pitchDeg, 6.0f, 0.01f),
+              "and the sway never leaves the triangle (cap 2.4 degrees, pitch capped at 6)");
+        const CsRecoil a = CsRecoilPattern(CSW_M4A1, 15, 42), b = CsRecoilPattern(CSW_M4A1, 15, 42);
+        CHECK(a.pitchDeg == b.pitchDeg && a.yawDeg == b.yawDeg, "same spray, same shot, same seed: the same offset - the pattern is a law, not a dice roll");
+        bool seedMatters = false;
+        for (uint32_t seed = 1; seed <= 6 && !seedMatters; ++seed)
+            if (CsRecoilPattern(CSW_M4A1, 15, seed).yawDeg != a.yawDeg)
+                seedMatters = true;
+        CHECK(seedMatters, "but a new spray sways anew - 1.6's semi-random heart");
+        const CsRecoil u8 = CsRecoilPattern(CSW_USP, 8, 7);
+        CHECK(Near(u8.pitchDeg, 4.4f, 0.01f) && std::fabs(u8.yawDeg) <= 0.15f,
+              "the USP climbs a straight line to its 4.4 cap, fretted by at most a whisper sideways");
+    }
+    // ---- end to end: the boss's fight prices all of it
+    {
+        // a vest on the player: his hits cost less and the vest wears
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        host.armorPoints = 100.0f;
+        RunMobsB(3.0f, Vec3(0.5f, 12.5f, 11.0f), none);
+        CHECK(host.playerHurt > 0.0f && host.armorWorn > 0.0f && host.armorPoints < 100.0f,
+              "a vested player is hurt less and his vest wears by the law (hurt %.1f, worn %.1f, vest %.0f left)",
+              host.playerHurt, host.armorWorn, host.armorPoints);
+        host.armorPoints = 0.0f;
+        host.armorWorn = 0.0f;
+    }
+    {
+        // surfaces without end: fence after fence after fence - the M4A1's
+        // bullet passes two and dies in the third, exactly its count
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        gMobs[s].negotiated = true;
+        RunMobsB(0.6f, Vec3(0.5f, 12.5f, 11.0f), none);
+        const float hurt0 = host.playerHurt;
+        host.traceScriptOn = true;
+        host.traceScript = HostHit();
+        host.traceScript.hit = true;
+        host.traceScript.dist = 2.0f;
+        host.traceScript.point = Vec3(0.5f, 2.5f, 11.0f);
+        host.traceScript.surface = HS_WOOD_THIN;
+        RunMobsB(4.0f, Vec3(0.5f, 12.5f, 11.0f), none);
+        CHECK(host.playerHurt == hurt0, "two fences are his limit: the third stops every round - no damage leaks through");
+        host.traceScriptOn = false;
+    }
+    {
+        // one fence in one shot's line: paired runs, same seed, same
+        // everything - the fenced run must pay exactly one shot's 40% wood
+        // tax less than the open run, summed over three pairs
+        auto runPair = [&](bool fence, int seed) {
+            WideStage();
+            McsaSrand(seed);
+            const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+            FaceMob(s, 0.0f);
+            gMobs[s].negotiated = true;
+            RunMobsB(1.0f, Vec3(0.5f, 5.5f, 11.0f), none); // engaged at 5 m
+            host.playerHurt = 0.0f;
+            if (fence) {
+                host.traceFirst = HostHit();
+                host.traceFirst.hit = true;
+                host.traceFirst.dist = 2.0f;
+                host.traceFirst.point = Vec3(0.5f, 3.0f, 11.3f);
+                host.traceFirst.surface = HS_WOOD_THIN;
+                host.traceCalls = 0;
+                host.traceFirstOn = true;
+            }
+            RunMobsB(2.0f, Vec3(0.5f, 5.5f, 11.0f), none);
+            host.traceFirstOn = false;
+            return host.playerHurt;
+        };
+        float diffSum = 0.0f;
+        for (int seed = 777; seed <= 779; ++seed) {
+            const float open = runPair(false, seed);
+            const float fenced = runPair(true, seed);
+            CHECK(open > 0.0f, "the open-line pair run lands its fire (%.1f)", open);
+            diffSum += open - fenced;
+        }
+        CHECK(diffSum >= 2.0f && diffSum <= 9.2f,
+              "one fence in one shot's line costs that shot 40%% of itself, no more, no less (summed discount %.2f)", diffSum);
+    }
+    {
+        // CS's footstep law: a creeping man is silent; a jogging man is news
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f); // facing +y; the man is behind him, ear-work only
+        host.velocity = Vec3(0.0f, 1.5f, 0.0f); // a creep: over the old walk band
+        RunMobsB(1.5f, Vec3(0.5f, -7.5f, 11.0f), none); // 8 m behind him
+        CHECK(!gMobs[s].alerted, "a creeping man at his back is not heard - in CS, walking makes no sound");
+        host.velocity = Vec3(0.0f, 3.0f, 0.0f); // a jog: running footsteps
+        RunMobsB(0.5f, Vec3(0.5f, -7.5f, 11.0f), none);
+        CHECK(gMobs[s].alerted, "but a jogging man at his back is heard at once");
+        host.velocity = Vec3();
+    }
+}
+
 static void TestSmartPack() {
     TestHost host;
     SetHost(&host);
@@ -6936,8 +7181,8 @@ static void TestSmartPack() {
               "a wheel-band hit pays half and bursts the tyre - even at the nose, the low band wins (%.2f)", wheel.dmg);
         const BossVehZone rear = BossVehicleZone(Vec3(0.5f, -1.4f, 11.0f), centre, fwd, 9.0f);
         CHECK(Near(rear.dmg, 9.0f, 0.01f) && !rear.tyre, "the rear is bodywork, not an engine (%.2f)", rear.dmg);
-        const BossVehZone usp = BossVehicleZone(Vec3(0.2f, 0.4f, 11.0f), centre, fwd, 9.0f * (3.4f / 6.0f));
-        CHECK(Near(usp.dmg, 5.1f, 0.01f), "the USP's vehicle price scales with the pistol (%.2f)", usp.dmg);
+        const BossVehZone usp = BossVehicleZone(Vec3(0.2f, 0.4f, 11.0f), centre, fwd, 9.0f * (6.18f / 6.0f));
+        CHECK(Near(usp.dmg, 9.27f, 0.01f), "the USP's vehicle price scales with the pistol - at its true damage now, a hair over the rifle's (%.2f)", usp.dmg);
     }
     // ---- the shot resolution, end to end: a scripted trace (the geometry is
     // the bridge's; the DECISION is the core's, and it is what is pinned here)
@@ -7477,6 +7722,7 @@ int main(int argc, char** argv) {
     TestSoldierAimFix();
     TestBoss();
     TestSmartPack();
+    TestCsRules();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
     TestBossDeathReset();

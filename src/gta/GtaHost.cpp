@@ -130,6 +130,18 @@ struct GtaHost : Host {
             CWeapon::GenerateDamageEvent(ped, nullptr, WEAPONTYPE_FALL, (int)(maxH * halfHearts / 20.0f), (ePedPieceTypes)3, 0);
         }
     }
+    // the player's vest, for the core's kevlar books: the channel above is a
+    // fall-type event, which the game's own armour never answers - so the
+    // core reads the vest here and wears it down there, at the same scale
+    // (20 half hearts = the vest's full 100 points)
+    float PlayerArmor() override {
+        CPlayerPed* ped = FindPlayerPed();
+        return ped ? ped->m_fArmour : 0.0f;
+    }
+    void WearPlayerArmor(float halfHearts) override {
+        if (CPlayerPed* ped = FindPlayerPed())
+            ped->m_fArmour = std::max(0.0f, ped->m_fArmour - halfHearts * 5.0f);
+    }
     float AimDistance(const Vec3& origin, const Vec3& dir, float reach, float nothing) override {
         return GtaAimDistance(origin, dir, reach, nothing);
     }
