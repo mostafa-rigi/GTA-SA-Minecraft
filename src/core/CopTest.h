@@ -30,4 +30,17 @@ void CopTestTick(float dt);
 // (the world the decoys lived in is already gone).
 void CopTestReset();
 
+// Test hook (the CopProfileOverrideForTest pattern): the last run's
+// sheet - how many scenarios were counted, how many passed, and any
+// one scenario's verdict by name. The suite grades the grader with it.
+struct CopTestSheet {
+    int counted = 0;
+    int passed = 0;
+};
+CopTestSheet CopTestSheetForTest();
+// True when the named scenario was graded in the last run; *passOut
+// then holds its verdict and *countedOut whether it counted (a SKIP
+// is graded but never counted).
+bool CopTestVerdictForTest(const char* name, bool* passOut, bool* countedOut);
+
 } // namespace mc

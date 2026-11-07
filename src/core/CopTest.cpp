@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 
 #include "Chat.h"
 #include "Cop.h"
@@ -208,6 +209,25 @@ bool BuildLoop(const Vec3& start) {
 
 // drive the decoy along its loop: the game's own autopilot, fed a
 // look-ahead point down the route, the way the spike feeds its own
+// A long straight there-and-back along one road: the roadblock
+// phase's shape. A block belongs on a straight road ahead of a
+// coming car, and a square loop defeats the phase twice over - the
+// chase's sight line cuts through the block interiors at every
+// corner, so the page loses the position (256 unseen ticks, the
+// original's own law) before the block timer can ever fire.
+bool BuildStraight(const Vec3& start, const Vec3& dir) {
+    sRoute.clear();
+    sRouteIdx = 0;
+    std::vector<Vec3> leg;
+    const Vec3 dst = start + dir * 230.0f;
+    if (!VehicleRoute(start, dst, &leg, nullptr) || leg.size() < 2)
+        return false;
+    sRoute = leg;
+    for (size_t i = leg.size() - 1; i-- > 0;)
+        sRoute.push_back(leg[i]);
+    return true;
+}
+
 void DriveDecoy(float cruise) {
     if (sDecoyCar < 0)
         return;
@@ -274,6 +294,10 @@ void Cleanup() {
         sSavedFelony);
 }
 
+// the last run's sheet, kept for the suite's hook after Finish
+Result sSheet[12];
+int sSheetN = 0;
+
 void Finish() {
     int n = 0, passed = 0;
     for (int i = 0; i < sResultN; ++i) {
@@ -283,6 +307,9 @@ void Finish() {
         if (sResults[i].pass)
             ++passed;
     }
+    sSheetN = sResultN;
+    for (int i = 0; i < sResultN; ++i)
+        sSheet[i] = sResults[i];
     Say("coptest: DONE %d/%d PASS (%.0f s)", passed, n, sTotalT);
     for (int i = 0; i < sResultN; ++i)
         if (sResults[i].counted && !sResults[i].pass)
@@ -360,7 +387,7 @@ void PhasePursuit(float dt) {
         if (fwd.Length() < 0.1f)
             fwd = Vec3(0, 1, 0);
         fwd = fwd * (1.0f / fwd.Length());
-        if (!SpawnDecoyCarNear(gCop.pos, 58.0f, fwd) || !BuildLoop(DecoyPos())) {
+        if (!SpawnDecoyCarNear(gCop.pos, 68.0f, fwd) || !BuildLoop(DecoyPos())) {
             Grade("arrival", false, true, "no decoy could be staged");
             Grade("ram", false, true, "no decoy could be staged");
             Grade("siren", false, true, "no decoy could be staged");
@@ -527,15 +554,27 @@ void PhaseRecovery(float dt) {
     if (!sEntered) {
         sEntered = true;
         Say("coptest: --- recovery: a unit is wedged nose-to-wall; he must free himself ---");
+        // the wall the probes hunt stands where the decoy man stood
+        // (his house front); capture his spot before he is retired,
+        // and take the unit nearest HIM - the unit that just ran the
+        // run-over act beside that wall. (The first cut probed from
+        // the unit nearest the PLAYER: a ladder unit idling by the
+        // player could be 50 m from the only wall on the ground, and
+        // the scenario skipped itself.)
+        Vec3 pedSpot = PlayerNow();
         if (sDecoyPed >= 0) {
+            Vec3 dp;
+            float dhp = 0.0f;
+            if (TheHost().DecoyPedReport(sDecoyPed, &dp, &dhp))
+                pedSpot = dp;
             TheHost().RetireDecoyPed(sDecoyPed);
             sDecoyPed = -1;
         }
-        // stage: find a wall face within reach of the player (the
-        // test's ground) or of a living unit, then place the nearest
-        // unit nose-to-it and put the target beyond the far side
+        // stage: find a wall face within reach of a living unit,
+        // then place that unit nose-to-it and put the target beyond
+        // the far side
         int slot = -1;
-        NearestUnit(PlayerNow(), false, &slot);
+        NearestUnit(pedSpot, false, &slot);
         sRecSlot = slot;
         bool staged = false;
         Vec3 wallDir, wallAt;
@@ -585,6 +624,10 @@ void PhaseRecovery(float dt) {
             return;
         }
         sRecFreed = false;
+        return; // the grading starts next tick: this tick's unit
+                // positions are still the PRE-placement reports, and
+                // judging the wedge against them would "free" him
+                // before he was ever wedged
     }
     CopPreyOverride(-1, sDecoyPed);
     const CopState& c = gCops[sRecSlot];
@@ -638,7 +681,8 @@ void PhaseBlock(float dt) {
         if (fwd.Length() < 0.1f)
             fwd = Vec3(0, 1, 0);
         fwd = fwd * (1.0f / fwd.Length());
-        if (!SpawnDecoyCarNear(gCop.pos, 58.0f, fwd) || !BuildLoop(DecoyPos())) {
+        if (!SpawnDecoyCarNear(gCop.pos, 68.0f, fwd) ||
+            (!BuildStraight(DecoyPos(), fwd) && !BuildLoop(DecoyPos()))) {
             Grade("roadblock", false, false, "no decoy could be staged");
             GoPhase(PH_PLAYER1);
             return;
@@ -774,6 +818,7 @@ bool CopTestStart() {
         return false;
     sRunning = true;
     sResultN = 0;
+    sSheetN = 0;
     sTotalT = 0.0f;
     sSavedFelony = gThreat.felony;
     sWorstFreeze = 0.0f;
@@ -805,6 +850,31 @@ void CopTestReset() {
     sPhase = PH_NONE;
     sDecoyCar = -1;
     sDecoyPed = -1;
+}
+
+CopTestSheet CopTestSheetForTest() {
+    CopTestSheet s;
+    for (int i = 0; i < sSheetN; ++i) {
+        if (!sSheet[i].counted)
+            continue;
+        ++s.counted;
+        if (sSheet[i].pass)
+            ++s.passed;
+    }
+    return s;
+}
+
+bool CopTestVerdictForTest(const char* name, bool* passOut, bool* countedOut) {
+    for (int i = 0; i < sSheetN; ++i) {
+        if (std::strcmp(sSheet[i].name, name) == 0) {
+            if (passOut)
+                *passOut = sSheet[i].pass;
+            if (countedOut)
+                *countedOut = sSheet[i].counted;
+            return true;
+        }
+    }
+    return false;
 }
 
 void CopTestTick(float dt) {
