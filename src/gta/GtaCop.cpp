@@ -18,7 +18,8 @@
 #include "Cop.h"
 #include "CopCarModel.h" // DrawCopCar / CopWheelCenters: his own body (piece 3)
 #include "Core.h"
-#include "GtaMobs.h"   // BridgePlayerShotAge
+#include "GtaMobs.h"   // shared bridge utilities (the shot clock is the
+                       // force's own since fix round 5 - see sCopShotAge)
 #include "PedSkins.h"  // PedSkinsExcludePed
 #include "Render3D.h"  // AddShadow
 #include "Sound.h"     // SetPosLoop / PlaySfx: his own siren, engine and radio (piece 3)
@@ -80,6 +81,11 @@ struct CopBodyState {
     bool apArmed = false;
     Vec3 apWritten;
     float apWrittenCruise = -1.0f;
+    float apWriteAge = 1e9f; // fix round 5: seconds since the mirror
+        // last wrote the autopilot - the refresh cadence's clock,
+        // advanced by CopBodyPre; a live mission is re-written at most
+        // ~3 times a second, so ProcessAI's own route bookkeeping is
+        // not reset under it faster than it can drive
     // piece 3's sound state: the pursuit edge (for his radio) and the
     // engine layer currently sounding (his idle/revs swap rides it)
     bool sirenPrev = false;
@@ -100,6 +106,21 @@ CopBodyState sBodies[kMaxCopUnits];
 CVehicle* sPlayerVeh = nullptr;
 float sPlayerVehHealth = 0.0f;
 float sPlayerImpactPeak = 0.0f;
+
+// the cop force's OWN shot clock (fix round 5): seconds since the
+// player's selected weapon was in its firing state, kept by CopBodyPre
+// every frame. The report's shot attribution used to read the BOSS
+// relay's clock (BridgePlayerShotAge) - a byproduct of BossBodyDuties,
+// which runs only while a soldier's body exists. In a cop-only session
+// that clock never ticks off its 99 s rest value, so every bullet the
+// player put into a cop car aged out as "the world's" damage: the book
+// billed, the felony heard nothing, and the page printed "position
+// lost" over a car being shot to death at point blank (the 2026-11-08
+// session's conviction; the earlier session climbed because the man
+// was IN a car ramming, and the ram channel never needed the clock).
+// The force keeps its own clock now, read off the player's weapon the
+// same way - two lines, no borrowed byproducts.
+float sCopShotAge = 99.0f;
 
 CopBodyState* FindBody(int vehRef) {
     if (vehRef < 0)
@@ -207,9 +228,32 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
         if (wantArm) {
             const float dx = b.apTarget.x - b.apWritten.x;
             const float dy = b.apTarget.y - b.apWritten.y;
-            if (!b.apArmed || dx * dx + dy * dy > 4.0f ||
-                std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) {
+            // the refresh discipline (fix round 5): a destination is
+            // re-written only when it truly changed (3 m of ground, or
+            // a new pace) AND the cadence allows it (~0.3 s since the
+            // last write) - except the arm itself, which lands at
+            // once. Round 4's 2 m gate re-wrote the destination every
+            // few frames of a pursuit; every write is a new destination
+            // for ProcessAI's route bookkeeping in the same struct,
+            // and a car whose route is replanned faster than it can
+            // drive never settles into its pace.
+            if (!b.apArmed ||
+                ((dx * dx + dy * dy > 9.0f ||
+                  std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) &&
+                 b.apWriteAge >= 0.3f)) {
                 ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
+                // the driving style (fix round 5): a CREATE_CAR
+                // autopilot rests at DRIVINGSTYLE_STOP_FOR_CARS - it
+                // brakes to a stop for cars and peds in its corridor.
+                // For this force the obstacle in the corridor is
+                // usually the TARGET: the man himself, standing in
+                // front of the spike car shooting it, or the car he
+                // flees in. The game's own header names the style a
+                // chase runs on - PLOUGH_THROUGH - and the original's
+                // cop earns the name (his batter geometry rams the
+                // flank; traffic niceties are not in his book). The
+                // style is written with the mission, on the arm.
+                ap.m_nCarDrivingStyle = DRIVINGSTYLE_PLOUGH_THROUGH;
                 ap.m_vecDestinationCoors =
                     CVector(b.apTarget.x, b.apTarget.y, b.apTarget.z);
                 // the cruise char and the traffic-speed cap are the
@@ -222,6 +266,7 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
                 ap.m_fMaxTrafficSpeed = b.apCruise;
                 b.apWritten = b.apTarget;
                 b.apWrittenCruise = b.apCruise;
+                b.apWriteAge = 0.0f;
                 b.apArmed = true;
             }
         } else if (b.apArmed) {
@@ -247,6 +292,7 @@ void CopSessionReset() {
     sPlayerVeh = nullptr;
     sPlayerVehHealth = 0.0f;
     sPlayerImpactPeak = 0.0f;
+    sCopShotAge = 99.0f;
 }
 
 // the drawn wheel's radius: CARS.C's rewrite scales the ring by
@@ -257,15 +303,28 @@ constexpr float kCopWheelRadiusM = 69.0f / 153.6f;
 // increment passes 400 of 4096 per 1/50 s tick: 400/4096 of a turn per
 // tick is ~30.7 rad/s, which at his wheel radius is ~13.8 m/s of road
 constexpr float kCopFastWheelMps = 13.8f;
-// his drawn body's lift over the host car's origin (fix round 3): his
-// contact patch sits 0.866 m under his own origin (wheel centre -0.417
-// at the convicted factor, less the 0.449 m radius) and the settled
-// 596 carries its origin ~0.53 m over its contact patch, so his
-// origin rides 0.336 m above the host's for the two ground lines to
-// meet. At the old 0.6x bake the same arithmetic gave ~0 lift, which
-// is why the small body sat plausibly while the true-size one would
-// have sunk its tyres a third of a metre into the road.
-constexpr float kCopBodyLiftM = 0.336f;
+// his drawn body's lift over the host car's origin. The drawn side
+// of the subtraction is exact from the baked bin (driver2-assets'
+// measure): wheel centres at z = -0.4167 m in his frame, wheel radius
+// 0.4492 m (diameter 0.8984) - his contact patch sits 0.866 m under
+// his origin, and the wheel spin pivots on the mesh's own axle, so no
+// part of a float can hide in the spin groups. The host side is the
+// 596's origin height over ITS patch at rest, and fix round 5
+// corrects round 3's number: the 0.53 m it used was asserted in a
+// comment with no measurement behind it anywhere in the record. The
+// measurement the record does hold is the spawn/settle behaviour -
+// GtaSpawnCopBody places the car at FindGroundZ + 0.6, and across the
+// eye sessions every settled report reads the car at the height it
+// was placed (23.7 at the Grove spawn, at the log's 0.1 m print
+// resolution): a body whose rest height were lower settles DOWN from
+// its placed height within a frame or two, and no report ever shows
+// the step. The host origin therefore rides 0.60 m over its patch,
+// with the print resolution as the honest tolerance (+-0.05 m). The
+// lift is 0.866 - 0.60 = 0.27 m - round 3 overshot by ~7 cm, which
+// is the "floats a little" the user's eye reported. The eye at a stop
+// on flat street owns the last centimetres; this is the constant it
+// would tune.
+constexpr float kCopBodyLiftM = 0.27f;
 
 void CopBodyPre(float dt) {
     // every body's driver, every frame (the one-unit law): what he lost
@@ -275,6 +334,8 @@ void CopBodyPre(float dt) {
         CopBodyState& b = sBodies[i];
         if (!b.used)
             continue;
+        b.apWriteAge += dt; // the mirror's refresh cadence clock
+            // (fix round 5), read in ApplyCommand
         // his drawn wheels turn with his own travel (piece 3): signed
         // speed along the nose off the vehicle itself, spun at his
         // wheel radius - forward travel decreases the angle, the
@@ -355,6 +416,14 @@ void CopBodyPre(float dt) {
                 }
             }
         }
+    }
+    // the force's own shot clock (fix round 5): the player's selected
+    // weapon in its firing state means his gun spoke this frame -
+    // the report's attribution reads the age off this clock, which
+    // CopBodyPre keeps whether or not any other system is awake
+    if (CPlayerPed* player = FindPlayerPed()) {
+        CWeapon& w = player->m_aWeapons[player->m_nSelectedWepSlot];
+        sCopShotAge = (w.m_nState == WEAPONSTATE_FIRING) ? 0.0f : sCopShotAge + dt;
     }
     // the player's own car, priced per frame: the felony system's ears
     // for "he hit something" are his own car's health steps, peaked so a
@@ -776,8 +845,11 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     s.impactPeak = 0.0f;
     // the health the display lost since it was last set, split by how it
     // arrived: his car close (his own vehicle within 6 m) prices a ram
-    // for the felony; the player's gun fresh (< 1 s, the boss relay's own
-    // clock) prices a shot; the residue is the world's (walls, fire)
+    // for the felony; the player's gun fresh (< 1 s on the force's OWN
+    // shot clock, fix round 5 - it used to read the boss relay's clock,
+    // which sleeps at 99 s whenever no soldier stands in the world, and
+    // silently re-filed every on-foot shooting as world damage) prices
+    // a shot; the residue is the world's (walls, fire)
     const float lost = s.book01 > 0.0f ? s.lastSetHealth - v->m_fHealth : 0.0f;
     if (lost > 0.0f) {
         CPlayerPed* player = FindPlayerPed();
@@ -790,7 +862,7 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
         }
         if (ram)
             s.struckRam += lost;
-        else if (BridgePlayerShotAge() < 1.0f)
+        else if (sCopShotAge < 1.0f)
             s.struckShot += lost;
         else
             s.struckWorld += lost;
