@@ -1,0 +1,6123 @@
+[
+ {
+  "name": "",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -1749.35,
+     869.279,
+     24.0593
+    ],
+    "exit": [
+     -1753.85,
+     885.679,
+     295.059
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1753.75,
+     883.965,
+     294.645
+    ],
+    "exit": [
+     -1749.38,
+     865.158,
+     24.1455
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -225.433,
+     1397.02,
+     69.0501
+    ],
+    "exit": [
+     -224.733,
+     1395.82,
+     172.05
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     2896.57,
+     57.2165,
+     0.0
+    ],
+    "exit": [
+     2980.16,
+     76.1581,
+     0.0
+    ],
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "8TRACK",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -1187.51,
+     -208.841,
+     1055.58
+    ],
+    "exit": [
+     -1266.59,
+     -216.344,
+     1055.58
+    ],
+    "interior": 7,
+    "src": "data\\maps\\interior\\stadint.ipl"
+   }
+  ]
+ },
+ {
+  "name": "ABATOIR",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     966.608,
+     2160.68,
+     9.82222
+    ],
+    "exit": [
+     969.708,
+     2160.68,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     965.377,
+     2159.33,
+     1010.02
+    ],
+    "exit": [
+     964.377,
+     2157.33,
+     1010.02
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AIRPOR2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -1861.68,
+     58.8643,
+     1054.2
+    ],
+    "exit": [
+     -1861.68,
+     60.8643,
+     1054.2
+    ],
+    "interior": 14,
+    "src": "data\\maps\\leveldes\\levelmap.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AIRPORT",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -1863.15,
+     -21.6598,
+     1060.15
+    ],
+    "exit": [
+     -1863.15,
+     -19.6598,
+     1060.15
+    ],
+    "interior": 14,
+    "src": "data\\maps\\leveldes\\levelmap.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AMMUN1",
+  "kind": "AMMU",
+  "doors": [
+   {
+    "entry": [
+     1368.35,
+     -1279.06,
+     12.55
+    ],
+    "exit": [
+     1365.35,
+     -1279.06,
+     12.55
+    ],
+    "src": "data\\maps\\LA\\LAn2.ipl"
+   },
+   {
+    "entry": [
+     -2625.85,
+     208.345,
+     3.98935
+    ],
+    "exit": [
+     -2625.85,
+     209.143,
+     3.98935
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     286.149,
+     -41.5444,
+     1000.57
+    ],
+    "exit": [
+     286.149,
+     -40.6444,
+     1000.57
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AMMUN2",
+  "kind": "AMMU",
+  "doors": [
+   {
+    "entry": [
+     242.668,
+     -178.478,
+     0.621441
+    ],
+    "exit": [
+     240.039,
+     -178.297,
+     1.0
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2333.43,
+     61.5173,
+     25.7342
+    ],
+    "exit": [
+     2336.8,
+     61.6987,
+     25.5342
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2159.51,
+     943.329,
+     9.82339
+    ],
+    "exit": [
+     2156.51,
+     943.229,
+     9.82339
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2539.04,
+     2083.56,
+     9.82222
+    ],
+    "exit": [
+     2535.94,
+     2083.56,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     285.801,
+     -85.4476,
+     1000.54
+    ],
+    "exit": [
+     285.801,
+     -84.5476,
+     1000.54
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AMMUN3",
+  "kind": "AMMU",
+  "doors": [
+   {
+    "entry": [
+     2400.5,
+     -1981.48,
+     12.5604
+    ],
+    "exit": [
+     2400.5,
+     -1978.48,
+     12.5604
+    ],
+    "src": "data\\maps\\LA\\LAs2.ipl"
+   },
+   {
+    "entry": [
+     777.231,
+     1871.47,
+     3.97687
+    ],
+    "exit": [
+     778.927,
+     1874.33,
+     3.97687
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -315.676,
+     829.868,
+     13.4266
+    ],
+    "exit": [
+     -313.98,
+     832.729,
+     13.4266
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -2093.51,
+     -2464.79,
+     29.6404
+    ],
+    "exit": [
+     -2092.71,
+     -2463.81,
+     29.6404
+    ],
+    "src": "data\\maps\\country\\countryS.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     296.92,
+     -111.972,
+     1000.57
+    ],
+    "exit": [
+     296.92,
+     -111.072,
+     1000.57
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AMMUN4",
+  "kind": "AMMU",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     315.821,
+     -143.332,
+     998.662
+    ],
+    "exit": [
+     315.821,
+     -142.432,
+     998.662
+    ],
+    "interior": 7,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "AMMUN5",
+  "kind": "AMMU",
+  "doors": [
+   {
+    "entry": [
+     -1508.89,
+     2610.8,
+     54.8902
+    ],
+    "exit": [
+     -1508.89,
+     2608.75,
+     54.8901
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     316.525,
+     -169.607,
+     998.662
+    ],
+    "exit": [
+     316.525,
+     -168.707,
+     998.662
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "ATRIUME",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1727.64,
+     -1636.88,
+     19.2198
+    ],
+    "exit": [
+     1727.63,
+     -1633.88,
+     19.2195
+    ],
+    "src": "data\\maps\\LA\\LAn.ipl"
+   },
+   {
+    "entry": [
+     1726.19,
+     -1638.01,
+     19.2679
+    ],
+    "exit": [
+     1726.18,
+     -1641.01,
+     19.2676
+    ],
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "ATRIUMX",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1699.36,
+     -1667.16,
+     19.2198
+    ],
+    "exit": [
+     1696.36,
+     -1667.16,
+     19.2195
+    ],
+    "src": "data\\maps\\LA\\LAn.ipl"
+   },
+   {
+    "entry": [
+     1700.74,
+     -1668.48,
+     19.2198
+    ],
+    "exit": [
+     1703.75,
+     -1668.48,
+     19.2195
+    ],
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "BAR1",
+  "kind": "BAR",
+  "doors": [
+   {
+    "entry": [
+     1836.9,
+     -1681.75,
+     12.3635
+    ],
+    "exit": [
+     1834.4,
+     -1681.75,
+     12.3635
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   },
+   {
+    "entry": [
+     -2551.79,
+     193.778,
+     5.21905
+    ],
+    "exit": [
+     -2553.79,
+     193.778,
+     5.21905
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     2507.44,
+     1242.31,
+     9.83339
+    ],
+    "exit": [
+     2507.44,
+     1245.21,
+     9.83339
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     493.391,
+     -24.9228,
+     999.687
+    ],
+    "exit": [
+     493.391,
+     -22.7228,
+     999.687
+    ],
+    "interior": 17,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BAR2",
+  "kind": "BAR",
+  "doors": [
+   {
+    "entry": [
+     2309.62,
+     -1643.63,
+     13.8385
+    ],
+    "exit": [
+     2308.12,
+     -1643.63,
+     13.8385
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   },
+   {
+    "entry": [
+     -2242.69,
+     -88.2558,
+     34.3578
+    ],
+    "exit": [
+     -2245.38,
+     -88.2558,
+     34.3578
+    ],
+    "src": "data\\maps\\SF\\SFSe.ipl"
+   },
+   {
+    "entry": [
+     2441.15,
+     2065.15,
+     9.8472
+    ],
+    "exit": [
+     2441.15,
+     2062.04,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     501.981,
+     -67.7502,
+     997.835
+    ],
+    "exit": [
+     501.981,
+     -69.1502,
+     997.835
+    ],
+    "interior": 11,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BARBER2",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     823.629,
+     -1588.9,
+     12.5764
+    ],
+    "exit": [
+     822.629,
+     -1590.4,
+     12.5784
+    ],
+    "src": "data\\maps\\LA\\LAw.ipl"
+   },
+   {
+    "entry": [
+     -2571.18,
+     246.698,
+     9.64213
+    ],
+    "exit": [
+     -2570.18,
+     245.498,
+     9.34213
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -1449.87,
+     2591.85,
+     54.8378
+    ],
+    "exit": [
+     -1449.87,
+     2593.85,
+     54.8378
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   },
+   {
+    "entry": [
+     672.355,
+     -496.834,
+     15.3751
+    ],
+    "exit": [
+     675.726,
+     -496.653,
+     15.3751
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2080.36,
+     2122.13,
+     9.82222
+    ],
+    "exit": [
+     2080.36,
+     2119.03,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     418.653,
+     -84.1398,
+     1000.96
+    ],
+    "exit": [
+     418.653,
+     -82.6398,
+     1000.96
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BARBER3",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     2723.76,
+     -2026.72,
+     12.5753
+    ],
+    "exit": [
+     2719.76,
+     -2026.72,
+     12.5753
+    ],
+    "src": "data\\maps\\LA\\LAs2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     412.022,
+     -54.5499,
+     1000.96
+    ],
+    "exit": [
+     412.022,
+     -52.6499,
+     1000.96
+    ],
+    "interior": 12,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BARBERS",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     2070.86,
+     -1793.84,
+     12.661
+    ],
+    "exit": [
+     2074.0,
+     -1793.94,
+     12.661
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     411.626,
+     -23.3333,
+     1000.8
+    ],
+    "exit": [
+     411.626,
+     -21.4333,
+     1000.8
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BDUPS",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1527.23,
+     -14.7745,
+     1001.27
+    ],
+    "exit": [
+     1527.23,
+     -11.5745,
+     1001.27
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BDUPS1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1523.51,
+     -51.0212,
+     1001.27
+    ],
+    "exit": [
+     1523.51,
+     -47.8212,
+     1001.27
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BIKESCH",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1494.43,
+     1304.11,
+     1092.29
+    ],
+    "exit": [
+     1494.43,
+     1305.63,
+     1092.29
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BROTHEL",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     744.527,
+     1431.31,
+     1101.74
+    ],
+    "exit": [
+     744.543,
+     1437.67,
+     1101.74
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BROTHL1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     940.922,
+     -18.307,
+     1000.18
+    ],
+    "exit": [
+     940.922,
+     -17.007,
+     1000.18
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BROTHL2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     967.107,
+     -53.5055,
+     1000.18
+    ],
+    "exit": [
+     964.107,
+     -53.2055,
+     1000.18
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "BURHOUS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2808.0,
+     -1175.99,
+     24.7745
+    ],
+    "exit": [
+     2808.0,
+     -1177.19,
+     24.7745
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2807.62,
+     -1174.1,
+     1024.58
+    ],
+    "exit": [
+     2807.62,
+     -1171.9,
+     1024.58
+    ],
+    "interior": 8,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CARLS",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     2495.33,
+     -1690.75,
+     13.7847
+    ],
+    "exit": [
+     2495.33,
+     -1690.25,
+     13.7847
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2496.05,
+     -1692.73,
+     1013.75
+    ],
+    "exit": [
+     2496.05,
+     -1692.93,
+     1013.75
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CARMOD1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     617.536,
+     -1.99,
+     999.98
+    ],
+    "exit": [
+     617.536,
+     -1.99,
+     999.98
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CARMOD2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     618.283,
+     -74.815,
+     997.014
+    ],
+    "exit": [
+     616.783,
+     -74.815,
+     997.014
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CARMOD3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     617.786,
+     -124.239,
+     996.995
+    ],
+    "exit": [
+     615.286,
+     -124.239,
+     996.995
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CARTER",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2540.08,
+     -1304.0,
+     33.9877
+    ],
+    "exit": [
+     2539.08,
+     -1304.0,
+     33.9877
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2541.7,
+     -1304.01,
+     1024.07
+    ],
+    "exit": [
+     2543.66,
+     -1303.63,
+     1024.07
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CASINO2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1659.42,
+     2249.69,
+     10.0664
+    ],
+    "exit": [
+     1659.42,
+     2252.79,
+     10.0665
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     1133.07,
+     -12.7731,
+     999.75
+    ],
+    "exit": [
+     1133.07,
+     -9.57306,
+     999.75
+    ],
+    "interior": 12,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CHANGER",
+  "kind": "CLOTHES",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     254.137,
+     -41.5322,
+     1001.07
+    ],
+    "exit": [
+     255.137,
+     -41.5322,
+     1001.07
+    ],
+    "interior": 14,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   },
+   {
+    "entry": [
+     2492.39,
+     -1708.46,
+     1017.35
+    ],
+    "exit": [
+     2492.39,
+     -1707.66,
+     1017.35
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   },
+   {
+    "entry": [
+     2231.65,
+     -1112.23,
+     1049.88
+    ],
+    "exit": [
+     2232.65,
+     -1112.23,
+     1049.88
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2215.88,
+     -1074.59,
+     1049.51
+    ],
+    "exit": [
+     2215.88,
+     -1075.59,
+     1049.51
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2236.37,
+     -1073.94,
+     1048.04
+    ],
+    "exit": [
+     2237.37,
+     -1073.94,
+     1048.04
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2334.8,
+     -1073.6,
+     1048.05
+    ],
+    "exit": [
+     2333.8,
+     -1073.6,
+     1048.05
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2286.34,
+     -1137.63,
+     1049.93
+    ],
+    "exit": [
+     2285.34,
+     -1137.63,
+     1049.93
+    ],
+    "interior": 11,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2263.16,
+     -1132.55,
+     1049.67
+    ],
+    "exit": [
+     2263.16,
+     -1133.55,
+     1049.67
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2251.52,
+     -1143.25,
+     1049.67
+    ],
+    "exit": [
+     2251.52,
+     -1142.25,
+     1049.67
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2332.68,
+     -1144.33,
+     1053.32
+    ],
+    "exit": [
+     2332.68,
+     -1142.33,
+     1053.32
+    ],
+    "interior": 12,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2319.48,
+     -1212.72,
+     1048.07
+    ],
+    "exit": [
+     2319.48,
+     -1210.72,
+     1048.07
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2194.97,
+     -1210.64,
+     1047.8
+    ],
+    "exit": [
+     2193.97,
+     -1210.64,
+     1047.8
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2363.94,
+     -1127.46,
+     1049.91
+    ],
+    "exit": [
+     2364.94,
+     -1127.46,
+     1049.91
+    ],
+    "interior": 8,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2316.31,
+     -1010.77,
+     1053.72
+    ],
+    "exit": [
+     2317.31,
+     -1010.77,
+     1053.72
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   },
+   {
+    "entry": [
+     2261.9,
+     -1216.73,
+     1048.04
+    ],
+    "exit": [
+     2260.9,
+     -1216.73,
+     1048.04
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CLOTHGP",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     1456.77,
+     -1138.02,
+     23.2872
+    ],
+    "exit": [
+     1458.77,
+     -1140.02,
+     23.2872
+    ],
+    "src": "data\\maps\\LA\\LAn2.ipl"
+   },
+   {
+    "entry": [
+     -1883.2,
+     865.473,
+     34.2601
+    ],
+    "exit": [
+     -1886.2,
+     862.473,
+     34.2601
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     2572.07,
+     1904.83,
+     10.0231
+    ],
+    "exit": [
+     2572.07,
+     1901.73,
+     10.0231
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2090.58,
+     2224.2,
+     10.0579
+    ],
+    "exit": [
+     2090.58,
+     2221.1,
+     10.0579
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     161.391,
+     -96.6856,
+     1000.81
+    ],
+    "exit": [
+     161.391,
+     -95.2856,
+     1000.81
+    ],
+    "interior": 18,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CSCHP",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     2244.47,
+     -1665.36,
+     14.4839
+    ],
+    "exit": [
+     2244.48,
+     -1664.06,
+     14.4839
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   },
+   {
+    "entry": [
+     -2375.32,
+     910.293,
+     44.4578
+    ],
+    "exit": [
+     -2377.32,
+     909.293,
+     44.4578
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     1657.01,
+     1733.33,
+     10.0209
+    ],
+    "exit": [
+     1654.01,
+     1733.43,
+     10.0209
+    ],
+    "src": "data\\maps\\vegas\\vegasS.ipl"
+   },
+   {
+    "entry": [
+     2102.69,
+     2257.49,
+     10.0579
+    ],
+    "exit": [
+     2105.79,
+     2257.49,
+     10.0579
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     207.738,
+     -111.42,
+     1004.27
+    ],
+    "exit": [
+     207.738,
+     -109.02,
+     1004.27
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CSDESGN",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     461.158,
+     -1499.98,
+     30.1742
+    ],
+    "exit": [
+     458.658,
+     -1500.48,
+     30.1742
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   },
+   {
+    "entry": [
+     -1694.76,
+     951.599,
+     24.2706
+    ],
+    "exit": [
+     -1699.27,
+     950.599,
+     24.2706
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     2802.34,
+     2430.6,
+     10.061
+    ],
+    "exit": [
+     2795.24,
+     2424.7,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     227.294,
+     -7.43153,
+     1001.26
+    ],
+    "exit": [
+     226.294,
+     -7.43153,
+     1001.26
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CSEXL",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     453.868,
+     -1478.07,
+     29.9609
+    ],
+    "exit": [
+     452.012,
+     -1479.57,
+     29.9609
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     204.333,
+     -168.695,
+     999.579
+    ],
+    "exit": [
+     204.333,
+     -166.695,
+     999.579
+    ],
+    "interior": 14,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "CSSPRT",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     499.637,
+     -1360.4,
+     15.4261
+    ],
+    "exit": [
+     501.781,
+     -1358.5,
+     15.4261
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   },
+   {
+    "entry": [
+     2825.74,
+     2407.44,
+     10.061
+    ],
+    "exit": [
+     2818.64,
+     2401.54,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     207.055,
+     -139.805,
+     1002.52
+    ],
+    "exit": [
+     207.055,
+     -138.805,
+     1002.52
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "DAMIN",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -594.874,
+     2018.21,
+     59.6792
+    ],
+    "exit": [
+     -959.874,
+     1952.0,
+     8.04431
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "DAMOUT",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -959.671,
+     1955.55,
+     8.08044
+    ],
+    "exit": [
+     -594.264,
+     2020.3,
+     59.5167
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "DESHOUS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     422.157,
+     2536.52,
+     9.00864
+    ],
+    "exit": [
+     429.157,
+     2535.52,
+     15.5086
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     423.985,
+     2536.49,
+     15.1903
+    ],
+    "exit": [
+     420.485,
+     2535.59,
+     9.02029
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "DINER1",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     386.918,
+     -1817.79,
+     6.90008
+    ],
+    "exit": [
+     385.062,
+     -1817.89,
+     6.90008
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   },
+   {
+    "entry": [
+     -1941.72,
+     2379.54,
+     48.7008
+    ],
+    "exit": [
+     -1939.75,
+     2380.45,
+     48.7008
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   },
+   {
+    "entry": [
+     1376.89,
+     2327.79,
+     9.82222
+    ],
+    "exit": [
+     1379.99,
+     2327.79,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     460.1,
+     -88.4285,
+     998.622
+    ],
+    "exit": [
+     460.1,
+     -88.4285,
+     998.622
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "DINER2",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     2863.23,
+     -1439.44,
+     10.0083
+    ],
+    "exit": [
+     2863.23,
+     -1439.44,
+     10.0083
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   },
+   {
+    "entry": [
+     -1700.01,
+     1380.49,
+     6.20434
+    ],
+    "exit": [
+     -1701.83,
+     1378.97,
+     6.20434
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2524.11,
+     1216.16,
+     36.4496
+    ],
+    "exit": [
+     -2521.86,
+     1216.16,
+     36.4496
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -206.0,
+     1062.21,
+     18.8298
+    ],
+    "exit": [
+     -203.993,
+     1064.08,
+     18.8298
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -53.87,
+     1189.17,
+     18.4108
+    ],
+    "exit": [
+     -51.8631,
+     1191.04,
+     18.4108
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     291.974,
+     -195.463,
+     0.852
+    ],
+    "exit": [
+     287.345,
+     -195.282,
+     1.23056
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2368.06,
+     1983.19,
+     10.003
+    ],
+    "exit": [
+     2362.56,
+     1979.39,
+     10.003
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     459.351,
+     -111.005,
+     998.718
+    ],
+    "exit": [
+     459.351,
+     -110.105,
+     998.718
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "DIRBIKE",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -1241.86,
+     -594.879,
+     1062.63
+    ],
+    "exit": [
+     -1320.94,
+     -602.382,
+     1062.63
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\stadint.ipl"
+   }
+  ]
+ },
+ {
+  "name": "DRIVES",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2029.72,
+     -120.926,
+     34.1691
+    ],
+    "exit": [
+     -2029.72,
+     -122.406,
+     34.1691
+    ],
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -2029.72,
+     -119.548,
+     1034.17
+    ],
+    "exit": [
+     -2029.72,
+     -118.068,
+     1034.17
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "DRIVES2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2026.92,
+     -101.459,
+     34.259
+    ],
+    "exit": [
+     -2026.92,
+     -99.9395,
+     34.259
+    ],
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -2026.92,
+     -103.483,
+     1034.27
+    ],
+    "exit": [
+     -2027.92,
+     -105.183,
+     1034.27
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "FDBURG",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     811.982,
+     -1616.02,
+     12.618
+    ],
+    "exit": [
+     812.981,
+     -1616.14,
+     12.6199
+    ],
+    "src": "data\\maps\\LA\\LAw.ipl"
+   },
+   {
+    "entry": [
+     1199.13,
+     -918.071,
+     42.3243
+    ],
+    "exit": [
+     1199.13,
+     -920.571,
+     42.3243
+    ],
+    "src": "data\\maps\\LA\\LaWn.ipl"
+   },
+   {
+    "entry": [
+     -1912.27,
+     828.025,
+     34.5615
+    ],
+    "exit": [
+     -1910.26,
+     830.598,
+     34.2215
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2336.95,
+     -166.646,
+     34.3573
+    ],
+    "exit": [
+     -2335.95,
+     -166.646,
+     34.3573
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2356.48,
+     1008.01,
+     49.9036
+    ],
+    "exit": [
+     -2356.48,
+     1005.14,
+     49.9036
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     2366.74,
+     2071.02,
+     9.8218
+    ],
+    "exit": [
+     2363.64,
+     2071.02,
+     9.8218
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2472.68,
+     2033.88,
+     9.822
+    ],
+    "exit": [
+     2469.58,
+     2033.88,
+     9.822
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2169.86,
+     2795.79,
+     9.89528
+    ],
+    "exit": [
+     2172.96,
+     2795.79,
+     9.89528
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     1872.24,
+     2072.07,
+     9.82222
+    ],
+    "exit": [
+     1875.34,
+     2072.07,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   },
+   {
+    "entry": [
+     1158.43,
+     2072.02,
+     9.82222
+    ],
+    "exit": [
+     1161.53,
+     2072.02,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     363.113,
+     -74.8787,
+     1000.55
+    ],
+    "exit": [
+     363.413,
+     -74.5787,
+     1000.55
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "FDCHICK",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     2419.95,
+     -1509.8,
+     23.1568
+    ],
+    "exit": [
+     2421.15,
+     -1509.8,
+     23.1568
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   },
+   {
+    "entry": [
+     2397.83,
+     -1898.65,
+     12.7131
+    ],
+    "exit": [
+     2397.83,
+     -1895.65,
+     12.7131
+    ],
+    "src": "data\\maps\\LA\\LAs2.ipl"
+   },
+   {
+    "entry": [
+     928.525,
+     -1352.77,
+     12.4344
+    ],
+    "exit": [
+     924.525,
+     -1352.77,
+     12.4344
+    ],
+    "src": "data\\maps\\LA\\LaWn.ipl"
+   },
+   {
+    "entry": [
+     -1815.84,
+     618.678,
+     34.2989
+    ],
+    "exit": [
+     -1814.64,
+     615.402,
+     34.2989
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2671.53,
+     258.344,
+     3.64932
+    ],
+    "exit": [
+     -2671.53,
+     259.141,
+     3.64932
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     172.727,
+     1176.68,
+     13.773
+    ],
+    "exit": [
+     173.761,
+     1174.07,
+     13.773
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -1213.71,
+     1830.46,
+     40.9335
+    ],
+    "exit": [
+     -1211.81,
+     1832.46,
+     40.9335
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   },
+   {
+    "entry": [
+     -2155.03,
+     -2460.28,
+     29.8484
+    ],
+    "exit": [
+     -2154.03,
+     -2461.28,
+     29.8484
+    ],
+    "src": "data\\maps\\country\\countryS.ipl"
+   },
+   {
+    "entry": [
+     2638.58,
+     1671.18,
+     10.0231
+    ],
+    "exit": [
+     2635.58,
+     1671.08,
+     10.0231
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2393.18,
+     2041.66,
+     9.8472
+    ],
+    "exit": [
+     2393.18,
+     2045.76,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2838.43,
+     2407.26,
+     10.061
+    ],
+    "exit": [
+     2844.53,
+     2401.16,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2102.69,
+     2228.76,
+     10.0579
+    ],
+    "exit": [
+     2105.79,
+     2228.76,
+     10.0579
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     365.673,
+     -11.6132,
+     1000.87
+    ],
+    "exit": [
+     365.673,
+     -10.7132,
+     1000.87
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "FDDONUT",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     377.099,
+     -193.14,
+     999.644
+    ],
+    "exit": [
+     377.099,
+     -192.44,
+     999.644
+    ],
+    "interior": 17,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "FDPIZA",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     2105.32,
+     -1806.49,
+     12.6941
+    ],
+    "exit": [
+     2103.46,
+     -1806.59,
+     12.6941
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   },
+   {
+    "entry": [
+     -1808.69,
+     945.863,
+     23.8648
+    ],
+    "exit": [
+     -1805.79,
+     943.221,
+     23.9148
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1721.13,
+     1359.01,
+     6.19634
+    ],
+    "exit": [
+     -1725.89,
+     1359.34,
+     6.19634
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     1367.27,
+     248.388,
+     18.6229
+    ],
+    "exit": [
+     1362.64,
+     249.569,
+     19.0015
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2333.43,
+     75.0488,
+     25.7342
+    ],
+    "exit": [
+     2335.8,
+     75.2301,
+     25.5042
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2333.43,
+     75.0488,
+     25.7342
+    ],
+    "exit": [
+     2335.8,
+     75.2301,
+     25.5042
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     1367.27,
+     248.388,
+     18.6229
+    ],
+    "exit": [
+     1362.64,
+     249.569,
+     19.0015
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     203.334,
+     -202.532,
+     0.600709
+    ],
+    "exit": [
+     203.705,
+     -205.35,
+     0.600709
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2638.58,
+     1849.97,
+     10.0231
+    ],
+    "exit": [
+     2635.58,
+     1849.87,
+     10.0231
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2756.01,
+     2477.05,
+     10.061
+    ],
+    "exit": [
+     2755.91,
+     2472.95,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2351.89,
+     2532.19,
+     9.82217
+    ],
+    "exit": [
+     2351.89,
+     2529.09,
+     9.82217
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2083.49,
+     2224.2,
+     10.0579
+    ],
+    "exit": [
+     2083.49,
+     2221.1,
+     10.0579
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     372.352,
+     -133.551,
+     1000.45
+    ],
+    "exit": [
+     372.352,
+     -131.651,
+     1000.45
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "FDREST1",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     419.191,
+     -1428.71,
+     31.8959
+    ],
+    "exit": [
+     417.335,
+     -1430.81,
+     31.8959
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   },
+   {
+    "entry": [
+     -2463.06,
+     132.287,
+     34.198
+    ],
+    "exit": [
+     -2462.06,
+     133.287,
+     34.198
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     2489.87,
+     2065.15,
+     9.8472
+    ],
+    "exit": [
+     2489.87,
+     2062.04,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     1693.19,
+     2209.13,
+     10.0212
+    ],
+    "exit": [
+     1693.19,
+     2206.03,
+     10.0212
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     452.89,
+     -18.1797,
+     1000.18
+    ],
+    "exit": [
+     452.49,
+     -18.1797,
+     1000.18
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GANG",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2351.97,
+     -1169.86,
+     27.0309
+    ],
+    "exit": [
+     2351.97,
+     -1167.86,
+     27.0309
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2352.34,
+     -1181.25,
+     1027.0
+    ],
+    "exit": [
+     2350.34,
+     -1181.65,
+     1027.0
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GENOTB",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1631.86,
+     -1172.57,
+     23.1349
+    ],
+    "exit": [
+     1631.86,
+     -1168.57,
+     23.1349
+    ],
+    "src": "data\\maps\\LA\\LAn2.ipl"
+   },
+   {
+    "entry": [
+     1288.8,
+     271.002,
+     18.5554
+    ],
+    "exit": [
+     1291.9,
+     269.445,
+     19.0
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     834.819,
+     7.418,
+     1003.18
+    ],
+    "exit": [
+     833.819,
+     7.418,
+     1003.18
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GENWRHS",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1306.71,
+     2.21274,
+     999.932
+    ],
+    "exit": [
+     1302.52,
+     -1.78751,
+     999.932
+    ],
+    "interior": 18,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     243.412,
+     305.033,
+     998.232
+    ],
+    "exit": [
+     244.412,
+     305.033,
+     998.232
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     272.885,
+     307.932,
+     998.326
+    ],
+    "exit": [
+     271.885,
+     306.632,
+     998.326
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     292.783,
+     310.032,
+     998.155
+    ],
+    "exit": [
+     291.283,
+     310.032,
+     998.155
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF4",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     302.181,
+     300.023,
+     998.232
+    ],
+    "exit": [
+     302.181,
+     300.723,
+     998.232
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF5",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     322.198,
+     301.798,
+     998.232
+    ],
+    "exit": [
+     322.198,
+     302.498,
+     998.232
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GF6",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     343.915,
+     305.033,
+     998.232
+    ],
+    "exit": [
+     344.915,
+     305.033,
+     998.232
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GYM1",
+  "kind": "GYM",
+  "doors": [
+   {
+    "entry": [
+     2229.63,
+     -1721.63,
+     12.6529
+    ],
+    "exit": [
+     2229.13,
+     -1722.13,
+     12.6529
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     772.112,
+     -4.99865,
+     999.688
+    ],
+    "exit": [
+     772.112,
+     -3.89865,
+     999.688
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GYM2",
+  "kind": "GYM",
+  "doors": [
+   {
+    "entry": [
+     -2270.46,
+     -155.957,
+     34.3573
+    ],
+    "exit": [
+     -2269.46,
+     -155.957,
+     34.3573
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     774.214,
+     -50.0243,
+     999.688
+    ],
+    "exit": [
+     774.214,
+     -48.9243,
+     999.688
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "GYM3",
+  "kind": "GYM",
+  "doors": [
+   {
+    "entry": [
+     1968.7,
+     2295.3,
+     15.4955
+    ],
+    "exit": [
+     1968.7,
+     2294.2,
+     15.4955
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     773.58,
+     -78.1967,
+     999.688
+    ],
+    "exit": [
+     773.58,
+     -77.0967,
+     999.688
+    ],
+    "interior": 7,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "JETINT",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     5.16199,
+     33.0586,
+     1198.85
+    ],
+    "exit": [
+     2.38483,
+     33.1034,
+     1198.85
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "JUMP1",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2268.07,
+     1619.59,
+     93.9124
+    ],
+    "exit": [
+     2271.07,
+     1619.49,
+     93.9124
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2264.49,
+     1619.58,
+     1089.5
+    ],
+    "exit": [
+     2265.79,
+     1619.58,
+     1089.5
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "JUMP2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2268.14,
+     1675.89,
+     93.9124
+    ],
+    "exit": [
+     2271.14,
+     1675.79,
+     93.9124
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2264.48,
+     1675.93,
+     1089.5
+    ],
+    "exit": [
+     2265.78,
+     1675.93,
+     1089.5
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LACRAK",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2166.2,
+     -1671.47,
+     14.1977
+    ],
+    "exit": [
+     2168.34,
+     -1673.57,
+     14.1977
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     318.565,
+     1115.21,
+     1082.98
+    ],
+    "exit": [
+     318.565,
+     1118.21,
+     1082.98
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LACS1",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     2112.73,
+     -1211.7,
+     22.9614
+    ],
+    "exit": [
+     2112.87,
+     -1214.79,
+     22.9614
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   },
+   {
+    "entry": [
+     -2491.98,
+     -29.1065,
+     24.817
+    ],
+    "exit": [
+     -2494.48,
+     -29.1065,
+     24.817
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     2779.12,
+     2453.54,
+     10.061
+    ],
+    "exit": [
+     2772.02,
+     2447.64,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     203.778,
+     -49.8924,
+     1000.8
+    ],
+    "exit": [
+     203.778,
+     -48.4924,
+     1000.8
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHS1A",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     226.757,
+     1240.0,
+     1081.15
+    ],
+    "exit": [
+     225.757,
+     1240.0,
+     1081.15
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHS1B",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2058.97,
+     889.859,
+     60.9137
+    ],
+    "exit": [
+     -2059.17,
+     894.097,
+     59.9137
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     223.044,
+     1287.26,
+     1081.2
+    ],
+    "exit": [
+     223.044,
+     1289.26,
+     1081.2
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHS2A",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2139.85,
+     1189.84,
+     54.7634
+    ],
+    "exit": [
+     -2140.05,
+     1186.08,
+     54.7634
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2152.4,
+     1250.16,
+     24.9503
+    ],
+    "exit": [
+     -2152.6,
+     1254.4,
+     24.7503
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1955.25,
+     1190.6,
+     44.4531
+    ],
+    "exit": [
+     -1955.44,
+     1187.84,
+     44.4531
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     260.984,
+     1284.55,
+     1079.3
+    ],
+    "exit": [
+     260.984,
+     1286.55,
+     1079.3
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHS2B",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     260.542,
+     1237.51,
+     1083.26
+    ],
+    "exit": [
+     260.942,
+     1238.51,
+     1083.26
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHSB1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     234.046,
+     1063.88,
+     1083.31
+    ],
+    "exit": [
+     234.046,
+     1064.88,
+     1083.31
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHSB2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     225.631,
+     1021.48,
+     1083.07
+    ],
+    "exit": [
+     225.631,
+     1022.48,
+     1083.07
+    ],
+    "interior": 7,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHSB3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     226.723,
+     1114.39,
+     1080.19
+    ],
+    "exit": [
+     227.723,
+     1114.39,
+     1080.19
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHSB4",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     235.509,
+     1187.57,
+     1079.34
+    ],
+    "exit": [
+     235.109,
+     1189.77,
+     1079.34
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LAHSS6",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     221.667,
+     1140.39,
+     1081.68
+    ],
+    "exit": [
+     221.667,
+     1143.39,
+     1081.68
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "LASTRIP",
+  "kind": "STRIP",
+  "doors": [
+   {
+    "entry": [
+     2421.52,
+     -1220.65,
+     24.6085
+    ],
+    "exit": [
+     2421.52,
+     -1221.75,
+     24.6085
+    ],
+    "src": "data\\maps\\LA\\LAe2.ipl"
+   },
+   {
+    "entry": [
+     2506.74,
+     2120.39,
+     9.8472
+    ],
+    "exit": [
+     2506.74,
+     2130.49,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     1204.81,
+     -12.7868,
+     1000.09
+    ],
+    "exit": [
+     1204.81,
+     -12.5868,
+     1000.09
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MADDOGS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1259.39,
+     -785.332,
+     91.042
+    ],
+    "exit": [
+     1255.89,
+     -785.332,
+     91.042
+    ],
+    "src": "data\\maps\\LA\\LAhills.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     1260.58,
+     -785.309,
+     1090.96
+    ],
+    "exit": [
+     1263.08,
+     -785.309,
+     1090.96
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MAFCAS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2196.92,
+     1676.52,
+     11.368
+    ],
+    "exit": [
+     2193.92,
+     1676.42,
+     11.368
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2233.91,
+     1714.73,
+     1011.38
+    ],
+    "exit": [
+     2233.91,
+     1710.73,
+     1010.18
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MAFCAS2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2135.61,
+     1599.54,
+     1007.41
+    ],
+    "exit": [
+     2138.61,
+     1599.54,
+     1007.41
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   },
+   {
+    "entry": [
+     2265.74,
+     1647.52,
+     1083.23
+    ],
+    "exit": [
+     2268.74,
+     1647.52,
+     1083.23
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MDDOGS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1298.34,
+     -797.968,
+     83.1574
+    ],
+    "exit": [
+     1299.34,
+     -803.568,
+     83.1574
+    ],
+    "src": "data\\maps\\LA\\LAhills.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     1299.08,
+     -796.827,
+     1083.03
+    ],
+    "exit": [
+     1299.08,
+     -795.227,
+     1083.03
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MOROOM",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     443.4,
+     509.274,
+     1000.42
+    ],
+    "exit": [
+     446.623,
+     509.319,
+     1000.42
+    ],
+    "interior": 12,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "MOTEL1",
+  "kind": "MOTEL",
+  "doors": [
+   {
+    "entry": [
+     2232.87,
+     -1159.71,
+     24.9416
+    ],
+    "exit": [
+     2229.02,
+     -1159.8,
+     24.9416
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2214.34,
+     -1150.51,
+     1024.8
+    ],
+    "exit": [
+     2216.34,
+     -1150.51,
+     1024.8
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "OFTEST",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -72.15,
+     780.976,
+     1122.32
+    ],
+    "exit": [
+     -72.15,
+     786.476,
+     1122.32
+    ],
+    "interior": 7,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "OGLOCS",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     516.271,
+     -17.7119,
+     1000.46
+    ],
+    "exit": [
+     516.271,
+     -16.6119,
+     1000.46
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "P69_ENT",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -1673.01,
+     1337.93,
+     6.18842
+    ],
+    "exit": [
+     -1689.35,
+     1335.56,
+     16.0
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1690.75,
+     1334.37,
+     15.318
+    ],
+    "exit": [
+     -1675.09,
+     1335.0,
+     6.31796
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "PAPER",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2412.6,
+     1123.81,
+     9.8529
+    ],
+    "exit": [
+     2415.6,
+     1123.71,
+     9.8529
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     390.872,
+     173.805,
+     1007.39
+    ],
+    "exit": [
+     388.872,
+     173.805,
+     1007.39
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "PDOMES",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2661.35,
+     1424.39,
+     23.0043
+    ],
+    "exit": [
+     -2661.85,
+     1426.39,
+     23.0043
+    ],
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -2661.01,
+     1417.74,
+     921.306
+    ],
+    "exit": [
+     -2661.01,
+     1415.74,
+     922.306
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "PDOMES2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2625.33,
+     1412.62,
+     6.13148
+    ],
+    "exit": [
+     -2625.33,
+     1411.01,
+     6.13154
+    ],
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -2637.45,
+     1402.24,
+     905.458
+    ],
+    "exit": [
+     -2637.45,
+     1404.63,
+     905.458
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "POLICE1",
+  "kind": "POLICE",
+  "doors": [
+   {
+    "entry": [
+     1554.95,
+     -1674.99,
+     15.3283
+    ],
+    "exit": [
+     1552.45,
+     -1674.99,
+     15.3283
+    ],
+    "src": "data\\maps\\LA\\LAn.ipl"
+   },
+   {
+    "entry": [
+     627.642,
+     -571.789,
+     16.907
+    ],
+    "exit": [
+     631.013,
+     -571.608,
+     15.2856
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     246.784,
+     62.2002,
+     1002.64
+    ],
+    "exit": [
+     246.784,
+     63.9002,
+     1002.64
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "POLICE2",
+  "kind": "POLICE",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     246.376,
+     107.546,
+     1002.28
+    ],
+    "exit": [
+     246.376,
+     109.246,
+     1002.28
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "POLICE3",
+  "kind": "POLICE",
+  "doors": [
+   {
+    "entry": [
+     2337.1,
+     2459.05,
+     14.0417
+    ],
+    "exit": [
+     2337.1,
+     2455.95,
+     14.0417
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     288.746,
+     167.651,
+     1006.18
+    ],
+    "exit": [
+     288.746,
+     169.351,
+     1006.18
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "POLICE4",
+  "kind": "POLICE",
+  "doors": [
+   {
+    "entry": [
+     2286.96,
+     2432.21,
+     9.9369
+    ],
+    "exit": [
+     2286.96,
+     2429.11,
+     9.9369
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     238.662,
+     139.352,
+     1002.05
+    ],
+    "exit": [
+     238.662,
+     141.052,
+     1002.05
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int4.ipl"
+   }
+  ]
+ },
+ {
+  "name": "RCPLAY",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2242.01,
+     128.521,
+     34.4174
+    ],
+    "exit": [
+     -2243.31,
+     128.521,
+     34.4174
+    ],
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -2241.07,
+     128.521,
+     1034.42
+    ],
+    "exit": [
+     -2239.57,
+     130.021,
+     1034.42
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "REST2",
+  "kind": "FOOD",
+  "doors": [
+   {
+    "entry": [
+     -1887.43,
+     749.592,
+     44.4658
+    ],
+    "exit": [
+     -1890.11,
+     749.592,
+     44.4658
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -857.938,
+     1535.56,
+     21.6348
+    ],
+    "exit": [
+     -856.846,
+     1536.68,
+     21.587
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     441.982,
+     -49.9199,
+     998.689
+    ],
+    "exit": [
+     441.982,
+     -52.2199,
+     998.689
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int5.ipl"
+   }
+  ]
+ },
+ {
+  "name": "RYDERS",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2468.29,
+     -1698.1,
+     1012.51
+    ],
+    "exit": [
+     2464.11,
+     -1698.66,
+     1012.51
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "S1TEST",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -131.446,
+     787.523,
+     1122.33
+    ],
+    "exit": [
+     -131.446,
+     793.023,
+     1122.33
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SEXSHOP",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2086.42,
+     2074.48,
+     10.2043
+    ],
+    "exit": [
+     2089.52,
+     2074.48,
+     10.2043
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -100.326,
+     -24.9165,
+     999.742
+    ],
+    "exit": [
+     -100.326,
+     -22.8165,
+     999.742
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSB1",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2627.09,
+     2309.93,
+     7.35039
+    ],
+    "exit": [
+     -2624.09,
+     2309.93,
+     7.35039
+    ],
+    "src": "data\\maps\\SF\\SFn.ipl"
+   },
+   {
+    "entry": [
+     -2684.77,
+     819.657,
+     49.0326
+    ],
+    "exit": [
+     -2684.77,
+     817.657,
+     49.0326
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     140.178,
+     1366.58,
+     1082.97
+    ],
+    "exit": [
+     140.278,
+     1368.98,
+     1082.97
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSB2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     87.9854,
+     1366.21,
+     1082.96
+    ],
+    "exit": [
+     88.0854,
+     1368.61,
+     1082.96
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSB3",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2569.1,
+     795.796,
+     48.9819
+    ],
+    "exit": [
+     -2569.1,
+     801.174,
+     48.9819
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2539.92,
+     767.238,
+     39.0419
+    ],
+    "exit": [
+     -2534.92,
+     766.615,
+     38.5919
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     82.9451,
+     1322.44,
+     1082.89
+    ],
+    "exit": [
+     83.3451,
+     1324.44,
+     1082.89
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSM1",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2401.5,
+     869.344,
+     43.3889
+    ],
+    "exit": [
+     -2397.5,
+     868.722,
+     43.0689
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -283.549,
+     1470.98,
+     1083.45
+    ],
+    "exit": [
+     -285.549,
+     1470.98,
+     1083.45
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSM2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2627.09,
+     2283.33,
+     7.3178
+    ],
+    "exit": [
+     -2624.09,
+     2283.33,
+     7.3178
+    ],
+    "src": "data\\maps\\SF\\SFn.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -260.602,
+     1456.62,
+     1083.45
+    ],
+    "exit": [
+     -262.602,
+     1456.62,
+     1083.45
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSS1",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2084.21,
+     1160.33,
+     49.2421
+    ],
+    "exit": [
+     -2084.41,
+     1164.57,
+     49.2421
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1913.32,
+     1252.89,
+     18.5367
+    ],
+    "exit": [
+     -1913.51,
+     1257.12,
+     18.5367
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1820.62,
+     1116.27,
+     45.5432
+    ],
+    "exit": [
+     -1820.82,
+     1112.51,
+     44.4732
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -1742.78,
+     1174.34,
+     24.1582
+    ],
+    "exit": [
+     -1742.97,
+     1178.58,
+     24.1582
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2157.2,
+     889.192,
+     79.0246
+    ],
+    "exit": [
+     -2154.4,
+     889.43,
+     79.0246
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2234.16,
+     830.667,
+     53.5143
+    ],
+    "exit": [
+     -2236.36,
+     830.906,
+     53.4143
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2159.69,
+     1048.74,
+     79.03
+    ],
+    "exit": [
+     -2156.88,
+     1048.98,
+     79.03
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2239.22,
+     962.248,
+     65.6541
+    ],
+    "exit": [
+     -2243.41,
+     962.486,
+     65.6541
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2112.58,
+     745.657,
+     68.582
+    ],
+    "exit": [
+     -2112.78,
+     742.895,
+     68.582
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2205.27,
+     743.061,
+     49.4742
+    ],
+    "exit": [
+     -2205.46,
+     740.299,
+     48.9742
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2636.13,
+     2351.92,
+     7.59756
+    ],
+    "exit": [
+     -2633.13,
+     2351.92,
+     7.59756
+    ],
+    "src": "data\\maps\\SF\\SFn.ipl"
+   },
+   {
+    "entry": [
+     -2591.41,
+     -158.542,
+     3.36046
+    ],
+    "exit": [
+     -2595.48,
+     -158.542,
+     3.36046
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2558.79,
+     -79.623,
+     10.0789
+    ],
+    "exit": [
+     -2558.87,
+     -76.623,
+     9.85889
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2514.04,
+     -170.797,
+     24.2706
+    ],
+    "exit": [
+     -2510.12,
+     -170.797,
+     24.6706
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2447.62,
+     820.771,
+     34.256
+    ],
+    "exit": [
+     -2447.62,
+     818.149,
+     34.256
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2338.61,
+     579.323,
+     27.0123
+    ],
+    "exit": [
+     -2338.61,
+     575.7,
+     27.0123
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2321.97,
+     819.509,
+     44.3052
+    ],
+    "exit": [
+     -2321.97,
+     815.887,
+     44.3052
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2401.48,
+     930.783,
+     44.4973
+    ],
+    "exit": [
+     -2397.48,
+     930.161,
+     44.4973
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2381.23,
+     1281.01,
+     22.1852
+    ],
+    "exit": [
+     -2378.23,
+     1281.26,
+     21.9852
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2279.5,
+     1148.84,
+     61.0751
+    ],
+    "exit": [
+     -2276.5,
+     1148.84,
+     60.5751
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2280.55,
+     916.429,
+     65.6849
+    ],
+    "exit": [
+     -2277.55,
+     916.429,
+     65.6849
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -42.582,
+     1405.61,
+     1083.45
+    ],
+    "exit": [
+     -42.582,
+     1408.11,
+     1083.45
+    ],
+    "interior": 8,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SFHSS2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2626.29,
+     2359.75,
+     8.00576
+    ],
+    "exit": [
+     -2625.29,
+     2359.75,
+     8.00576
+    ],
+    "src": "data\\maps\\SF\\SFn.ipl"
+   },
+   {
+    "entry": [
+     -2591.41,
+     -95.538,
+     3.44458
+    ],
+    "exit": [
+     -2595.48,
+     -95.538,
+     3.44458
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2541.61,
+     -145.321,
+     14.7826
+    ],
+    "exit": [
+     -2541.69,
+     -142.321,
+     14.8826
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   },
+   {
+    "entry": [
+     -2449.72,
+     921.163,
+     57.2093
+    ],
+    "exit": [
+     -2449.72,
+     918.54,
+     57.2093
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     -2372.92,
+     692.687,
+     34.138
+    ],
+    "exit": [
+     -2372.92,
+     690.065,
+     34.138
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -68.6941,
+     1351.97,
+     1079.28
+    ],
+    "exit": [
+     -68.2941,
+     1353.47,
+     1079.28
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SKYLAN2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     1571.24,
+     -1336.67,
+     15.7288
+    ],
+    "exit": [
+     1577.24,
+     -1330.67,
+     15.7288
+    ],
+    "src": "data\\maps\\LA\\LAn2.ipl"
+   },
+   {
+    "entry": [
+     1548.64,
+     -1364.02,
+     325.289
+    ],
+    "exit": [
+     1548.14,
+     -1366.42,
+     325.289
+    ],
+    "src": "data\\maps\\LA\\LAn2.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "SMASHTV",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1416.82,
+     2.21274,
+     999.932
+    ],
+    "exit": [
+     1412.64,
+     -1.78751,
+     999.932
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "STRIP2",
+  "kind": "STRIP",
+  "doors": [
+   {
+    "entry": [
+     693.632,
+     1966.4,
+     4.56038
+    ],
+    "exit": [
+     693.632,
+     1961.4,
+     4.56038
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     2543.15,
+     1025.16,
+     9.82133
+    ],
+    "exit": [
+     2543.15,
+     1022.06,
+     9.82133
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     1212.02,
+     -25.8631,
+     1000.09
+    ],
+    "exit": [
+     1212.02,
+     -28.6631,
+     1000.09
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "STUDIO",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     1038.51,
+     -3.86375,
+     1000.09
+    ],
+    "exit": [
+     1038.51,
+     -0.663752,
+     1000.09
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int3.ipl"
+   }
+  ]
+ },
+ {
+  "name": "STUDRAN",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     703.035,
+     1972.63,
+     916.3
+    ],
+    "exit": [
+     694.05,
+     1961.74,
+     3.79999
+    ],
+    "interior": 0,
+    "src": "data\\maps\\country\\countn2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVCUNT",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     -369.456,
+     1169.14,
+     19.3978
+    ],
+    "exit": [
+     -366.422,
+     1166.54,
+     18.8978
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -1533.1,
+     2656.65,
+     55.275
+    ],
+    "exit": [
+     -1534.1,
+     2650.46,
+     54.875
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   },
+   {
+    "entry": [
+     -1051.47,
+     1549.76,
+     32.496
+    ],
+    "exit": [
+     -1046.47,
+     1552.56,
+     32.096
+    ],
+    "src": "data\\maps\\country\\countryN.ipl"
+   },
+   {
+    "entry": [
+     -2075.91,
+     -2312.55,
+     30.1313
+    ],
+    "exit": [
+     -2079.91,
+     -2309.55,
+     29.7313
+    ],
+    "src": "data\\maps\\country\\countryS.ipl"
+   },
+   {
+    "entry": [
+     794.884,
+     -506.702,
+     17.1238
+    ],
+    "exit": [
+     793.991,
+     -514.26,
+     16.5684
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     2236.53,
+     167.997,
+     27.196
+    ],
+    "exit": [
+     2237.63,
+     160.439,
+     26.6406
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     206.802,
+     -112.542,
+     3.98153
+    ],
+    "exit": [
+     206.173,
+     -109.361,
+     4.36009
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     -1438.72,
+     -1544.58,
+     100.713
+    ],
+    "exit": [
+     -1438.72,
+     -1542.58,
+     100.713
+    ],
+    "src": "data\\maps\\country\\countryw.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2333.11,
+     -1077.1,
+     1048.04
+    ],
+    "exit": [
+     2333.11,
+     -1075.1,
+     1048.04
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVGNMT1",
+  "kind": "SAFEHOUSE",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2255.14,
+     -1140.09,
+     1049.65
+    ],
+    "exit": [
+     2253.14,
+     -1140.09,
+     1049.65
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVGNMT2",
+  "kind": "SAFEHOUSE",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2259.4,
+     -1135.94,
+     1049.64
+    ],
+    "exit": [
+     2261.4,
+     -1135.94,
+     1049.64
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVHOT1",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     -2425.94,
+     337.87,
+     35.997
+    ],
+    "exit": [
+     -2424.94,
+     337.37,
+     35.997
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2233.8,
+     -1115.36,
+     1049.91
+    ],
+    "exit": [
+     2233.8,
+     -1113.36,
+     1049.91
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVLABIG",
+  "kind": "SAFEHOUSE",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2324.42,
+     -1149.54,
+     1049.72
+    ],
+    "exit": [
+     2324.42,
+     -1147.54,
+     1049.72
+    ],
+    "interior": 12,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVLAMD",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     1684.74,
+     -2099.0,
+     12.8507
+    ],
+    "exit": [
+     1684.76,
+     -2101.99,
+     12.8507
+    ],
+    "src": "data\\maps\\LA\\LAs.ipl"
+   },
+   {
+    "entry": [
+     893.617,
+     -1636.3,
+     13.9872
+    ],
+    "exit": [
+     893.717,
+     -1637.5,
+     13.9891
+    ],
+    "src": "data\\maps\\LA\\LAw.ipl"
+   },
+   {
+    "entry": [
+     315.684,
+     -1769.81,
+     3.62877
+    ],
+    "exit": [
+     315.829,
+     -1773.91,
+     3.62877
+    ],
+    "src": "data\\maps\\LA\\LAw2.ipl"
+   },
+   {
+    "entry": [
+     2449.17,
+     689.839,
+     10.471
+    ],
+    "exit": [
+     2446.07,
+     689.839,
+     10.471
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     1408.05,
+     1897.08,
+     10.5873
+    ],
+    "exit": [
+     1405.95,
+     1897.08,
+     10.5873
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   },
+   {
+    "entry": [
+     929.122,
+     2006.43,
+     10.4781
+    ],
+    "exit": [
+     926.022,
+     2006.43,
+     10.4781
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2365.3,
+     -1134.92,
+     1049.91
+    ],
+    "exit": [
+     2365.3,
+     -1132.92,
+     1049.91
+    ],
+    "interior": 8,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVLASM",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     2111.23,
+     -1279.71,
+     24.9546
+    ],
+    "exit": [
+     2111.23,
+     -1281.21,
+     24.7546
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   },
+   {
+    "entry": [
+     2483.38,
+     -1996.19,
+     12.8507
+    ],
+    "exit": [
+     2483.4,
+     -1999.18,
+     12.8507
+    ],
+    "src": "data\\maps\\LA\\LAs2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2282.91,
+     -1140.29,
+     1049.91
+    ],
+    "exit": [
+     2282.91,
+     -1138.29,
+     1049.91
+    ],
+    "interior": 11,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVSFBG",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     1331.94,
+     -633.096,
+     108.245
+    ],
+    "exit": [
+     1333.31,
+     -628.914,
+     108.345
+    ],
+    "src": "data\\maps\\LA\\LAhills.ipl"
+   },
+   {
+    "entry": [
+     -2027.73,
+     -40.5488,
+     37.8263
+    ],
+    "exit": [
+     -2027.83,
+     -44.0454,
+     37.0263
+    ],
+    "src": "data\\maps\\SF\\SFSe.ipl"
+   },
+   {
+    "entry": [
+     -2099.68,
+     897.485,
+     75.9661
+    ],
+    "exit": [
+     -2103.76,
+     901.734,
+     75.7161
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2196.79,
+     -1204.35,
+     1048.05
+    ],
+    "exit": [
+     2194.79,
+     -1204.35,
+     1048.05
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVSFMD",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     -2454.44,
+     -135.879,
+     25.2223
+    ],
+    "exit": [
+     -2455.44,
+     -135.879,
+     25.2223
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2270.39,
+     -1210.45,
+     1046.57
+    ],
+    "exit": [
+     2268.39,
+     -1210.45,
+     1046.57
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVSFSM",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     -2213.54,
+     720.845,
+     48.4262
+    ],
+    "exit": [
+     -2214.06,
+     725.036,
+     48.4262
+    ],
+    "src": "data\\maps\\SF\\SFe.ipl"
+   },
+   {
+    "entry": [
+     -2700.32,
+     820.308,
+     48.999
+    ],
+    "exit": [
+     -2700.32,
+     818.686,
+     48.999
+    ],
+    "src": "data\\maps\\SF\\SFw.ipl"
+   },
+   {
+    "entry": [
+     2818.75,
+     2140.56,
+     13.7132
+    ],
+    "exit": [
+     2818.85,
+     2148.56,
+     9.91323
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2308.79,
+     -1212.88,
+     1048.03
+    ],
+    "exit": [
+     2308.79,
+     -1210.88,
+     1048.03
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVVGHO1",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     2238.99,
+     1285.05,
+     9.82528
+    ],
+    "exit": [
+     2235.99,
+     1284.95,
+     9.82528
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2226.03,
+     1837.92,
+     9.964
+    ],
+    "exit": [
+     2222.93,
+     1837.92,
+     9.964
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2217.54,
+     -1076.29,
+     1049.52
+    ],
+    "exit": [
+     2216.54,
+     -1076.29,
+     1049.52
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVVGHO2",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     1965.11,
+     1622.54,
+     11.879
+    ],
+    "exit": [
+     1968.11,
+     1622.44,
+     11.879
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   },
+   {
+    "entry": [
+     2374.55,
+     2167.88,
+     9.8472
+    ],
+    "exit": [
+     2370.05,
+     2164.08,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2237.59,
+     -1080.87,
+     1048.07
+    ],
+    "exit": [
+     2237.59,
+     -1078.87,
+     1048.07
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SVVGMD",
+  "kind": "SAFEHOUSE",
+  "doors": [
+   {
+    "entry": [
+     1274.28,
+     2522.47,
+     9.99299
+    ],
+    "exit": [
+     1277.38,
+     2522.47,
+     9.99299
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2317.82,
+     -1026.75,
+     1049.21
+    ],
+    "exit": [
+     2317.82,
+     -1024.75,
+     1049.21
+    ],
+    "interior": 9,
+    "src": "data\\maps\\interior\\savehous.ipl"
+   }
+  ]
+ },
+ {
+  "name": "SWEETS",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     2524.01,
+     -1679.53,
+     1014.5
+    ],
+    "exit": [
+     2526.46,
+     -1679.09,
+     1014.5
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_LA.ipl"
+   }
+  ]
+ },
+ {
+  "name": "TATTO2",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -2491.98,
+     -38.9587,
+     24.817
+    ],
+    "exit": [
+     -2494.48,
+     -38.9587,
+     24.817
+    ],
+    "src": "data\\maps\\SF\\SFs.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -204.44,
+     -9.1696,
+     1001.3
+    ],
+    "exit": [
+     -204.44,
+     -8.4696,
+     1001.3
+    ],
+    "interior": 17,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "TATTO3",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2094.7,
+     2122.13,
+     9.82222
+    ],
+    "exit": [
+     2094.7,
+     2119.03,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -204.44,
+     -44.3525,
+     1001.3
+    ],
+    "exit": [
+     -204.44,
+     -43.6525,
+     1001.3
+    ],
+    "interior": 3,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "TATTOO",
+  "kind": "CLOTHES",
+  "doors": [
+   {
+    "entry": [
+     2068.71,
+     -1779.84,
+     12.5103
+    ],
+    "exit": [
+     2071.51,
+     -1779.94,
+     12.5103
+    ],
+    "src": "data\\maps\\LA\\LAe.ipl"
+   },
+   {
+    "entry": [
+     1975.79,
+     -2036.65,
+     12.5753
+    ],
+    "exit": [
+     1971.79,
+     -2036.65,
+     12.5753
+    ],
+    "src": "data\\maps\\LA\\LAs2.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -204.44,
+     -27.154,
+     1001.3
+    ],
+    "exit": [
+     -204.44,
+     -26.454,
+     1001.3
+    ],
+    "interior": 16,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "TRICAS",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     2019.49,
+     1007.11,
+     9.82133
+    ],
+    "exit": [
+     2022.49,
+     1007.01,
+     9.82133
+    ],
+    "src": "data\\maps\\vegas\\vegasE.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     2018.95,
+     1017.09,
+     995.882
+    ],
+    "exit": [
+     2015.45,
+     1017.09,
+     995.882
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\int_veg.ipl"
+   }
+  ]
+ },
+ {
+  "name": "TSDINER",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     681.579,
+     -473.419,
+     15.592
+    ],
+    "exit": [
+     681.494,
+     -476.161,
+     15.592
+    ],
+    "src": "data\\maps\\country\\countrye.ipl"
+   },
+   {
+    "entry": [
+     681.475,
+     -449.151,
+     -26.6168
+    ],
+    "exit": [
+     681.475,
+     -451.151,
+     -26.6168
+    ],
+    "src": "data\\maps\\interior\\int_cont.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "UFOBAR",
+  "kind": "GENERIC",
+  "doors": [
+   {
+    "entry": [
+     -229.028,
+     1401.23,
+     26.7698
+    ],
+    "exit": [
+     -227.028,
+     1401.23,
+     26.7698
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -88.5875,
+     1378.36,
+     9.56984
+    ],
+    "exit": [
+     -86.5875,
+     1377.36,
+     9.56984
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   }
+  ],
+  "heavens": []
+ },
+ {
+  "name": "VGHSB1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     447.135,
+     1398.24,
+     1083.34
+    ],
+    "exit": [
+     447.735,
+     1400.44,
+     1083.34
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGHSB3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     491.211,
+     1399.29,
+     1079.34
+    ],
+    "exit": [
+     490.811,
+     1401.49,
+     1079.34
+    ],
+    "interior": 2,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGHSM2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     22.7783,
+     1403.46,
+     1083.45
+    ],
+    "exit": [
+     22.7783,
+     1404.96,
+     1083.45
+    ],
+    "interior": 5,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGHSM3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     24.1327,
+     1340.15,
+     1083.45
+    ],
+    "exit": [
+     27.1327,
+     1341.15,
+     1083.45
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\gen_intb.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGHSS1",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     295.139,
+     1472.47,
+     1079.52
+    ],
+    "exit": [
+     295.139,
+     1474.47,
+     1079.52
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGSHM2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     386.804,
+     1471.77,
+     1079.21
+    ],
+    "exit": [
+     385.804,
+     1471.77,
+     1079.21
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGSHM3",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     376.972,
+     1417.27,
+     1080.41
+    ],
+    "exit": [
+     375.972,
+     1417.27,
+     1080.41
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "VGSHS2",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     328.094,
+     1478.09,
+     1083.45
+    ],
+    "exit": [
+     328.494,
+     1480.59,
+     1083.45
+    ],
+    "interior": 15,
+    "src": "data\\maps\\interior\\gen_int2.ipl"
+   }
+  ]
+ },
+ {
+  "name": "WUZIBET",
+  "kind": "GENERIC",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -2158.72,
+     643.288,
+     1051.37
+    ],
+    "exit": [
+     -2158.72,
+     641.288,
+     1051.37
+    ],
+    "interior": 1,
+    "src": "data\\maps\\interior\\int_SF.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X711S2",
+  "kind": "SHOP247",
+  "doors": [
+   {
+    "entry": [
+     1000.33,
+     -919.924,
+     41.2368
+    ],
+    "exit": [
+     998.327,
+     -919.924,
+     41.2368
+    ],
+    "src": "data\\maps\\LA\\LaWn.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -27.3123,
+     -31.3776,
+     1002.55
+    ],
+    "exit": [
+     -27.3123,
+     -29.2776,
+     1002.55
+    ],
+    "interior": 4,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X711S3",
+  "kind": "SHOP247",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     6.09118,
+     -31.3719,
+     1002.55
+    ],
+    "exit": [
+     6.09118,
+     -29.2719,
+     1002.55
+    ],
+    "interior": 10,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X7_11B",
+  "kind": "SHOP247",
+  "doors": [
+   {
+    "entry": [
+     1833.54,
+     -1843.38,
+     12.5595
+    ],
+    "exit": [
+     1831.54,
+     -1843.38,
+     12.5595
+    ],
+    "src": "data\\maps\\LA\\LAs.ipl"
+   },
+   {
+    "entry": [
+     1315.49,
+     -897.843,
+     38.571
+    ],
+    "exit": [
+     1315.49,
+     -900.843,
+     38.571
+    ],
+    "src": "data\\maps\\LA\\LaWn.ipl"
+   },
+   {
+    "entry": [
+     2546.71,
+     1972.28,
+     9.822
+    ],
+    "exit": [
+     2546.71,
+     1967.18,
+     9.822
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2884.83,
+     2453.28,
+     10.061
+    ],
+    "exit": [
+     2890.93,
+     2447.18,
+     10.061
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -30.9467,
+     -91.7096,
+     1002.55
+    ],
+    "exit": [
+     -30.9467,
+     -89.6096,
+     1002.55
+    ],
+    "interior": 18,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X7_11C",
+  "kind": "SHOP247",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -25.1326,
+     -141.167,
+     1002.55
+    ],
+    "exit": [
+     -25.1326,
+     -139.067,
+     1002.55
+    ],
+    "interior": 16,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X7_11D",
+  "kind": "SHOP247",
+  "doors": [],
+  "heavens": [
+   {
+    "entry": [
+     -25.8845,
+     -187.969,
+     1002.55
+    ],
+    "exit": [
+     -25.8845,
+     -185.869,
+     1002.55
+    ],
+    "interior": 17,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ },
+ {
+  "name": "X7_11S",
+  "kind": "SHOP247",
+  "doors": [
+   {
+    "entry": [
+     1352.31,
+     -1758.3,
+     12.5149
+    ],
+    "exit": [
+     1352.33,
+     -1755.71,
+     12.5149
+    ],
+    "src": "data\\maps\\LA\\LAn.ipl"
+   },
+   {
+    "entry": [
+     -181.004,
+     1034.83,
+     18.8298
+    ],
+    "exit": [
+     -182.997,
+     1033.69,
+     18.8298
+    ],
+    "src": "data\\maps\\country\\countn2.ipl"
+   },
+   {
+    "entry": [
+     -1562.63,
+     -2732.98,
+     47.7435
+    ],
+    "exit": [
+     -1560.63,
+     -2734.98,
+     47.7435
+    ],
+    "src": "data\\maps\\country\\countryS.ipl"
+   },
+   {
+    "entry": [
+     2247.66,
+     2396.26,
+     9.8218
+    ],
+    "exit": [
+     2247.66,
+     2401.36,
+     9.8218
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2452.47,
+     2065.15,
+     9.8472
+    ],
+    "exit": [
+     2452.47,
+     2062.04,
+     9.8472
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2194.38,
+     1991.02,
+     11.301
+    ],
+    "exit": [
+     2191.28,
+     1991.02,
+     11.301
+    ],
+    "src": "data\\maps\\vegas\\vegasN.ipl"
+   },
+   {
+    "entry": [
+     2097.76,
+     2224.2,
+     10.0579
+    ],
+    "exit": [
+     2097.76,
+     2221.1,
+     10.0579
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   },
+   {
+    "entry": [
+     1937.25,
+     2307.17,
+     9.82222
+    ],
+    "exit": [
+     1934.15,
+     2307.17,
+     9.82222
+    ],
+    "src": "data\\maps\\vegas\\vegasW.ipl"
+   }
+  ],
+  "heavens": [
+   {
+    "entry": [
+     -26.6916,
+     -57.8149,
+     1002.55
+    ],
+    "exit": [
+     -26.6916,
+     -55.7149,
+     1002.55
+    ],
+    "interior": 6,
+    "src": "data\\maps\\interior\\gen_int1.ipl"
+   }
+  ]
+ }
+]

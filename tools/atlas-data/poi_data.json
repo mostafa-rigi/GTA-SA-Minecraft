@@ -1,0 +1,4226 @@
+[
+ {
+  "kind": "GENERIC",
+  "name": "Generic door ()",
+  "x": -1753.75,
+  "y": 883.965,
+  "z": 294.645,
+  "door": [
+   -1753.75,
+   883.965,
+   294.645
+  ],
+  "src": "enex:",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door ()",
+  "x": -1749.35,
+  "y": 869.279,
+  "z": 24.0593,
+  "door": [
+   -1749.35,
+   869.279,
+   24.0593
+  ],
+  "src": "enex:",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door ()",
+  "x": -225.433,
+  "y": 1397.02,
+  "z": 69.0501,
+  "door": [
+   -225.433,
+   1397.02,
+   69.0501
+  ],
+  "src": "enex:",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door ()",
+  "x": 2896.57,
+  "y": 57.2165,
+  "z": 0.0,
+  "door": [
+   2896.57,
+   57.2165,
+   0.0
+  ],
+  "src": "enex:",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (ABATOIR)",
+  "x": 966.608,
+  "y": 2160.68,
+  "z": 9.82222,
+  "door": [
+   966.608,
+   2160.68,
+   9.82222
+  ],
+  "src": "enex:ABATOIR",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (ATRIUME)",
+  "x": 1726.19,
+  "y": -1638.01,
+  "z": 19.2679,
+  "door": [
+   1726.19,
+   -1638.01,
+   19.2679
+  ],
+  "src": "enex:ATRIUME",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (ATRIUME)",
+  "x": 1727.64,
+  "y": -1636.88,
+  "z": 19.2198,
+  "door": [
+   1727.64,
+   -1636.88,
+   19.2198
+  ],
+  "src": "enex:ATRIUME",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (ATRIUMX)",
+  "x": 1699.36,
+  "y": -1667.16,
+  "z": 19.2198,
+  "door": [
+   1699.36,
+   -1667.16,
+   19.2198
+  ],
+  "src": "enex:ATRIUMX",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (ATRIUMX)",
+  "x": 1700.74,
+  "y": -1668.48,
+  "z": 19.2198,
+  "door": [
+   1700.74,
+   -1668.48,
+   19.2198
+  ],
+  "src": "enex:ATRIUMX",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (BURHOUS)",
+  "x": 2808.0,
+  "y": -1175.99,
+  "z": 24.7745,
+  "door": [
+   2808.0,
+   -1175.99,
+   24.7745
+  ],
+  "src": "enex:BURHOUS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (CARTER)",
+  "x": 2540.08,
+  "y": -1304.0,
+  "z": 33.9877,
+  "door": [
+   2540.08,
+   -1304.0,
+   33.9877
+  ],
+  "src": "enex:CARTER",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (CASINO2)",
+  "x": 1659.42,
+  "y": 2249.69,
+  "z": 10.0664,
+  "door": [
+   1659.42,
+   2249.69,
+   10.0664
+  ],
+  "src": "enex:CASINO2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DAMIN)",
+  "x": -594.874,
+  "y": 2018.21,
+  "z": 59.6792,
+  "door": [
+   -594.874,
+   2018.21,
+   59.6792
+  ],
+  "src": "enex:DAMIN",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DAMOUT)",
+  "x": -959.671,
+  "y": 1955.55,
+  "z": 8.08044,
+  "door": [
+   -959.671,
+   1955.55,
+   8.08044
+  ],
+  "src": "enex:DAMOUT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DESHOUS)",
+  "x": 422.157,
+  "y": 2536.52,
+  "z": 9.00864,
+  "door": [
+   422.157,
+   2536.52,
+   9.00864
+  ],
+  "src": "enex:DESHOUS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DESHOUS)",
+  "x": 423.985,
+  "y": 2536.49,
+  "z": 15.1903,
+  "door": [
+   423.985,
+   2536.49,
+   15.1903
+  ],
+  "src": "enex:DESHOUS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DRIVES)",
+  "x": -2029.72,
+  "y": -120.926,
+  "z": 34.1691,
+  "door": [
+   -2029.72,
+   -120.926,
+   34.1691
+  ],
+  "src": "enex:DRIVES",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (DRIVES2)",
+  "x": -2026.92,
+  "y": -101.459,
+  "z": 34.259,
+  "door": [
+   -2026.92,
+   -101.459,
+   34.259
+  ],
+  "src": "enex:DRIVES2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (GANG)",
+  "x": 2351.97,
+  "y": -1169.86,
+  "z": 27.0309,
+  "door": [
+   2351.97,
+   -1169.86,
+   27.0309
+  ],
+  "src": "enex:GANG",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (GENOTB)",
+  "x": 1288.8,
+  "y": 271.002,
+  "z": 18.5554,
+  "door": [
+   1288.8,
+   271.002,
+   18.5554
+  ],
+  "src": "enex:GENOTB",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (GENOTB)",
+  "x": 1631.86,
+  "y": -1172.57,
+  "z": 23.1349,
+  "door": [
+   1631.86,
+   -1172.57,
+   23.1349
+  ],
+  "src": "enex:GENOTB",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (JUMP1)",
+  "x": 2268.07,
+  "y": 1619.59,
+  "z": 93.9124,
+  "door": [
+   2268.07,
+   1619.59,
+   93.9124
+  ],
+  "src": "enex:JUMP1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (JUMP2)",
+  "x": 2268.14,
+  "y": 1675.89,
+  "z": 93.9124,
+  "door": [
+   2268.14,
+   1675.89,
+   93.9124
+  ],
+  "src": "enex:JUMP2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (LACRAK)",
+  "x": 2166.2,
+  "y": -1671.47,
+  "z": 14.1977,
+  "door": [
+   2166.2,
+   -1671.47,
+   14.1977
+  ],
+  "src": "enex:LACRAK",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (LAHS1B)",
+  "x": -2058.97,
+  "y": 889.859,
+  "z": 60.9137,
+  "door": [
+   -2058.97,
+   889.859,
+   60.9137
+  ],
+  "src": "enex:LAHS1B",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (LAHS2A)",
+  "x": -2152.4,
+  "y": 1250.16,
+  "z": 24.9503,
+  "door": [
+   -2152.4,
+   1250.16,
+   24.9503
+  ],
+  "src": "enex:LAHS2A",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (LAHS2A)",
+  "x": -2139.85,
+  "y": 1189.84,
+  "z": 54.7634,
+  "door": [
+   -2139.85,
+   1189.84,
+   54.7634
+  ],
+  "src": "enex:LAHS2A",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (LAHS2A)",
+  "x": -1955.25,
+  "y": 1190.6,
+  "z": 44.4531,
+  "door": [
+   -1955.25,
+   1190.6,
+   44.4531
+  ],
+  "src": "enex:LAHS2A",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (MADDOGS)",
+  "x": 1259.39,
+  "y": -785.332,
+  "z": 91.042,
+  "door": [
+   1259.39,
+   -785.332,
+   91.042
+  ],
+  "src": "enex:MADDOGS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (MAFCAS)",
+  "x": 2196.92,
+  "y": 1676.52,
+  "z": 11.368,
+  "door": [
+   2196.92,
+   1676.52,
+   11.368
+  ],
+  "src": "enex:MAFCAS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (MDDOGS)",
+  "x": 1298.34,
+  "y": -797.968,
+  "z": 83.1574,
+  "door": [
+   1298.34,
+   -797.968,
+   83.1574
+  ],
+  "src": "enex:MDDOGS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (P69_ENT)",
+  "x": -1690.75,
+  "y": 1334.37,
+  "z": 15.318,
+  "door": [
+   -1690.75,
+   1334.37,
+   15.318
+  ],
+  "src": "enex:P69_ENT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (P69_ENT)",
+  "x": -1673.01,
+  "y": 1337.93,
+  "z": 6.18842,
+  "door": [
+   -1673.01,
+   1337.93,
+   6.18842
+  ],
+  "src": "enex:P69_ENT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (PAPER)",
+  "x": 2412.6,
+  "y": 1123.81,
+  "z": 9.8529,
+  "door": [
+   2412.6,
+   1123.81,
+   9.8529
+  ],
+  "src": "enex:PAPER",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (PDOMES)",
+  "x": -2661.35,
+  "y": 1424.39,
+  "z": 23.0043,
+  "door": [
+   -2661.35,
+   1424.39,
+   23.0043
+  ],
+  "src": "enex:PDOMES",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (PDOMES2)",
+  "x": -2625.33,
+  "y": 1412.62,
+  "z": 6.13148,
+  "door": [
+   -2625.33,
+   1412.62,
+   6.13148
+  ],
+  "src": "enex:PDOMES2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (RCPLAY)",
+  "x": -2242.01,
+  "y": 128.521,
+  "z": 34.4174,
+  "door": [
+   -2242.01,
+   128.521,
+   34.4174
+  ],
+  "src": "enex:RCPLAY",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SEXSHOP)",
+  "x": 2086.42,
+  "y": 2074.48,
+  "z": 10.2043,
+  "door": [
+   2086.42,
+   2074.48,
+   10.2043
+  ],
+  "src": "enex:SEXSHOP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSB1)",
+  "x": -2684.77,
+  "y": 819.657,
+  "z": 49.0326,
+  "door": [
+   -2684.77,
+   819.657,
+   49.0326
+  ],
+  "src": "enex:SFHSB1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSB1)",
+  "x": -2627.09,
+  "y": 2309.93,
+  "z": 7.35039,
+  "door": [
+   -2627.09,
+   2309.93,
+   7.35039
+  ],
+  "src": "enex:SFHSB1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSB3)",
+  "x": -2569.1,
+  "y": 795.796,
+  "z": 48.9819,
+  "door": [
+   -2569.1,
+   795.796,
+   48.9819
+  ],
+  "src": "enex:SFHSB3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSB3)",
+  "x": -2539.92,
+  "y": 767.238,
+  "z": 39.0419,
+  "door": [
+   -2539.92,
+   767.238,
+   39.0419
+  ],
+  "src": "enex:SFHSB3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSM1)",
+  "x": -2401.5,
+  "y": 869.344,
+  "z": 43.3889,
+  "door": [
+   -2401.5,
+   869.344,
+   43.3889
+  ],
+  "src": "enex:SFHSM1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSM2)",
+  "x": -2627.09,
+  "y": 2283.33,
+  "z": 7.3178,
+  "door": [
+   -2627.09,
+   2283.33,
+   7.3178
+  ],
+  "src": "enex:SFHSM2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2636.13,
+  "y": 2351.92,
+  "z": 7.59756,
+  "door": [
+   -2636.13,
+   2351.92,
+   7.59756
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2591.41,
+  "y": -158.542,
+  "z": 3.36046,
+  "door": [
+   -2591.41,
+   -158.542,
+   3.36046
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2558.79,
+  "y": -79.623,
+  "z": 10.0789,
+  "door": [
+   -2558.79,
+   -79.623,
+   10.0789
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2514.04,
+  "y": -170.797,
+  "z": 24.2706,
+  "door": [
+   -2514.04,
+   -170.797,
+   24.2706
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2447.62,
+  "y": 820.771,
+  "z": 34.256,
+  "door": [
+   -2447.62,
+   820.771,
+   34.256
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2401.48,
+  "y": 930.783,
+  "z": 44.4973,
+  "door": [
+   -2401.48,
+   930.783,
+   44.4973
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2381.23,
+  "y": 1281.01,
+  "z": 22.1852,
+  "door": [
+   -2381.23,
+   1281.01,
+   22.1852
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2338.61,
+  "y": 579.323,
+  "z": 27.0123,
+  "door": [
+   -2338.61,
+   579.323,
+   27.0123
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2321.97,
+  "y": 819.509,
+  "z": 44.3052,
+  "door": [
+   -2321.97,
+   819.509,
+   44.3052
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2280.55,
+  "y": 916.429,
+  "z": 65.6849,
+  "door": [
+   -2280.55,
+   916.429,
+   65.6849
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2279.5,
+  "y": 1148.84,
+  "z": 61.0751,
+  "door": [
+   -2279.5,
+   1148.84,
+   61.0751
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2239.22,
+  "y": 962.248,
+  "z": 65.6541,
+  "door": [
+   -2239.22,
+   962.248,
+   65.6541
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2234.16,
+  "y": 830.667,
+  "z": 53.5143,
+  "door": [
+   -2234.16,
+   830.667,
+   53.5143
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2205.27,
+  "y": 743.061,
+  "z": 49.4742,
+  "door": [
+   -2205.27,
+   743.061,
+   49.4742
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2159.69,
+  "y": 1048.74,
+  "z": 79.03,
+  "door": [
+   -2159.69,
+   1048.74,
+   79.03
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2157.2,
+  "y": 889.192,
+  "z": 79.0246,
+  "door": [
+   -2157.2,
+   889.192,
+   79.0246
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2112.58,
+  "y": 745.657,
+  "z": 68.582,
+  "door": [
+   -2112.58,
+   745.657,
+   68.582
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -2084.21,
+  "y": 1160.33,
+  "z": 49.2421,
+  "door": [
+   -2084.21,
+   1160.33,
+   49.2421
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -1913.32,
+  "y": 1252.89,
+  "z": 18.5367,
+  "door": [
+   -1913.32,
+   1252.89,
+   18.5367
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -1820.62,
+  "y": 1116.27,
+  "z": 45.5432,
+  "door": [
+   -1820.62,
+   1116.27,
+   45.5432
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS1)",
+  "x": -1742.78,
+  "y": 1174.34,
+  "z": 24.1582,
+  "door": [
+   -1742.78,
+   1174.34,
+   24.1582
+  ],
+  "src": "enex:SFHSS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS2)",
+  "x": -2626.29,
+  "y": 2359.75,
+  "z": 8.00576,
+  "door": [
+   -2626.29,
+   2359.75,
+   8.00576
+  ],
+  "src": "enex:SFHSS2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS2)",
+  "x": -2591.41,
+  "y": -95.538,
+  "z": 3.44458,
+  "door": [
+   -2591.41,
+   -95.538,
+   3.44458
+  ],
+  "src": "enex:SFHSS2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS2)",
+  "x": -2541.61,
+  "y": -145.321,
+  "z": 14.7826,
+  "door": [
+   -2541.61,
+   -145.321,
+   14.7826
+  ],
+  "src": "enex:SFHSS2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS2)",
+  "x": -2449.72,
+  "y": 921.163,
+  "z": 57.2093,
+  "door": [
+   -2449.72,
+   921.163,
+   57.2093
+  ],
+  "src": "enex:SFHSS2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SFHSS2)",
+  "x": -2372.92,
+  "y": 692.687,
+  "z": 34.138,
+  "door": [
+   -2372.92,
+   692.687,
+   34.138
+  ],
+  "src": "enex:SFHSS2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SKYLAN2)",
+  "x": 1548.64,
+  "y": -1364.02,
+  "z": 325.289,
+  "door": [
+   1548.64,
+   -1364.02,
+   325.289
+  ],
+  "src": "enex:SKYLAN2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (SKYLAN2)",
+  "x": 1571.24,
+  "y": -1336.67,
+  "z": 15.7288,
+  "door": [
+   1571.24,
+   -1336.67,
+   15.7288
+  ],
+  "src": "enex:SKYLAN2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (TATTO2)",
+  "x": -2491.98,
+  "y": -38.9587,
+  "z": 24.817,
+  "door": [
+   -2491.98,
+   -38.9587,
+   24.817
+  ],
+  "src": "enex:TATTO2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (TATTO3)",
+  "x": 2094.7,
+  "y": 2122.13,
+  "z": 9.82222,
+  "door": [
+   2094.7,
+   2122.13,
+   9.82222
+  ],
+  "src": "enex:TATTO3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (TRICAS)",
+  "x": 2019.49,
+  "y": 1007.11,
+  "z": 9.82133,
+  "door": [
+   2019.49,
+   1007.11,
+   9.82133
+  ],
+  "src": "enex:TRICAS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (TSDINER)",
+  "x": 681.475,
+  "y": -449.151,
+  "z": -26.6168,
+  "door": [
+   681.475,
+   -449.151,
+   -26.6168
+  ],
+  "src": "enex:TSDINER",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (TSDINER)",
+  "x": 681.579,
+  "y": -473.419,
+  "z": 15.592,
+  "door": [
+   681.579,
+   -473.419,
+   15.592
+  ],
+  "src": "enex:TSDINER",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (UFOBAR)",
+  "x": -229.028,
+  "y": 1401.23,
+  "z": 26.7698,
+  "door": [
+   -229.028,
+   1401.23,
+   26.7698
+  ],
+  "src": "enex:UFOBAR",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic door (UFOBAR)",
+  "x": -88.5875,
+  "y": 1378.36,
+  "z": 9.56984,
+  "door": [
+   -88.5875,
+   1378.36,
+   9.56984
+  ],
+  "src": "enex:UFOBAR",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "GENERIC",
+  "name": "Generic garage (lasbomb)",
+  "x": 1850.505,
+  "y": -1858.8,
+  "z": 12.3645,
+  "door": [
+   1850.505,
+   -1858.8,
+   12.3645
+  ],
+  "src": "grge:lasbomb",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Angel Pine clinic",
+  "x": -2163.0,
+  "y": -2427.0,
+  "z": 36.0,
+  "door": null,
+  "src": "documented",
+  "tag": "DOC",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Crippen Memorial clinic (Montgomery)",
+  "x": 1250.0,
+  "y": 300.0,
+  "z": 25.0,
+  "door": null,
+  "src": "documented",
+  "tag": "DOC",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "El Quebrados clinic",
+  "x": -1517.0,
+  "y": 2528.0,
+  "z": 46.0,
+  "door": null,
+  "src": "documented",
+  "tag": "DOC",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Hospital (hospital01_lvs)",
+  "x": 1607.390625,
+  "y": 1774.898438,
+  "z": 23.0625,
+  "door": null,
+  "src": "inst:hospital01_lvs",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Hospital (hospital_law)",
+  "x": 1134.25,
+  "y": -1338.078125,
+  "z": 23.15625,
+  "door": null,
+  "src": "inst:hospital_law",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Hospital (laehospital1)",
+  "x": 2050.0703125,
+  "y": -1401.2109375,
+  "z": 33.6796875,
+  "door": null,
+  "src": "inst:laehospital1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Hospital (laehospitalTr)",
+  "x": 2026.1171875,
+  "y": -1404.640625,
+  "z": 46.0,
+  "door": null,
+  "src": "inst:laehospitalTr",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "HOSPITAL",
+  "name": "Santa Flora Hospital (SF)",
+  "x": -2658.0,
+  "y": 631.0,
+  "z": 65.0,
+  "door": null,
+  "src": "documented",
+  "tag": "DOC",
+  "refuge": true
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police door (POLICE1)",
+  "x": 627.642,
+  "y": -571.789,
+  "z": 16.907,
+  "door": [
+   627.642,
+   -571.789,
+   16.907
+  ],
+  "src": "enex:POLICE1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police door (POLICE1)",
+  "x": 1554.95,
+  "y": -1674.99,
+  "z": 15.3283,
+  "door": [
+   1554.95,
+   -1674.99,
+   15.3283
+  ],
+  "src": "enex:POLICE1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police door (POLICE3)",
+  "x": 2337.1,
+  "y": 2459.05,
+  "z": 14.0417,
+  "door": [
+   2337.1,
+   2459.05,
+   14.0417
+  ],
+  "src": "enex:POLICE3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police door (POLICE4)",
+  "x": 2286.96,
+  "y": 2432.21,
+  "z": 9.9369,
+  "door": [
+   2286.96,
+   2432.21,
+   9.9369
+  ],
+  "src": "enex:POLICE4",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police garage (imp_la)",
+  "x": 1540.42,
+  "y": -1653.23,
+  "z": 4.72837,
+  "door": [
+   1540.42,
+   -1653.23,
+   4.72837
+  ],
+  "src": "grge:imp_la",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police garage (imp_lv)",
+  "x": 2226.265,
+  "y": 2448.06,
+  "z": -8.43807,
+  "door": [
+   2226.265,
+   2448.06,
+   -8.43807
+  ],
+  "src": "grge:imp_lv",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police garage (imp_sf)",
+  "x": -1635.35,
+  "y": 647.502,
+  "z": -6.04924,
+  "door": [
+   -1635.35,
+   647.502,
+   -6.04924
+  ],
+  "src": "grge:imp_sf",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (PoliceSt01_LAn)",
+  "x": 1578.46875,
+  "y": -1676.421875,
+  "z": 13.0703125,
+  "door": null,
+  "src": "inst:PoliceSt01_LAn",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (PoliceSt02_LAn)",
+  "x": 1571.6015625,
+  "y": -1675.75,
+  "z": 35.6796875,
+  "door": null,
+  "src": "inst:PoliceSt02_LAn",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (copshop_sfe)",
+  "x": -1636.304688,
+  "y": 682.765625,
+  "z": 27.453125,
+  "door": null,
+  "src": "inst:copshop_sfe",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (veropolice_LAW2)",
+  "x": 528.265625,
+  "y": -1812.984375,
+  "z": 7.6875,
+  "door": null,
+  "src": "inst:veropolice_LAW2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (vgnpolicebuild1)",
+  "x": 2251.25,
+  "y": 2490.9140625,
+  "z": 11.8984375,
+  "door": null,
+  "src": "inst:vgnpolicebuild1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (vgnpolicecpark)",
+  "x": 2343.6953125,
+  "y": 2432.0859375,
+  "z": 11.390625,
+  "door": null,
+  "src": "inst:vgnpolicecpark",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "POLICE",
+  "name": "Police station (vgnpolicecpark3)",
+  "x": 2265.6953125,
+  "y": 2466.7890625,
+  "z": 11.5390625,
+  "door": null,
+  "src": "inst:vgnpolicecpark3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN1)",
+  "x": -2625.85,
+  "y": 208.345,
+  "z": 3.98935,
+  "door": [
+   -2625.85,
+   208.345,
+   3.98935
+  ],
+  "src": "enex:AMMUN1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN1)",
+  "x": 1368.35,
+  "y": -1279.06,
+  "z": 12.55,
+  "door": [
+   1368.35,
+   -1279.06,
+   12.55
+  ],
+  "src": "enex:AMMUN1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN2)",
+  "x": 242.668,
+  "y": -178.478,
+  "z": 0.621441,
+  "door": [
+   242.668,
+   -178.478,
+   0.621441
+  ],
+  "src": "enex:AMMUN2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN2)",
+  "x": 2159.51,
+  "y": 943.329,
+  "z": 9.82339,
+  "door": [
+   2159.51,
+   943.329,
+   9.82339
+  ],
+  "src": "enex:AMMUN2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN2)",
+  "x": 2333.43,
+  "y": 61.5173,
+  "z": 25.7342,
+  "door": [
+   2333.43,
+   61.5173,
+   25.7342
+  ],
+  "src": "enex:AMMUN2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN2)",
+  "x": 2539.04,
+  "y": 2083.56,
+  "z": 9.82222,
+  "door": [
+   2539.04,
+   2083.56,
+   9.82222
+  ],
+  "src": "enex:AMMUN2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN3)",
+  "x": -2093.51,
+  "y": -2464.79,
+  "z": 29.6404,
+  "door": [
+   -2093.51,
+   -2464.79,
+   29.6404
+  ],
+  "src": "enex:AMMUN3",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN3)",
+  "x": -315.676,
+  "y": 829.868,
+  "z": 13.4266,
+  "door": [
+   -315.676,
+   829.868,
+   13.4266
+  ],
+  "src": "enex:AMMUN3",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN3)",
+  "x": 777.231,
+  "y": 1871.47,
+  "z": 3.97687,
+  "door": [
+   777.231,
+   1871.47,
+   3.97687
+  ],
+  "src": "enex:AMMUN3",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN3)",
+  "x": 2400.5,
+  "y": -1981.48,
+  "z": 12.5604,
+  "door": [
+   2400.5,
+   -1981.48,
+   12.5604
+  ],
+  "src": "enex:AMMUN3",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu door (AMMUN5)",
+  "x": -1508.89,
+  "y": 2610.8,
+  "z": 54.8902,
+  "door": [
+   -1508.89,
+   2610.8,
+   54.8902
+  ],
+  "src": "enex:AMMUN5",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "AMMU",
+  "name": "Ammu-Nation (count_ammundoor)",
+  "x": -2113.0390625,
+  "y": -2460.6171875,
+  "z": 30.9140625,
+  "door": null,
+  "src": "inst:count_ammundoor",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Pay'n'Spray (spray01_LAwN)",
+  "x": 1005.25,
+  "y": -1011.2109375,
+  "z": 36.375,
+  "door": null,
+  "src": "inst:spray01_LAwN",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Pay'n'Spray (vgsEspray01)",
+  "x": 2393.765625,
+  "y": 1490.546875,
+  "z": 13.0,
+  "door": null,
+  "src": "inst:vgsEspray01",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (CEspray)",
+  "x": 720.0495000000001,
+  "y": -462.403,
+  "z": 14.9635,
+  "door": [
+   720.0495000000001,
+   -462.403,
+   14.9635
+  ],
+  "src": "grge:CEspray",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (CN2spry)",
+  "x": -99.99865,
+  "y": 1112.42,
+  "z": 18.7017,
+  "door": [
+   -99.99865,
+   1112.42,
+   18.7017
+  ],
+  "src": "grge:CN2spry",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (CNspray)",
+  "x": -1420.48,
+  "y": 2576.61,
+  "z": 54.8156,
+  "door": [
+   -1420.48,
+   2576.61,
+   54.8156
+  ],
+  "src": "grge:CNspray",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (blob1)",
+  "x": 1975.775,
+  "y": 2157.88,
+  "z": 9.59696,
+  "door": [
+   1975.775,
+   2157.88,
+   9.59696
+  ],
+  "src": "grge:blob1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (spLAw2)",
+  "x": 491.90999999999997,
+  "y": -1741.6599999999999,
+  "z": 9.45516,
+  "door": [
+   491.90999999999997,
+   -1741.6599999999999,
+   9.45516
+  ],
+  "src": "grge:spLAw2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (sprLAe)",
+  "x": 1021.81,
+  "y": -1024.12,
+  "z": 30.9081,
+  "door": [
+   1021.81,
+   -1024.12,
+   30.9081
+  ],
+  "src": "grge:sprLAe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (sprLAe)",
+  "x": 2063.95,
+  "y": -1835.9,
+  "z": 12.5443,
+  "door": [
+   2063.95,
+   -1835.9,
+   12.5443
+  ],
+  "src": "grge:sprLAe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (sprsfse)",
+  "x": -1908.93,
+  "y": 285.171,
+  "z": 40.0413,
+  "door": [
+   -1908.93,
+   285.171,
+   40.0413
+  ],
+  "src": "grge:sprsfse",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "PAYNSPRAY",
+  "name": "Paynspray garage (sprsfw)",
+  "x": -2425.665,
+  "y": 1013.71,
+  "z": 49.3413,
+  "door": [
+   -2425.665,
+   1013.71,
+   49.3413
+  ],
+  "src": "grge:sprsfw",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (bodLAwN)",
+  "x": 1053.295,
+  "y": -1025.67,
+  "z": 31.1027,
+  "door": [
+   1053.295,
+   -1025.67,
+   31.1027
+  ],
+  "src": "grge:bodLAwN",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (mds1SFS)",
+  "x": -2722.445,
+  "y": 212.295,
+  "z": 3.45112,
+  "door": [
+   -2722.445,
+   212.295,
+   3.45112
+  ],
+  "src": "grge:mds1SFS",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (mdsSFSe)",
+  "x": -1941.04,
+  "y": 245.6275,
+  "z": 33.4274,
+  "door": [
+   -1941.04,
+   245.6275,
+   33.4274
+  ],
+  "src": "grge:mdsSFSe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (modgLAS)",
+  "x": 1809.46,
+  "y": -2146.71,
+  "z": 12.4283,
+  "door": [
+   1809.46,
+   -2146.71,
+   12.4283
+  ],
+  "src": "grge:modgLAS",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (modlast)",
+  "x": 2644.87,
+  "y": -2049.99,
+  "z": 12.543,
+  "door": [
+   2644.87,
+   -2049.99,
+   12.543
+  ],
+  "src": "grge:modlast",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "MODSHOP",
+  "name": "Modshop garage (vEcmod)",
+  "x": 2386.71,
+  "y": 1044.0,
+  "z": 9.8337,
+  "door": [
+   2386.71,
+   1044.0,
+   9.8337
+  ],
+  "src": "grge:vEcmod",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (CARLS)",
+  "x": 2495.33,
+  "y": -1690.75,
+  "z": 13.7847,
+  "door": [
+   2495.33,
+   -1690.75,
+   13.7847
+  ],
+  "src": "enex:CARLS",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": -2075.91,
+  "y": -2312.55,
+  "z": 30.1313,
+  "door": [
+   -2075.91,
+   -2312.55,
+   30.1313
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": -1533.1,
+  "y": 2656.65,
+  "z": 55.275,
+  "door": [
+   -1533.1,
+   2656.65,
+   55.275
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": -1438.72,
+  "y": -1544.58,
+  "z": 100.713,
+  "door": [
+   -1438.72,
+   -1544.58,
+   100.713
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": -1051.47,
+  "y": 1549.76,
+  "z": 32.496,
+  "door": [
+   -1051.47,
+   1549.76,
+   32.496
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": -369.456,
+  "y": 1169.14,
+  "z": 19.3978,
+  "door": [
+   -369.456,
+   1169.14,
+   19.3978
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": 206.802,
+  "y": -112.542,
+  "z": 3.98153,
+  "door": [
+   206.802,
+   -112.542,
+   3.98153
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": 794.884,
+  "y": -506.702,
+  "z": 17.1238,
+  "door": [
+   794.884,
+   -506.702,
+   17.1238
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVCUNT)",
+  "x": 2236.53,
+  "y": 167.997,
+  "z": 27.196,
+  "door": [
+   2236.53,
+   167.997,
+   27.196
+  ],
+  "src": "enex:SVCUNT",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVHOT1)",
+  "x": -2425.94,
+  "y": 337.87,
+  "z": 35.997,
+  "door": [
+   -2425.94,
+   337.87,
+   35.997
+  ],
+  "src": "enex:SVHOT1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 315.684,
+  "y": -1769.81,
+  "z": 3.62877,
+  "door": [
+   315.684,
+   -1769.81,
+   3.62877
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 893.617,
+  "y": -1636.3,
+  "z": 13.9872,
+  "door": [
+   893.617,
+   -1636.3,
+   13.9872
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 929.122,
+  "y": 2006.43,
+  "z": 10.4781,
+  "door": [
+   929.122,
+   2006.43,
+   10.4781
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 1408.05,
+  "y": 1897.08,
+  "z": 10.5873,
+  "door": [
+   1408.05,
+   1897.08,
+   10.5873
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 1684.74,
+  "y": -2099.0,
+  "z": 12.8507,
+  "door": [
+   1684.74,
+   -2099.0,
+   12.8507
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLAMD)",
+  "x": 2449.17,
+  "y": 689.839,
+  "z": 10.471,
+  "door": [
+   2449.17,
+   689.839,
+   10.471
+  ],
+  "src": "enex:SVLAMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLASM)",
+  "x": 2111.23,
+  "y": -1279.71,
+  "z": 24.9546,
+  "door": [
+   2111.23,
+   -1279.71,
+   24.9546
+  ],
+  "src": "enex:SVLASM",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVLASM)",
+  "x": 2483.38,
+  "y": -1996.19,
+  "z": 12.8507,
+  "door": [
+   2483.38,
+   -1996.19,
+   12.8507
+  ],
+  "src": "enex:SVLASM",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFBG)",
+  "x": -2099.68,
+  "y": 897.485,
+  "z": 75.9661,
+  "door": [
+   -2099.68,
+   897.485,
+   75.9661
+  ],
+  "src": "enex:SVSFBG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFBG)",
+  "x": -2027.73,
+  "y": -40.5488,
+  "z": 37.8263,
+  "door": [
+   -2027.73,
+   -40.5488,
+   37.8263
+  ],
+  "src": "enex:SVSFBG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFBG)",
+  "x": 1331.94,
+  "y": -633.096,
+  "z": 108.245,
+  "door": [
+   1331.94,
+   -633.096,
+   108.245
+  ],
+  "src": "enex:SVSFBG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFMD)",
+  "x": -2454.44,
+  "y": -135.879,
+  "z": 25.2223,
+  "door": [
+   -2454.44,
+   -135.879,
+   25.2223
+  ],
+  "src": "enex:SVSFMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFSM)",
+  "x": -2700.32,
+  "y": 820.308,
+  "z": 48.999,
+  "door": [
+   -2700.32,
+   820.308,
+   48.999
+  ],
+  "src": "enex:SVSFSM",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFSM)",
+  "x": -2213.54,
+  "y": 720.845,
+  "z": 48.4262,
+  "door": [
+   -2213.54,
+   720.845,
+   48.4262
+  ],
+  "src": "enex:SVSFSM",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVSFSM)",
+  "x": 2818.75,
+  "y": 2140.56,
+  "z": 13.7132,
+  "door": [
+   2818.75,
+   2140.56,
+   13.7132
+  ],
+  "src": "enex:SVSFSM",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVVGHO1)",
+  "x": 2226.03,
+  "y": 1837.92,
+  "z": 9.964,
+  "door": [
+   2226.03,
+   1837.92,
+   9.964
+  ],
+  "src": "enex:SVVGHO1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVVGHO1)",
+  "x": 2238.99,
+  "y": 1285.05,
+  "z": 9.82528,
+  "door": [
+   2238.99,
+   1285.05,
+   9.82528
+  ],
+  "src": "enex:SVVGHO1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVVGHO2)",
+  "x": 1965.11,
+  "y": 1622.54,
+  "z": 11.879,
+  "door": [
+   1965.11,
+   1622.54,
+   11.879
+  ],
+  "src": "enex:SVVGHO2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVVGHO2)",
+  "x": 2374.55,
+  "y": 2167.88,
+  "z": 9.8472,
+  "door": [
+   2374.55,
+   2167.88,
+   9.8472
+  ],
+  "src": "enex:SVVGHO2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse door (SVVGMD)",
+  "x": 1274.28,
+  "y": 2522.47,
+  "z": 9.99299,
+  "door": [
+   1274.28,
+   2522.47,
+   9.99299
+  ],
+  "src": "enex:SVVGMD",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (CEsafe1)",
+  "x": 1355.8,
+  "y": -635.5375,
+  "z": 108.135,
+  "door": [
+   1355.8,
+   -635.5375,
+   108.135
+  ],
+  "src": "grge:CEsafe1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (beacsv)",
+  "x": 322.4755,
+  "y": -1768.93,
+  "z": 3.35686,
+  "door": [
+   322.4755,
+   -1768.93,
+   3.35686
+  ],
+  "src": "grge:beacsv",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (cjsafe)",
+  "x": 2505.46,
+  "y": -1699.36,
+  "z": 12.4323,
+  "door": [
+   2505.46,
+   -1699.36,
+   12.4323
+  ],
+  "src": "grge:cjsafe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (hbgdSFS)",
+  "x": -2048.13,
+  "y": 150.803,
+  "z": 27.8286,
+  "door": [
+   -2048.13,
+   150.803,
+   27.8286
+  ],
+  "src": "grge:hbgdSFS",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (sav1sfe)",
+  "x": -2105.1400000000003,
+  "y": 886.553,
+  "z": 75.566,
+  "door": [
+   -2105.1400000000003,
+   886.553,
+   75.566
+  ],
+  "src": "grge:sav1sfe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (sav1sfw)",
+  "x": -2696.01,
+  "y": 821.489,
+  "z": 49.0042,
+  "door": [
+   -2696.01,
+   821.489,
+   49.0042
+  ],
+  "src": "grge:sav1sfw",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "SAFEHOUSE",
+  "name": "Safehouse garage (svgsfs1)",
+  "x": -2448.2,
+  "y": -131.556,
+  "z": 25.0886,
+  "door": [
+   -2448.2,
+   -131.556,
+   25.0886
+  ],
+  "src": "grge:svgsfs1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER1)",
+  "x": -1941.72,
+  "y": 2379.54,
+  "z": 48.7008,
+  "door": [
+   -1941.72,
+   2379.54,
+   48.7008
+  ],
+  "src": "enex:DINER1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER1)",
+  "x": 386.918,
+  "y": -1817.79,
+  "z": 6.90008,
+  "door": [
+   386.918,
+   -1817.79,
+   6.90008
+  ],
+  "src": "enex:DINER1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER1)",
+  "x": 1376.89,
+  "y": 2327.79,
+  "z": 9.82222,
+  "door": [
+   1376.89,
+   2327.79,
+   9.82222
+  ],
+  "src": "enex:DINER1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": -2524.11,
+  "y": 1216.16,
+  "z": 36.4496,
+  "door": [
+   -2524.11,
+   1216.16,
+   36.4496
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": -1700.01,
+  "y": 1380.49,
+  "z": 6.20434,
+  "door": [
+   -1700.01,
+   1380.49,
+   6.20434
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": -206.0,
+  "y": 1062.21,
+  "z": 18.8298,
+  "door": [
+   -206.0,
+   1062.21,
+   18.8298
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": -53.87,
+  "y": 1189.17,
+  "z": 18.4108,
+  "door": [
+   -53.87,
+   1189.17,
+   18.4108
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": 291.974,
+  "y": -195.463,
+  "z": 0.852,
+  "door": [
+   291.974,
+   -195.463,
+   0.852
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": 2368.06,
+  "y": 1983.19,
+  "z": 10.003,
+  "door": [
+   2368.06,
+   1983.19,
+   10.003
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (DINER2)",
+  "x": 2863.23,
+  "y": -1439.44,
+  "z": 10.0083,
+  "door": [
+   2863.23,
+   -1439.44,
+   10.0083
+  ],
+  "src": "enex:DINER2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": -2356.48,
+  "y": 1008.01,
+  "z": 49.9036,
+  "door": [
+   -2356.48,
+   1008.01,
+   49.9036
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": -2336.95,
+  "y": -166.646,
+  "z": 34.3573,
+  "door": [
+   -2336.95,
+   -166.646,
+   34.3573
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": -1912.27,
+  "y": 828.025,
+  "z": 34.5615,
+  "door": [
+   -1912.27,
+   828.025,
+   34.5615
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 811.982,
+  "y": -1616.02,
+  "z": 12.618,
+  "door": [
+   811.982,
+   -1616.02,
+   12.618
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 1158.43,
+  "y": 2072.02,
+  "z": 9.82222,
+  "door": [
+   1158.43,
+   2072.02,
+   9.82222
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 1199.13,
+  "y": -918.071,
+  "z": 42.3243,
+  "door": [
+   1199.13,
+   -918.071,
+   42.3243
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 1872.24,
+  "y": 2072.07,
+  "z": 9.82222,
+  "door": [
+   1872.24,
+   2072.07,
+   9.82222
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 2169.86,
+  "y": 2795.79,
+  "z": 9.89528,
+  "door": [
+   2169.86,
+   2795.79,
+   9.89528
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 2366.74,
+  "y": 2071.02,
+  "z": 9.8218,
+  "door": [
+   2366.74,
+   2071.02,
+   9.8218
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDBURG)",
+  "x": 2472.68,
+  "y": 2033.88,
+  "z": 9.822,
+  "door": [
+   2472.68,
+   2033.88,
+   9.822
+  ],
+  "src": "enex:FDBURG",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": -2671.53,
+  "y": 258.344,
+  "z": 3.64932,
+  "door": [
+   -2671.53,
+   258.344,
+   3.64932
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": -2155.03,
+  "y": -2460.28,
+  "z": 29.8484,
+  "door": [
+   -2155.03,
+   -2460.28,
+   29.8484
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": -1815.84,
+  "y": 618.678,
+  "z": 34.2989,
+  "door": [
+   -1815.84,
+   618.678,
+   34.2989
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": -1213.71,
+  "y": 1830.46,
+  "z": 40.9335,
+  "door": [
+   -1213.71,
+   1830.46,
+   40.9335
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 172.727,
+  "y": 1176.68,
+  "z": 13.773,
+  "door": [
+   172.727,
+   1176.68,
+   13.773
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 928.525,
+  "y": -1352.77,
+  "z": 12.4344,
+  "door": [
+   928.525,
+   -1352.77,
+   12.4344
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2102.69,
+  "y": 2228.76,
+  "z": 10.0579,
+  "door": [
+   2102.69,
+   2228.76,
+   10.0579
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2393.18,
+  "y": 2041.66,
+  "z": 9.8472,
+  "door": [
+   2393.18,
+   2041.66,
+   9.8472
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2397.83,
+  "y": -1898.65,
+  "z": 12.7131,
+  "door": [
+   2397.83,
+   -1898.65,
+   12.7131
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2419.95,
+  "y": -1509.8,
+  "z": 23.1568,
+  "door": [
+   2419.95,
+   -1509.8,
+   23.1568
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2638.58,
+  "y": 1671.18,
+  "z": 10.0231,
+  "door": [
+   2638.58,
+   1671.18,
+   10.0231
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDCHICK)",
+  "x": 2838.43,
+  "y": 2407.26,
+  "z": 10.061,
+  "door": [
+   2838.43,
+   2407.26,
+   10.061
+  ],
+  "src": "enex:FDCHICK",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": -1808.69,
+  "y": 945.863,
+  "z": 23.8648,
+  "door": [
+   -1808.69,
+   945.863,
+   23.8648
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": -1721.13,
+  "y": 1359.01,
+  "z": 6.19634,
+  "door": [
+   -1721.13,
+   1359.01,
+   6.19634
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 203.334,
+  "y": -202.532,
+  "z": 0.600709,
+  "door": [
+   203.334,
+   -202.532,
+   0.600709
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 1367.27,
+  "y": 248.388,
+  "z": 18.6229,
+  "door": [
+   1367.27,
+   248.388,
+   18.6229
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 1367.27,
+  "y": 248.388,
+  "z": 18.6229,
+  "door": [
+   1367.27,
+   248.388,
+   18.6229
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2083.49,
+  "y": 2224.2,
+  "z": 10.0579,
+  "door": [
+   2083.49,
+   2224.2,
+   10.0579
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2105.32,
+  "y": -1806.49,
+  "z": 12.6941,
+  "door": [
+   2105.32,
+   -1806.49,
+   12.6941
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2333.43,
+  "y": 75.0488,
+  "z": 25.7342,
+  "door": [
+   2333.43,
+   75.0488,
+   25.7342
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2333.43,
+  "y": 75.0488,
+  "z": 25.7342,
+  "door": [
+   2333.43,
+   75.0488,
+   25.7342
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2351.89,
+  "y": 2532.19,
+  "z": 9.82217,
+  "door": [
+   2351.89,
+   2532.19,
+   9.82217
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2638.58,
+  "y": 1849.97,
+  "z": 10.0231,
+  "door": [
+   2638.58,
+   1849.97,
+   10.0231
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDPIZA)",
+  "x": 2756.01,
+  "y": 2477.05,
+  "z": 10.061,
+  "door": [
+   2756.01,
+   2477.05,
+   10.061
+  ],
+  "src": "enex:FDPIZA",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDREST1)",
+  "x": -2463.06,
+  "y": 132.287,
+  "z": 34.198,
+  "door": [
+   -2463.06,
+   132.287,
+   34.198
+  ],
+  "src": "enex:FDREST1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDREST1)",
+  "x": 419.191,
+  "y": -1428.71,
+  "z": 31.8959,
+  "door": [
+   419.191,
+   -1428.71,
+   31.8959
+  ],
+  "src": "enex:FDREST1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDREST1)",
+  "x": 1693.19,
+  "y": 2209.13,
+  "z": 10.0212,
+  "door": [
+   1693.19,
+   2209.13,
+   10.0212
+  ],
+  "src": "enex:FDREST1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (FDREST1)",
+  "x": 2489.87,
+  "y": 2065.15,
+  "z": 9.8472,
+  "door": [
+   2489.87,
+   2065.15,
+   9.8472
+  ],
+  "src": "enex:FDREST1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (REST2)",
+  "x": -1887.43,
+  "y": 749.592,
+  "z": 44.4658,
+  "door": [
+   -1887.43,
+   749.592,
+   44.4658
+  ],
+  "src": "enex:REST2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "FOOD",
+  "name": "Food door (REST2)",
+  "x": -857.938,
+  "y": 1535.56,
+  "z": 21.6348,
+  "door": [
+   -857.938,
+   1535.56,
+   21.6348
+  ],
+  "src": "enex:REST2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "GYM",
+  "name": "Gym (gymblok2_lae2)",
+  "x": 2682.6953125,
+  "y": -1115.515625,
+  "z": 70.75,
+  "door": null,
+  "src": "inst:gymblok2_lae2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "GYM",
+  "name": "Gym (scumgym1_LAe)",
+  "x": 2260.0,
+  "y": -1707.734375,
+  "z": 17.171875,
+  "door": null,
+  "src": "inst:scumgym1_LAe",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "GYM",
+  "name": "Gym door (GYM1)",
+  "x": 2229.63,
+  "y": -1721.63,
+  "z": 12.6529,
+  "door": [
+   2229.63,
+   -1721.63,
+   12.6529
+  ],
+  "src": "enex:GYM1",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "GYM",
+  "name": "Gym door (GYM2)",
+  "x": -2270.46,
+  "y": -155.957,
+  "z": 34.3573,
+  "door": [
+   -2270.46,
+   -155.957,
+   34.3573
+  ],
+  "src": "enex:GYM2",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "GYM",
+  "name": "Gym door (GYM3)",
+  "x": 1968.7,
+  "y": 2295.3,
+  "z": 15.4955,
+  "door": [
+   1968.7,
+   2295.3,
+   15.4955
+  ],
+  "src": "enex:GYM3",
+  "tag": "FILE",
+  "refuge": true
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER2)",
+  "x": -2571.18,
+  "y": 246.698,
+  "z": 9.64213,
+  "door": [
+   -2571.18,
+   246.698,
+   9.64213
+  ],
+  "src": "enex:BARBER2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER2)",
+  "x": -1449.87,
+  "y": 2591.85,
+  "z": 54.8378,
+  "door": [
+   -1449.87,
+   2591.85,
+   54.8378
+  ],
+  "src": "enex:BARBER2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER2)",
+  "x": 672.355,
+  "y": -496.834,
+  "z": 15.3751,
+  "door": [
+   672.355,
+   -496.834,
+   15.3751
+  ],
+  "src": "enex:BARBER2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER2)",
+  "x": 823.629,
+  "y": -1588.9,
+  "z": 12.5764,
+  "door": [
+   823.629,
+   -1588.9,
+   12.5764
+  ],
+  "src": "enex:BARBER2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER2)",
+  "x": 2080.36,
+  "y": 2122.13,
+  "z": 9.82222,
+  "door": [
+   2080.36,
+   2122.13,
+   9.82222
+  ],
+  "src": "enex:BARBER2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBER3)",
+  "x": 2723.76,
+  "y": -2026.72,
+  "z": 12.5753,
+  "door": [
+   2723.76,
+   -2026.72,
+   12.5753
+  ],
+  "src": "enex:BARBER3",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (BARBERS)",
+  "x": 2070.86,
+  "y": -1793.84,
+  "z": 12.661,
+  "door": [
+   2070.86,
+   -1793.84,
+   12.661
+  ],
+  "src": "enex:BARBERS",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CLOTHGP)",
+  "x": -1883.2,
+  "y": 865.473,
+  "z": 34.2601,
+  "door": [
+   -1883.2,
+   865.473,
+   34.2601
+  ],
+  "src": "enex:CLOTHGP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CLOTHGP)",
+  "x": 1456.77,
+  "y": -1138.02,
+  "z": 23.2872,
+  "door": [
+   1456.77,
+   -1138.02,
+   23.2872
+  ],
+  "src": "enex:CLOTHGP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CLOTHGP)",
+  "x": 2090.58,
+  "y": 2224.2,
+  "z": 10.0579,
+  "door": [
+   2090.58,
+   2224.2,
+   10.0579
+  ],
+  "src": "enex:CLOTHGP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CLOTHGP)",
+  "x": 2572.07,
+  "y": 1904.83,
+  "z": 10.0231,
+  "door": [
+   2572.07,
+   1904.83,
+   10.0231
+  ],
+  "src": "enex:CLOTHGP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSCHP)",
+  "x": -2375.32,
+  "y": 910.293,
+  "z": 44.4578,
+  "door": [
+   -2375.32,
+   910.293,
+   44.4578
+  ],
+  "src": "enex:CSCHP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSCHP)",
+  "x": 1657.01,
+  "y": 1733.33,
+  "z": 10.0209,
+  "door": [
+   1657.01,
+   1733.33,
+   10.0209
+  ],
+  "src": "enex:CSCHP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSCHP)",
+  "x": 2102.69,
+  "y": 2257.49,
+  "z": 10.0579,
+  "door": [
+   2102.69,
+   2257.49,
+   10.0579
+  ],
+  "src": "enex:CSCHP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSCHP)",
+  "x": 2244.47,
+  "y": -1665.36,
+  "z": 14.4839,
+  "door": [
+   2244.47,
+   -1665.36,
+   14.4839
+  ],
+  "src": "enex:CSCHP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSDESGN)",
+  "x": -1694.76,
+  "y": 951.599,
+  "z": 24.2706,
+  "door": [
+   -1694.76,
+   951.599,
+   24.2706
+  ],
+  "src": "enex:CSDESGN",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSDESGN)",
+  "x": 461.158,
+  "y": -1499.98,
+  "z": 30.1742,
+  "door": [
+   461.158,
+   -1499.98,
+   30.1742
+  ],
+  "src": "enex:CSDESGN",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSDESGN)",
+  "x": 2802.34,
+  "y": 2430.6,
+  "z": 10.061,
+  "door": [
+   2802.34,
+   2430.6,
+   10.061
+  ],
+  "src": "enex:CSDESGN",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSEXL)",
+  "x": 453.868,
+  "y": -1478.07,
+  "z": 29.9609,
+  "door": [
+   453.868,
+   -1478.07,
+   29.9609
+  ],
+  "src": "enex:CSEXL",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSSPRT)",
+  "x": 499.637,
+  "y": -1360.4,
+  "z": 15.4261,
+  "door": [
+   499.637,
+   -1360.4,
+   15.4261
+  ],
+  "src": "enex:CSSPRT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (CSSPRT)",
+  "x": 2825.74,
+  "y": 2407.44,
+  "z": 10.061,
+  "door": [
+   2825.74,
+   2407.44,
+   10.061
+  ],
+  "src": "enex:CSSPRT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (LACS1)",
+  "x": -2491.98,
+  "y": -29.1065,
+  "z": 24.817,
+  "door": [
+   -2491.98,
+   -29.1065,
+   24.817
+  ],
+  "src": "enex:LACS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (LACS1)",
+  "x": 2112.73,
+  "y": -1211.7,
+  "z": 22.9614,
+  "door": [
+   2112.73,
+   -1211.7,
+   22.9614
+  ],
+  "src": "enex:LACS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (LACS1)",
+  "x": 2779.12,
+  "y": 2453.54,
+  "z": 10.061,
+  "door": [
+   2779.12,
+   2453.54,
+   10.061
+  ],
+  "src": "enex:LACS1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (TATTOO)",
+  "x": 1975.79,
+  "y": -2036.65,
+  "z": 12.5753,
+  "door": [
+   1975.79,
+   -2036.65,
+   12.5753
+  ],
+  "src": "enex:TATTOO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CLOTHES",
+  "name": "Clothes door (TATTOO)",
+  "x": 2068.71,
+  "y": -1779.84,
+  "z": 12.5103,
+  "door": [
+   2068.71,
+   -1779.84,
+   12.5103
+  ],
+  "src": "enex:TATTOO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR1)",
+  "x": -2551.79,
+  "y": 193.778,
+  "z": 5.21905,
+  "door": [
+   -2551.79,
+   193.778,
+   5.21905
+  ],
+  "src": "enex:BAR1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR1)",
+  "x": 1836.9,
+  "y": -1681.75,
+  "z": 12.3635,
+  "door": [
+   1836.9,
+   -1681.75,
+   12.3635
+  ],
+  "src": "enex:BAR1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR1)",
+  "x": 2507.44,
+  "y": 1242.31,
+  "z": 9.83339,
+  "door": [
+   2507.44,
+   1242.31,
+   9.83339
+  ],
+  "src": "enex:BAR1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR2)",
+  "x": -2242.69,
+  "y": -88.2558,
+  "z": 34.3578,
+  "door": [
+   -2242.69,
+   -88.2558,
+   34.3578
+  ],
+  "src": "enex:BAR2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR2)",
+  "x": 2309.62,
+  "y": -1643.63,
+  "z": 13.8385,
+  "door": [
+   2309.62,
+   -1643.63,
+   13.8385
+  ],
+  "src": "enex:BAR2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "BAR",
+  "name": "Bar door (BAR2)",
+  "x": 2441.15,
+  "y": 2065.15,
+  "z": 9.8472,
+  "door": [
+   2441.15,
+   2065.15,
+   9.8472
+  ],
+  "src": "enex:BAR2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STRIP",
+  "name": "Strip door (LASTRIP)",
+  "x": 2421.52,
+  "y": -1220.65,
+  "z": 24.6085,
+  "door": [
+   2421.52,
+   -1220.65,
+   24.6085
+  ],
+  "src": "enex:LASTRIP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STRIP",
+  "name": "Strip door (LASTRIP)",
+  "x": 2506.74,
+  "y": 2120.39,
+  "z": 9.8472,
+  "door": [
+   2506.74,
+   2120.39,
+   9.8472
+  ],
+  "src": "enex:LASTRIP",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STRIP",
+  "name": "Strip door (STRIP2)",
+  "x": 693.632,
+  "y": 1966.4,
+  "z": 4.56038,
+  "door": [
+   693.632,
+   1966.4,
+   4.56038
+  ],
+  "src": "enex:STRIP2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STRIP",
+  "name": "Strip door (STRIP2)",
+  "x": 2543.15,
+  "y": 1025.16,
+  "z": 9.82133,
+  "door": [
+   2543.15,
+   1025.16,
+   9.82133
+  ],
+  "src": "enex:STRIP2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "MOTEL",
+  "name": "Motel door (MOTEL1)",
+  "x": 2232.87,
+  "y": -1159.71,
+  "z": 24.9416,
+  "door": [
+   2232.87,
+   -1159.71,
+   24.9416
+  ],
+  "src": "enex:MOTEL1",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X711S2)",
+  "x": 1000.33,
+  "y": -919.924,
+  "z": 41.2368,
+  "door": [
+   1000.33,
+   -919.924,
+   41.2368
+  ],
+  "src": "enex:X711S2",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11B)",
+  "x": 1315.49,
+  "y": -897.843,
+  "z": 38.571,
+  "door": [
+   1315.49,
+   -897.843,
+   38.571
+  ],
+  "src": "enex:X7_11B",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11B)",
+  "x": 1833.54,
+  "y": -1843.38,
+  "z": 12.5595,
+  "door": [
+   1833.54,
+   -1843.38,
+   12.5595
+  ],
+  "src": "enex:X7_11B",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11B)",
+  "x": 2546.71,
+  "y": 1972.28,
+  "z": 9.822,
+  "door": [
+   2546.71,
+   1972.28,
+   9.822
+  ],
+  "src": "enex:X7_11B",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11B)",
+  "x": 2884.83,
+  "y": 2453.28,
+  "z": 10.061,
+  "door": [
+   2884.83,
+   2453.28,
+   10.061
+  ],
+  "src": "enex:X7_11B",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": -1562.63,
+  "y": -2732.98,
+  "z": 47.7435,
+  "door": [
+   -1562.63,
+   -2732.98,
+   47.7435
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": -181.004,
+  "y": 1034.83,
+  "z": 18.8298,
+  "door": [
+   -181.004,
+   1034.83,
+   18.8298
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 1352.31,
+  "y": -1758.3,
+  "z": 12.5149,
+  "door": [
+   1352.31,
+   -1758.3,
+   12.5149
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 1937.25,
+  "y": 2307.17,
+  "z": 9.82222,
+  "door": [
+   1937.25,
+   2307.17,
+   9.82222
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 2097.76,
+  "y": 2224.2,
+  "z": 10.0579,
+  "door": [
+   2097.76,
+   2224.2,
+   10.0579
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 2194.38,
+  "y": 1991.02,
+  "z": 11.301,
+  "door": [
+   2194.38,
+   1991.02,
+   11.301
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 2247.66,
+  "y": 2396.26,
+  "z": 9.8218,
+  "door": [
+   2247.66,
+   2396.26,
+   9.8218
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SHOP247",
+  "name": "Shop247 door (X7_11S)",
+  "x": 2452.47,
+  "y": 2065.15,
+  "z": 9.8472,
+  "door": [
+   2452.47,
+   2065.15,
+   9.8472
+  ],
+  "src": "enex:X7_11S",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CASINO",
+  "name": "Casino (The Strip)",
+  "x": 2074.351563,
+  "y": 1736.554688,
+  "z": 19.5390625,
+  "door": null,
+  "src": "inst-cluster:CASINO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CASINO",
+  "name": "Casino (The Strip)",
+  "x": 2242.2734378333334,
+  "y": 2167.059895916667,
+  "z": 23.578125,
+  "door": null,
+  "src": "inst-cluster:CASINO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CASINO",
+  "name": "Casino (The Strip)",
+  "x": 2247.234375,
+  "y": 2080.242188,
+  "z": 54.59375,
+  "door": null,
+  "src": "inst-cluster:CASINO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "CASINO",
+  "name": "Casino (The Strip)",
+  "x": 2448.6223958333335,
+  "y": 2119.4140625,
+  "z": 13.015625,
+  "door": null,
+  "src": "inst-cluster:CASINO",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": -1735.2265625,
+  "y": -580.984375,
+  "z": 32.7265625,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": -1666.673828375,
+  "y": 64.94921875,
+  "z": -5.8203125,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": -1487.6517858571428,
+  "y": -352.45535714285717,
+  "z": 11.1328125,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": -1408.359375,
+  "y": -433.6796875,
+  "z": 9.25,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": -1363.429688,
+  "y": -248.21875,
+  "z": 20.578125,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": 1515.7473958333333,
+  "y": 1702.1334637083335,
+  "z": 9.890625,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": 1518.1655506904763,
+  "y": 1307.0212056666667,
+  "z": 19.3984375,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Airport",
+  "x": 1640.078125,
+  "y": 1448.085938,
+  "z": 27.921875,
+  "door": null,
+  "src": "inst-cluster:AIRPORT",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "AIRPORT",
+  "name": "Los Santos International (zone LAIR)",
+  "x": 1670.0,
+  "y": -2290.0,
+  "z": 15.0,
+  "door": null,
+  "src": "documented",
+  "tag": "DOC",
+  "refuge": false
+ },
+ {
+  "kind": "STADIUM",
+  "name": "Stadium",
+  "x": -2051.539063,
+  "y": -444.162109375,
+  "z": 53.828125,
+  "door": null,
+  "src": "inst-cluster:STADIUM",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STADIUM",
+  "name": "Stadium",
+  "x": 1097.117188,
+  "y": 1529.6875,
+  "z": 28.125,
+  "door": null,
+  "src": "inst-cluster:STADIUM",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "STADIUM",
+  "name": "Stadium",
+  "x": 1357.515625,
+  "y": 2159.171875,
+  "z": 18.96875,
+  "door": null,
+  "src": "inst-cluster:STADIUM",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "MILITARY",
+  "name": "Aircraft carrier (restricted)",
+  "x": -1368.3671875833334,
+  "y": 498.84375,
+  "z": 38.6796875,
+  "door": null,
+  "src": "inst-cluster:CARRIER",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "MILITARY",
+  "name": "Area 69 (restricted)",
+  "x": 228.28125,
+  "y": 1928.8149038846154,
+  "z": 16.8203125,
+  "door": null,
+  "src": "inst-cluster:MILITARY69",
+  "tag": "FILE",
+  "refuge": false
+ },
+ {
+  "kind": "SCHOOL",
+  "name": "Driving school (drivingschoolex_SFS)",
+  "x": -2028.1328125,
+  "y": -111.2734375,
+  "z": 36.1328125,
+  "door": null,
+  "src": "inst:drivingschoolex_SFS",
+  "tag": "FILE",
+  "refuge": false
+ }
+]

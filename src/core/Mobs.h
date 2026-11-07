@@ -156,6 +156,14 @@ struct Mob {
     int routeIdx = 0;          // boss: the waypoint he is walking to
     float routeT = 0.0f;       // boss: seconds before the route is recomputed regardless
     Vec3 routeGoal{ 0, 0, 0 }; // boss: the destination the route was built for
+    // ---- the atlas (the map as data; Atlas.h / GTA-SA-ATLAS-fa.md)
+    int campFamFirst = -1;     // boss: first atlas door index of the interior family he is
+                               // camping (the prey ducked inside), -1: no camp
+    int campFamCount = 0;      // boss: how many street doors that family has
+    const char* campFam = nullptr; // boss: the family's enex name (a static table string)
+    Vec3 prevPlayerPos{ 0, 0, 0 }; // boss: the player's position at his last brain tick -
+                               // interior jumps and teleports are read off the difference
+    bool prevPlayerInit = false;   // boss: prevPlayerPos holds a real reading
     // ---- the smart pack: combat navigation on the graph, the settle, the lock
     float repathT = 0.0f;      // boss: seconds before combat navigation may repath again (the ~1 s throttle)
     Vec3 chaseDest{ 0, 0, 0 }; // boss: the point combat navigation is steering to (intercept or fallback)

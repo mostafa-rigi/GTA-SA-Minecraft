@@ -1,6 +1,7 @@
 // Offline checks of the pure game logic (recipes, cooking, tables, movement, blocks, loose things, arm's length, survival, controls, game state, world file). Not part of the mod.
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <map>
 
@@ -22,6 +23,7 @@
 #include "Items.h"
 #include "McModel.h"
 #include "Mobs.h"
+#include "Atlas.h"
 #include "NavGraph.h"
 #include "SoldierModel.h"
 #include "Screens.h"
@@ -7954,6 +7956,212 @@ static void TestBossAggroLaw() {
     }
 }
 
+// =====================================================================
+// THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
+// the POI database, the zone/gang map and the interior door families
+// extracted from the game's own files (atlas-assets/), the vehicle road
+// graph from the other half of nodes*.dat, and the brain wired to all of
+// it: destination thinking, interior camping, turf-aware search.
+// (POI kinds: 1 hospital, 2 police, 3 ammu, 4 pay'n'spray, 6 safehouse.)
+static bool LoadVehicleGraphFromRepo() {
+    static const char* paths[] = { "cs-soldier/vehicle_graph.bin", "../cs-soldier/vehicle_graph.bin",
+                                   "../../cs-soldier/vehicle_graph.bin", "../../../cs-soldier/vehicle_graph.bin" };
+    for (const char* p : paths) {
+        FILE* f = std::fopen(p, "rb");
+        if (!f)
+            continue;
+        std::fseek(f, 0, SEEK_END);
+        const long n = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        std::vector<unsigned char> bytes((size_t)std::max<long>(n, 0));
+        const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+        std::fclose(f);
+        if (ok)
+            return LoadVehicleGraph(bytes.data(), bytes.size());
+    }
+    return false;
+}
+
+static float Dist2D(const Vec3& a, const Vec3& b) {
+    const float dx = a.x - b.x, dy = a.y - b.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+static void TestAtlas() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // ---- the datasets: counts, and spot checks against the game files
+    {
+        CHECK(AtlasPoiCount() == 292, "the atlas holds %d places (292 extracted)", AtlasPoiCount());
+        int kinds[19] = {};
+        for (int i = 0; i < AtlasPoiCount(); ++i) {
+            AtlasPoiInfo info;
+            if (AtlasPoiGet(i, info) && info.kind >= 0 && info.kind < 19)
+                ++kinds[info.kind];
+        }
+        CHECK(kinds[1] >= 6 && kinds[2] >= 10 && kinds[3] >= 10 && kinds[6] >= 25 && kinds[7] >= 40 && kinds[13] >= 10,
+              "per kind: %d hospitals, %d police, %d ammu, %d safehouses, %d food, %d 24/7",
+              kinds[1], kinds[2], kinds[3], kinds[6], kinds[7], kinds[13]);
+        const int hosp = AtlasNearestPoi(Vec3(2050, -1401, 14), 1, false);
+        AtlasPoiInfo hi;
+        CHECK(hosp >= 0 && AtlasPoiGet(hosp, hi) && Dist2D(hi.door, Vec3(2050.07f, -1401.21f, 0)) < 2.0f,
+              "County General Hospital sits where laehospital1 stands in the files");
+        const char* fam = nullptr;
+        Vec3 en, ex;
+        const int dCarls = AtlasDoorNear(Vec3(2495.33f, -1690.75f, 13.78f), 3.0f);
+        CHECK(dCarls >= 0 && AtlasDoorGet(dCarls, fam, en, ex) && std::strcmp(fam, "CARLS") == 0,
+              "the Johnson house door is an enex record, not a guess");
+        const int dAmmu = AtlasDoorNear(Vec3(1368.35f, -1279.06f, 12.55f), 3.0f);
+        CHECK(dAmmu >= 0 && AtlasDoorGet(dAmmu, fam, en, ex) && std::strcmp(fam, "AMMUN1") == 0,
+              "the Market Ammu-Nation door likewise");
+        const int dLspd = AtlasDoorNear(Vec3(1554.95f, -1674.99f, 15.33f), 3.0f);
+        CHECK(dLspd >= 0 && AtlasDoorGet(dLspd, fam, en, ex) && std::strcmp(fam, "POLICE1") == 0,
+              "and the LSPD door likewise");
+        CHECK(AtlasHeavenFamAt(Vec3(2496.05f, -1692.73f, 1013.75f), 10.0f, fam) && std::strcmp(fam, "CARLS") == 0,
+              "the heaven above Ganton belongs to the CARLS family");
+        int first = -1, count = 0;
+        CHECK(AtlasDoorFamRange("CARLS", first, count) && count == 1, "CARLS has its one street door");
+        CHECK(AtlasDoorFamRange("AMMUN1", first, count) && count == 2,
+              "AMMUN1's one heaven serves two street doors (LS and SF) - the shared-template truth");
+        CHECK(AtlasDoorCount() == 225, "%d street doors after dedupe", AtlasDoorCount());
+        CHECK(AtlasZoneGangAt(Vec3(2500, -1650, 14)) == 1, "Ganton is Grove Street Families ground");
+        CHECK(AtlasZoneGangAt(Vec3(2027, -1400, 14)) == 2, "Jefferson is Ballas ground");
+        CHECK(AtlasZoneGangAt(Vec3(1670, -2290, 14)) == 0, "the airport is nobody's turf");
+        CHECK(std::strncmp(AtlasZoneNameAt(Vec3(2500, -1650, 14)), "GAN", 3) == 0,
+              "and the zone under Grove is named from the GAN family (%s)", AtlasZoneNameAt(Vec3(2500, -1650, 14)));
+        // destination thinking, as a pure function: running west past
+        // Jefferson, the hospital is the refuge his run is aimed at
+        const int refuge = AtlasRefugeAhead(Vec3(2105, -1440, 14), Vec3(-5.5f, 0, 0), Vec3(2130, -1442, 14));
+        AtlasPoiInfo ri;
+        CHECK(refuge >= 0 && AtlasPoiGet(refuge, ri) && ri.kind == 1 &&
+                  Dist2D(ri.door, Vec3(2050.07f, -1401.21f, 0)) < 3.0f,
+              "a man running west at Jefferson is read as running to County General");
+        CHECK(AtlasRefugeAhead(Vec3(2105, -1440, 14), Vec3(5.5f, 0, 0), Vec3(2130, -1442, 14)) < 0 ||
+                  AtlasPoiGet(AtlasRefugeAhead(Vec3(2105, -1440, 14), Vec3(5.5f, 0, 0), Vec3(2130, -1442, 14)), ri),
+              "and the reader never invents a destination behind his back");
+    }
+    // ---- the vehicle road graph: the car half of nodes*.dat
+    {
+        CHECK(LoadVehicleGraphFromRepo(), "the vehicle road graph loads");
+        CHECK(VehicleNodeCount() == 30587 && VehicleEdgeCount() == 62936,
+              "it holds %d road nodes and %d directed edges", VehicleNodeCount(), VehicleEdgeCount());
+        std::vector<Vec3> route;
+        float dist = 0.0f;
+        CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(1670, -2290, 14), &route, &dist),
+              "Grove Street to Los Santos International routes BY ROAD");
+        CHECK(dist > 1500.0f && dist < 4000.0f && route.size() > 100,
+              "the airport run is %.0f m over %d waypoints - the route the ped graph cannot make",
+              dist, (int)route.size());
+        CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(-1420, -330, 14), &route, &dist) && dist > 6000.0f,
+              "and Grove to Easter Bay airport crosses the bay by bridge (%.0f m)", dist);
+        UnloadVehicleGraph();
+    }
+    // ---- the brain: a prey fleeing toward the hospital is intercepted at
+    // its door, not at a bare point on his run line
+    {
+        CHECK(LoadNavGraphFromRepo(), "the city graph loads for the atlas brain sims");
+        WideStage();
+        host.groundMode = 1;
+        host.groundZVal = 13.4f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(2190, -1445, 13.4f), true);
+        FaceMob(s, 1.5708f); // facing the prey, west
+        host.wall = true;    // a wall across the street at x=2110: the run breaks his eye line there
+        host.wallC = Vec3(2110, -1440, 13.4f);
+        host.wallDir = Vec3(0, 1, 0);
+        host.wallHalf = 14.0f;
+        ProvokeByAim(host, Vec3(2150, -1440, 14.4f), none);
+        RunMobsB(1.5f, Vec3(2150, -1440, 14.4f), none);
+        CHECK(gMobs[s].bossState == 2, "the hospital run opens with a real fight (state %d)", gMobs[s].bossState);
+        float px = 2150.0f;
+        host.velocity = Vec3(-5.5f, 0, 0);
+        bool huntSeen = false;
+        Vec3 huntDest;
+        for (int i = 0; i < 800 && !huntSeen; ++i) { // 40 s: the run, the break, the hunt
+            if (px > 2056.0f)
+                px = std::max(2056.0f, px - 5.5f * 0.05f);
+            else
+                host.velocity = Vec3();
+            MobsTick(0.05f, Vec3(px, -1440, 14.4f), 0, true, none);
+            if (gMobs[s].bossState == 3) {
+                huntSeen = true;
+                huntDest = gMobs[s].huntDest;
+            }
+        }
+        CHECK(huntSeen, "the fight breaks into a hunt when the wall eats his eye line");
+        CHECK(huntSeen && Dist2D(huntDest, Vec3(2050.07f, -1401.21f, 0)) < 5.0f,
+              "and the hunt runs at the hospital's door (%.0f, %.0f) - destination thinking, not a bare intercept",
+              huntDest.x, huntDest.y);
+        host.wall = false;
+        host.velocity = Vec3();
+    }
+    // ---- the brain: a prey who ducks into the Johnson house is camped at
+    // its door - and the camp holds while he stays inside
+    {
+        WideStage();
+        host.groundMode = 1;
+        host.groundZVal = 13.4f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(2462, -1652, 13.4f), true);
+        FaceMob(s, -2.43f); // facing the Johnson house door
+        ProvokeByAim(host, Vec3(2495.33f, -1690.75f, 14.78f), none);
+        RunMobsB(1.5f, Vec3(2495.33f, -1690.75f, 14.78f), none);
+        CHECK(gMobs[s].bossState == 2, "the camp sim opens with a fight at the door (state %d)", gMobs[s].bossState);
+        bool campSet = false, campHeld = true, doorSearch = false;
+        for (int i = 0; i < 1100; ++i) { // 55 s with the prey inside the heaven
+            MobsTick(0.05f, Vec3(2496.05f, -1692.73f, 1014.75f), 0, true, none);
+            const Mob& b = gMobs[s];
+            if (b.campFam && std::strcmp(b.campFam, "CARLS") == 0)
+                campSet = true;
+            if (campSet && (b.bossState == 0 || b.bossState == 4))
+                campHeld = false; // he never stands down while the man is inside
+            if (campSet && b.huntPhase == 1 && b.searchPts.size() == 1 &&
+                Dist2D(b.searchPts[0], Vec3(2495.33f, -1690.75f, 0)) < 3.0f)
+                doorSearch = true; // the hunt's search IS the family's door list
+        }
+        CHECK(campSet, "ducking into the Johnson house names the family: he camps CARLS");
+        CHECK(campHeld, "and the camp holds the whole time the prey stays inside");
+        CHECK(doorSearch, "and his search points are the family's street doors, not a disc");
+        RunMobsB(1.5f, Vec3(2495.33f, -1690.75f, 14.78f), none); // he comes back out
+        CHECK(gMobs[s].campFamFirst < 0, "coming back out ends the camp - at the true door");
+        host.groundMode = 0;
+    }
+    // ---- the brain: on Ballas ground the search slices faster than on
+    // Grove ground - the same vanish, two turfs, one stopwatch
+    auto turfScan = [&](const Vec3& bossAt, float faceYaw, const Vec3& preyAt, const Vec3& preyGone) {
+        WideStage();
+        host.groundMode = 1;
+        host.groundZVal = 13.4f;
+        const int s = SpawnMob(MOB_SOLDIER, bossAt, true);
+        FaceMob(s, faceYaw);
+        ProvokeByAim(host, preyAt, none);
+        RunMobsB(1.0f, preyAt, none);
+        float t = 0.0f, scanStart = -1.0f, scanDur = -1.0f;
+        for (int i = 0; i < 1800 && scanDur < 0.0f; ++i) { // up to 90 s
+            MobsTick(0.05f, preyGone, 0, true, none);
+            t += 0.05f;
+            const Mob& b = gMobs[s];
+            if (scanStart < 0.0f && b.huntPhase == 1 && b.scanT > 0.0f)
+                scanStart = t;
+            if (scanStart >= 0.0f && b.searchIdx > 0)
+                scanDur = t - scanStart;
+        }
+        host.groundMode = 0;
+        return scanDur;
+    };
+    {
+        const float ballas = turfScan(Vec3(2200, -1180, 13.4f), -1.5708f, Vec3(2230, -1180, 14.4f), Vec3(2630, -1180, 14.4f));
+        const float grove = turfScan(Vec3(2370, -1660, 13.4f), -1.5708f, Vec3(2400, -1660, 14.4f), Vec3(2800, -1660, 14.4f));
+        CHECK(ballas > 0.0f && grove > 0.0f, "both turfs produce a measured scan (Ballas %.2f s, Grove %.2f s)", ballas, grove);
+        CHECK(ballas < grove - 0.25f,
+              "on Ballas ground he slices a corner in %.2f s against %.2f s at home - he does not linger on enemy turf",
+              ballas, grove);
+    }
+    UnloadNavGraph();
+}
+
 int main(int argc, char** argv) {
     if (argc > 1)
         return InspectWorldFile(argv[1]);
@@ -8103,6 +8311,7 @@ int main(int argc, char** argv) {
     TestCsRules();
     TestBossFixRound();
     TestBossAggroLaw();
+    TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
     TestBossDeathReset();

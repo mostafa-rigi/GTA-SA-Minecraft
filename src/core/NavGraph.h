@@ -54,8 +54,32 @@ int NavRouteAttempts();
 // The length of a route NavRoute produced, in metres.
 float NavRouteLength(const std::vector<Vec3>& route);
 
-// Named places the boss checks while hunting (Los Santos set; coordinates from
-// documented SA map knowledge, approximate - they are check-points, not doors).
+// How many graph edges leave one node (its CSR row length); -1 for a bad
+// index or an unloaded graph. Degree 1 = a dead end: where a running man
+// gets cornered, and where the search now looks on purpose.
+int NavNodeDegree(int node);
+
+// ---------------------------------------------------------------------------
+// The VEHICLE road graph: the other half of the game's nodes*.dat - the car
+// network (30,587 nodes) the ped graph cannot see, built by
+// nav-assets/build_vehicle_graph.py into vehicle_graph.bin ("MCVEH1", same
+// layout spirit as MCNAV1: nodes carry a flood/segment id and a path width).
+// It loads and routes NOW so the coming vehicle step starts taught; nothing
+// in this build drives on it yet.
+bool LoadVehicleGraph(const unsigned char* data, size_t size);
+void UnloadVehicleGraph();
+bool VehicleGraphReady();
+int VehicleNodeCount();
+int VehicleEdgeCount();
+int VehicleNearestNode(const Vec3& at, float maxDist);
+// A* over the road graph; fills world waypoints, and (when distOut is given)
+// the route's length in metres. False when no road route exists.
+bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut);
+
+// Named places the boss checks while hunting. Since the atlas landed these
+// are no longer a hand-placed list: they are the atlas POI database itself
+// (Atlas.h - extracted from the game's own files), and `at` is the place's
+// DOOR where the data has one.
 struct NavPoi {
     const char* name;
     Vec3 at;

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <queue>
 
+#include "Atlas.h"
 #include "Core.h" // Log
 
 namespace mc {
@@ -29,18 +30,12 @@ struct Reader {
     template <typename T> bool Get(T& v) { return Take(&v, sizeof(T)); }
 };
 
-// Los Santos places of interest: where a hunted man runs, hides, heals or re-arms.
-// Coordinates from documented San Andreas map knowledge (approximate, +-20 m) -
-// they aim a search, they do not pretend to be door positions.
-const NavPoi kPois[] = {
-    { "Grove Street", Vec3(2480, -1660, 13) },
-    { "Johnson safehouse", Vec3(2495, -1688, 14) },
-    { "County General Hospital", Vec3(2030, -1410, 13) },
-    { "All Saints Hospital", Vec3(1240, -1330, 13) },
-    { "LSPD headquarters", Vec3(1540, -1670, 25) },
-    { "Ammu-Nation Market", Vec3(1365, -1278, 14) },
-    { "Idlewood Pay'n'Spray", Vec3(2070, -1830, 11) },
-};
+// The vehicle road graph's state (the MCVEH1 file): same shape as the ped
+// graph plus the per-node flood/segment id and path width the builder kept.
+std::vector<Vec3> vNodes;
+std::vector<uint8_t> vFlood;
+std::vector<uint32_t> vRow;
+std::vector<uint32_t> vTargets;
 
 } // namespace
 
@@ -151,6 +146,12 @@ bool NavNodePos(int node, Vec3* out) {
     return true;
 }
 
+int NavNodeDegree(int node) {
+    if (node < 0 || node >= (int)gNodes.size())
+        return -1;
+    return (int)(gRow[node + 1] - gRow[node]);
+}
+
 bool NavRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out) {
     return NavRouteBudget(from, to, out, 1 << 29, -1); // the unbounded original, for calm callers
 }
@@ -231,14 +232,185 @@ bool NavRouteBudget(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, in
     return true;
 }
 
-int NavPoiCount() { return (int)(sizeof(kPois) / sizeof(kPois[0])); }
-const NavPoi& NavPoiAt(int i) { return kPois[i]; }
+// ---------------------------------------------------------------------------
+// The vehicle road graph (vehicle_graph.bin, "MCVEH1"): the car half of the
+// game's own nodes*.dat, extracted by nav-assets/build_vehicle_graph.py.
+// Header: char[6] magic; u32 nodeCount; u32 edgeCount;
+// nodes: nodeCount * (f32 x, y, z; u8 flood; u8 width; u16 reserved);
+// CSR: u32 rowOffsets[nodeCount + 1]; u32 targets[edgeCount];
+// trailer: u32 checksum (sum of every preceding byte, matching the builder).
+
+bool LoadVehicleGraph(const unsigned char* data, size_t size) {
+    UnloadVehicleGraph();
+    if (!data || size < 14) {
+        Log("vehicle_graph.bin: missing or empty - the road graph stays dark (the car step will need it)");
+        return false;
+    }
+    uint32_t sum = 0;
+    for (size_t i = 0; i + 4 < size; ++i)
+        sum += data[i];
+    Reader rd{ data, size };
+    char magic[6];
+    uint32_t nodes = 0, edges = 0, storedSum = 0;
+    if (!rd.Get(magic) || std::memcmp(magic, "MCVEH1", 6) != 0 ||
+        !rd.Get(nodes) || !rd.Get(edges) ||
+        nodes == 0 || nodes > 200000 || edges > 2000000) {
+        Log("vehicle_graph.bin: bad header - the road graph stays dark");
+        return false;
+    }
+    vNodes.resize(nodes);
+    vFlood.resize(nodes);
+    for (uint32_t i = 0; i < nodes; ++i) {
+        float x = 0, y = 0, z = 0;
+        uint8_t flood = 0, width = 0;
+        uint16_t res = 0;
+        if (!rd.Get(x) || !rd.Get(y) || !rd.Get(z) || !rd.Get(flood) || !rd.Get(width) || !rd.Get(res)) {
+            Log("vehicle_graph.bin: truncated node table - the road graph stays dark");
+            UnloadVehicleGraph();
+            return false;
+        }
+        vNodes[i] = Vec3(x, y, z);
+        vFlood[i] = flood;
+    }
+    vRow.resize(nodes + 1);
+    for (uint32_t i = 0; i <= nodes; ++i)
+        if (!rd.Get(vRow[i])) {
+            Log("vehicle_graph.bin: truncated CSR rows - the road graph stays dark");
+            UnloadVehicleGraph();
+            return false;
+        }
+    if (vRow[0] != 0 || vRow[nodes] != edges) {
+        Log("vehicle_graph.bin: CSR does not add up - the road graph stays dark");
+        UnloadVehicleGraph();
+        return false;
+    }
+    vTargets.resize(edges);
+    for (uint32_t i = 0; i < edges; ++i)
+        if (!rd.Get(vTargets[i]) || vTargets[i] >= nodes) {
+            Log("vehicle_graph.bin: truncated CSR targets - the road graph stays dark");
+            UnloadVehicleGraph();
+            return false;
+        }
+    if (!rd.Get(storedSum) || storedSum != sum) {
+        Log("vehicle_graph.bin: checksum mismatch - the road graph stays dark");
+        UnloadVehicleGraph();
+        return false;
+    }
+    Log("vehicle graph loaded: %u road nodes, %u directed edges - the car network is in his head",
+        nodes, edges);
+    return true;
+}
+
+void UnloadVehicleGraph() {
+    vNodes.clear();
+    vFlood.clear();
+    vRow.clear();
+    vTargets.clear();
+}
+
+bool VehicleGraphReady() { return !vNodes.empty(); }
+int VehicleNodeCount() { return (int)vNodes.size(); }
+int VehicleEdgeCount() { return (int)vTargets.size(); }
+
+int VehicleNearestNode(const Vec3& at, float maxDist) {
+    int best = -1;
+    float bd = maxDist * maxDist;
+    for (size_t i = 0; i < vNodes.size(); ++i) {
+        const float d = (vNodes[i] - at).LengthSq();
+        if (d < bd) {
+            bd = d;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut) {
+    if (!out || vNodes.empty())
+        return false;
+    out->clear();
+    if (distOut)
+        *distOut = 0.0f;
+    const int start = VehicleNearestNode(from, 80.0f);
+    const int goal = VehicleNearestNode(to, 80.0f);
+    if (start < 0 || goal < 0)
+        return false;
+    if (start == goal) {
+        out->push_back(vNodes[goal]);
+        return true;
+    }
+    const int n = (int)vNodes.size();
+    static std::vector<float> g;
+    static std::vector<int> came;
+    static std::vector<char> closed;
+    if ((int)g.size() < n) {
+        g.resize(n);
+        came.resize(n);
+        closed.resize(n);
+    }
+    std::fill(g.begin(), g.begin() + n, 1e18f);
+    std::fill(came.begin(), came.begin() + n, -1);
+    std::fill(closed.begin(), closed.begin() + n, (char)0);
+    typedef std::pair<float, int> QN;
+    std::priority_queue<QN, std::vector<QN>, std::greater<QN>> open;
+    g[start] = 0.0f;
+    open.push(QN((vNodes[start] - vNodes[goal]).Length(), start));
+    while (!open.empty()) {
+        const QN cur = open.top();
+        open.pop();
+        const int u = cur.second;
+        if (closed[u])
+            continue;
+        closed[u] = 1;
+        if (u == goal)
+            break;
+        for (uint32_t e = vRow[u]; e < vRow[u + 1]; ++e) {
+            const int v = (int)vTargets[e];
+            const float w = (vNodes[v] - vNodes[u]).Length();
+            if (g[u] + w < g[v]) {
+                g[v] = g[u] + w;
+                came[v] = u;
+                open.push(QN(g[v] + (vNodes[v] - vNodes[goal]).Length(), v));
+            }
+        }
+    }
+    if (came[goal] < 0)
+        return false;
+    std::vector<Vec3> rev;
+    for (int u = goal; u >= 0; u = came[u]) {
+        rev.push_back(vNodes[u]);
+        if (u == start)
+            break;
+    }
+    out->assign(rev.rbegin(), rev.rend());
+    if (distOut)
+        *distOut = g[goal];
+    return true;
+}
+
+// The named places are the atlas now (Atlas.h): the hand-placed checkpoint
+// list is gone, replaced by the extracted database. `at` is the place's
+// door - the point a search actually walks to.
+int NavPoiCount() { return AtlasPoiCount(); }
+
+const NavPoi& NavPoiAt(int i) {
+    static NavPoi sPoi{ "", Vec3(0, 0, 0) };
+    AtlasPoiInfo info;
+    if (AtlasPoiGet(i, info)) {
+        sPoi.name = info.name;
+        sPoi.at = info.door;
+    }
+    return sPoi;
+}
 
 int NavNearestPoi(const Vec3& at) {
     int best = -1;
     float bd = 1e18f;
-    for (int i = 0; i < NavPoiCount(); ++i) {
-        const float d = (kPois[i].at - at).LengthSq();
+    for (int i = 0; i < AtlasPoiCount(); ++i) {
+        AtlasPoiInfo info;
+        if (!AtlasPoiGet(i, info))
+            break;
+        const float d = (info.door - at).LengthSq();
         if (d < bd) {
             bd = d;
             best = i;

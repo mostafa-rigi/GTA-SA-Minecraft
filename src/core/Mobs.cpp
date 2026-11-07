@@ -1,4 +1,5 @@
 #include "Mobs.h"
+#include "Atlas.h"
 #include "NavGraph.h"
 
 #include <chrono>
@@ -1614,7 +1615,22 @@ static Vec3 BossHuntDest(const Mob& m) {
         vel = m.exitDir * 3.0f; // no tracked velocity: a man leaving at a jog, the way he was heading
     const float toSeen = (m.lastSeen - m.pos).Length();
     const float lead = Clamp(m.lostT + toSeen / kBoss.chaseSpeed, 0.0f, 6.0f);
-    return m.lastSeen + vel * lead;
+    Vec3 dst = m.lastSeen + vel * lead;
+    // ATLAS — destination thinking: a prey RUNNING somewhere is usually
+    // running TO somewhere. If a refuge (hospital, ammu-nation, pay'n'spray,
+    // safehouse, mod shop...) lies in front of his run and he can reach it
+    // before the boss can, the hunt's point is that place's DOOR - the
+    // consult promise "he checks the hospitals, the stations, the gun
+    // shops" kept with the game's own coordinates, not a bare map point.
+    if (std::sqrt(m.preyVel.x * m.preyVel.x + m.preyVel.y * m.preyVel.y) > 2.0f) {
+        const int poi = AtlasRefugeAhead(m.lastSeen, m.preyVel, m.pos);
+        if (poi >= 0) {
+            AtlasPoiInfo info;
+            if (AtlasPoiGet(poi, info))
+                return info.door;
+        }
+    }
+    return dst;
 }
 
 bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
@@ -1689,6 +1705,9 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         m.stateWhy = "the player died: the pressure resets, the slate is clean";
         m.fightStarted = false;
         m.aggro = false;
+        m.campFamFirst = -1; // a dead man is not hiding in an interior any more
+        m.campFamCount = 0;
+        m.campFam = nullptr;
         m.aimAggroT = 0.0f;
         m.playerHostileT = 0.0f;
         m.detect = 0.0f;
@@ -2419,6 +2438,62 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     }
 
     // ================================================================ HUNT
+    // ================================================================ ATLAS:
+    // interior knowledge. The prey's position is tracked tick to tick: a jump
+    // into a heaven (z ~ 1000), or an impossible street-level teleport right
+    // at a known door, means he ducked inside - and the atlas names the
+    // interior family from its own enex records. From that moment the hunt
+    // camps the family's street doors (he can only come out where a door is)
+    // instead of losing the trail at the doorstep. Coming back out ends the
+    // camp at his true exit point.
+    {
+        if (!m.prevPlayerInit) {
+            m.prevPlayerPos = playerPos;
+            m.prevPlayerInit = true;
+        }
+        const bool wasIn = m.prevPlayerPos.z >= 500.0f;
+        const bool isIn = playerPos.z >= 500.0f;
+        const float jump = (playerPos - m.prevPlayerPos).Length();
+        const bool engaged = m.bossState == BS_COMBAT || m.bossState == BS_HUNT;
+        if (engaged && m.campFamFirst < 0 && playerAlive) {
+            const char* fam = nullptr;
+            if (isIn && !wasIn) {
+                AtlasHeavenFamAt(playerPos, 90.0f, fam); // stepped into a heaven
+            } else if (!isIn && !wasIn && jump > 35.0f) {
+                // a street-level teleport (a ground-floor interior): the
+                // door he vanished at names the family
+                const int d = AtlasDoorNear(m.prevPlayerPos, 8.0f);
+                const char* dfam = nullptr;
+                Vec3 de, dx;
+                if (d >= 0 && AtlasDoorGet(d, dfam, de, dx))
+                    fam = dfam;
+            }
+            if (fam) {
+                int first = -1, count = 0;
+                if (AtlasDoorFamRange(fam, first, count)) {
+                    m.campFamFirst = first;
+                    m.campFamCount = count;
+                    m.campFam = fam;
+                    m.stateWhy = "atlas: he ducked inside - camping the doors";
+                    Log("boss atlas: the prey entered interior %s (%d street doors) - the hunt camps them",
+                        fam, count);
+                }
+            }
+        }
+        if (m.campFamFirst >= 0 && playerAlive && !isIn &&
+            (wasIn || (jump > 35.0f && AtlasDoorNear(playerPos, 10.0f) >= 0))) {
+            // he came back out - and a man leaves by a door, so the trail
+            // restarts HERE, at his true position, not at the stale point
+            m.campFamFirst = -1;
+            m.campFamCount = 0;
+            m.campFam = nullptr;
+            m.lastSeen = playerPos;
+            m.lostT = 0.0f;
+            m.stateWhy = "atlas: he came back out - the trail restarts at the door";
+        }
+        m.prevPlayerPos = playerPos;
+    }
+
     if (m.bossState == BS_HUNT) {
         m.huntT += dt;
         // a fresh clue is EVIDENCE: something heard just now, or a loud
@@ -2430,7 +2505,16 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         // the hunt renews instead of dying on its 45-second clock; it stands
         // down only when the trail is honestly cold, or on the player's
         // death (handled at the top).
-        const bool freshClue = m.heardT > 0.0f || m.loudT < 10.0f;
+        const bool freshClue = m.heardT > 0.0f || m.loudT < 10.0f ||
+                               (m.campFamFirst >= 0 && playerPos.z >= 500.0f);
+        // ATLAS turf: whose ground the prey was last seen on. Enemy turf
+        // (Ballas / Vagos - the documented starting map) tightens the
+        // search: his own zone's nodes rank first and no corner is lingered
+        // on, because armed locals make standing about expensive.
+        Vec3 turfMn, turfMx;
+        int turfGang = 0;
+        const bool enemyTurf = AtlasZoneBoxAt(m.lastSeen, turfMn, turfMx, turfGang) &&
+                               (turfGang == 2 || turfGang == 3);
         // the warm trail: a firefight inside the last minute (fightWarmT,
         // stamped by the exchange itself) with the prey still inside the
         // wider hunt area. Senses alone call this trail cold - a quiet man
@@ -2443,6 +2527,22 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.huntPhase = 0;
             m.huntT = 0.0f;
             m.huntDest = BossHuntDest(m);
+            if (m.campFamFirst >= 0) {
+                // camping: the destination is the family's nearest street
+                // door - he goes and stands on an exit the prey must use
+                float bd = 1e18f;
+                for (int i = 0; i < m.campFamCount; ++i) {
+                    const char* f = nullptr;
+                    Vec3 en, ex;
+                    if (AtlasDoorGet(m.campFamFirst + i, f, en, ex)) {
+                        const float d = (en - m.pos).LengthSq();
+                        if (d < bd) {
+                            bd = d;
+                            m.huntDest = en;
+                        }
+                    }
+                }
+            }
             m.route.clear();
             m.searchPts.clear();
             m.searchIdx = 0;
@@ -2475,6 +2575,23 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 // the street's corners weighted toward the exit side of the
                 // disc over mere nearness, then the nearest named place.
                 m.searchPts.clear();
+                const bool campSearch = m.campFamFirst >= 0;
+                if (campSearch) {
+                    // the camp: the search IS the family's doors - the one
+                    // nearest the spot he vanished at first, then the rest
+                    std::vector<std::pair<float, Vec3>> doors;
+                    for (int i = 0; i < m.campFamCount; ++i) {
+                        const char* f = nullptr;
+                        Vec3 en, ex;
+                        if (AtlasDoorGet(m.campFamFirst + i, f, en, ex))
+                            doors.push_back({ (en - m.lastSeen).LengthSq(), en });
+                    }
+                    std::sort(doors.begin(), doors.end(),
+                              [](const std::pair<float, Vec3>& a, const std::pair<float, Vec3>& b) { return a.first < b.first; });
+                    for (const auto& dp : doors)
+                        m.searchPts.push_back(dp.second);
+                }
+                if (!campSearch) {
                 const Vec3 exitD = m.exitDir;
                 for (float step : { 1.5f, 3.0f, 4.5f }) {
                     Vec3 pt = m.lastSeen + exitD * (kBoss.searchRadius * step);
@@ -2505,7 +2622,22 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                             const float d2 = (np - m.lastSeen).LengthSq();
                             if (d2 < kBoss.searchRadius * kBoss.searchRadius) {
                                 const float along = (np.x - m.lastSeen.x) * exitD.x + (np.y - m.lastSeen.y) * exitD.y;
-                                cand.push_back({ d2 - along * kBoss.searchRadius, np });
+                                float score = d2 - along * kBoss.searchRadius;
+                                // ATLAS search quality: dead ends (graph
+                                // degree 1) are where a cornered man
+                                // actually is, and nodes well above the
+                                // prey's ground are stairs and roofs -
+                                // both rank UP. On enemy turf his own
+                                // zone's nodes rank first: that is the
+                                // ground he runs home over.
+                                if (NavNodeDegree(i) == 1)
+                                    score -= 0.35f * kBoss.searchRadius * kBoss.searchRadius;
+                                if (np.z > m.lastSeen.z + 3.5f && np.z < m.lastSeen.z + 9.0f)
+                                    score -= 0.25f * kBoss.searchRadius * kBoss.searchRadius;
+                                if (enemyTurf && np.x >= turfMn.x && np.x <= turfMx.x &&
+                                    np.y >= turfMn.y && np.y <= turfMx.y)
+                                    score -= 0.45f * kBoss.searchRadius * kBoss.searchRadius;
+                                cand.push_back({ score, np });
                             }
                         }
                     }
@@ -2517,6 +2649,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 const int poi = NavNearestPoi(m.lastSeen);
                 if (poi >= 0 && (NavPoiAt(poi).at - m.lastSeen).LengthSq() < 900.0f)
                     m.searchPts.push_back(NavPoiAt(poi).at);
+                } // !campSearch
                 m.searchIdx = 0;
                 m.scanT = 0.0f;
                 m.huntPhase = 1;
@@ -2551,7 +2684,9 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     const float sweep = base + std::sin(m.scanT * 2.2f) * 0.9f;
                     m.aimGoal = m.pos + Vec3(-std::sin(sweep), std::cos(sweep), 0.0f) * 10.0f + Vec3(0, 0, 1.2f);
                     m.aimRate = 7.0f;
-                    if (m.scanT > 1.6f) {
+                    if (m.scanT > (enemyTurf ? 1.1f : 1.6f)) {
+                        // on enemy turf he slices faster and moves on:
+                        // lingering on Ballas/Vagos ground is its own risk
                         ++m.searchIdx;
                         m.scanT = 0.0f;
                     }

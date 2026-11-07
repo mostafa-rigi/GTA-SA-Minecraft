@@ -1,0 +1,107 @@
+{
+ "pois_total": 292,
+ "pois_by_kind": {
+  "GENERIC": 80,
+  "HOSPITAL": 8,
+  "POLICE": 14,
+  "AMMU": 12,
+  "PAYNSPRAY": 11,
+  "MODSHOP": 6,
+  "SAFEHOUSE": 37,
+  "FOOD": 50,
+  "GYM": 5,
+  "CLOTHES": 26,
+  "BAR": 6,
+  "STRIP": 4,
+  "MOTEL": 1,
+  "SHOP247": 13,
+  "CASINO": 4,
+  "AIRPORT": 9,
+  "STADIUM": 3,
+  "MILITARY": 2,
+  "SCHOOL": 1
+ },
+ "pois_file": 287,
+ "pois_doc": 5,
+ "doc_checks": [
+  {
+   "name": "Santa Flora Hospital (SF)",
+   "zones": [
+    "CIVI",
+    "SF",
+    "SF01"
+   ],
+   "accepted": true
+  },
+  {
+   "name": "Angel Pine clinic",
+   "zones": [
+    "ANGPI",
+    "WHET"
+   ],
+   "accepted": true
+  },
+  {
+   "name": "El Quebrados clinic",
+   "zones": [
+    "ELQUE",
+    "ROBAD"
+   ],
+   "accepted": true
+  },
+  {
+   "name": "Crippen Memorial clinic (Montgomery)",
+   "zones": [
+    "MONT",
+    "RED"
+   ],
+   "accepted": true
+  },
+  {
+   "name": "Los Santos International (zone LAIR)",
+   "zones": [
+    "LA",
+    "LAIR1",
+    "LA01"
+   ],
+   "accepted": true
+  }
+ ],
+ "zones_total": 384,
+ "gang_zones": {
+  "AZTECAS": 5,
+  "BALLAS": 22,
+  "GSF": 5,
+  "VAGOS": 7
+ },
+ "door_families": 144,
+ "street_doors": 227,
+ "heaven_records": 149,
+ "spot_checks": {
+  "County General Hospital": {
+   "poi": "Hospital (laehospital1)",
+   "dist_m": 0.22,
+   "src": "inst:laehospital1"
+  },
+  "All Saints Hospital": {
+   "poi": "Hospital (hospital_law)",
+   "dist_m": 0.26,
+   "src": "inst:hospital_law"
+  },
+  "LSPD (enex POLICE1)": {
+   "poi": "Police door (POLICE1)",
+   "dist_m": 0.0,
+   "src": "enex:POLICE1"
+  },
+  "Johnson safehouse door (enex CARLS)": {
+   "poi": "Safehouse door (CARLS)",
+   "dist_m": 0.0,
+   "src": "enex:CARLS"
+  },
+  "Market Ammu-Nation door (enex AMMUN1)": {
+   "poi": "Ammu door (AMMUN1)",
+   "dist_m": 0.0,
+   "src": "enex:AMMUN1"
+  }
+ }
+}

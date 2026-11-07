@@ -118,6 +118,27 @@ static void LoadSoldierFiles() {
     }
     std::fclose(f);
     LoadSoldierModel(bytes.data(), bytes.size());
+    // the road graph rides the same road in: vehicle_graph.bin, built from
+    // the vehicle half of the game's own nodes*.dat (nav-assets/). In this
+    // build it only has to load and route - the car step will drive on it.
+    // A missing file is said out loud and costs nothing else.
+    {
+        const std::string vehPath = SoldierFilePath("vehicle_graph.bin");
+        FILE* vf = std::fopen(vehPath.c_str(), "rb");
+        if (!vf) {
+            Log("vehicle_graph.bin not found in the MinecraftSA folder - the road graph stays dark until the car step");
+        } else {
+            std::fseek(vf, 0, SEEK_END);
+            long vsize = std::ftell(vf);
+            std::fseek(vf, 0, SEEK_SET);
+            std::vector<unsigned char> vbytes(vsize > 0 ? (size_t)vsize : 0);
+            if (vsize > 0 && std::fread(vbytes.data(), 1, vbytes.size(), vf) == vbytes.size())
+                LoadVehicleGraph(vbytes.data(), vbytes.size());
+            else
+                Log("ERROR: could not read %s - the road graph stays dark", vehPath.c_str());
+            std::fclose(vf);
+        }
+    }
     // his map of the city, the same road in: read whole, handed to the core. A
     // missing file only costs him the map (he falls back to probe steering and
     // the core's loader says so) - never the mod.
