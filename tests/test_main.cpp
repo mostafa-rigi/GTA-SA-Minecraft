@@ -10019,6 +10019,12 @@ static void TestCop() {
     SetHost(&host);
     WideStage();
     CopReset();
+    // the shared threat record is staged, not inherited: an earlier
+    // test's boss fight must not leak into the spike's quiet world (in
+    // the rounds before the complete update the leak sat hidden - the
+    // spike-skip law let an informed summon's felony 659 ride along
+    // unnoticed; the anchor-transition restore made honesty necessary)
+    ThreatNoteBoss(-1, false, Vec3(), false);
     CHECK(LoadVehicleGraphFromRepo(), "the cop sims ride the real vehicle graph");
     const float dt = 0.02f;
     const Vec3 grove(2486.0f, -1654.0f, 13.5f);
@@ -10937,7 +10943,7 @@ static void TestCopForce() {
             host.StepAll(dt);
             for (auto& kv : host.bodies)
                 kv.second.pos.z = road.PosAt(road.NearestDist(kv.second.pos), nullptr).z;
-            if (!placed && CopBlockCount() == 2) {
+            if (!placed && CopBlockCount() == kMaxBlockCars) {
                 placed = true;
                 blk0 = gCops[kMaxCopCars].pos;
                 blk1 = gCops[kMaxCopCars + 1].pos;

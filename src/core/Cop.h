@@ -89,7 +89,10 @@ enum CopMode {
 // pool with a cop flag until they wake - so they get their own slots
 // behind the ladder's.
 constexpr int kMaxCopCars = 4;
-constexpr int kMaxBlockCars = 2;
+// The complete update: two ROWS of two, as the original places them -
+// the second row staggered behind the first, angled (piece 2 shipped one
+// row and named this follow-up in its report).
+constexpr int kMaxBlockCars = 4;
 constexpr int kMaxCopUnits = kMaxCopCars + kMaxBlockCars;
 
 struct CopState {
@@ -132,6 +135,14 @@ struct CopState {
     float stuckT = 0.0f;
     float recoveryT = 0.0f;
     int recoverStrategy = 0;   // the original's rotating 8-pattern index
+    int recoverCount = 0;      // the complete update: how many recoveries
+                               // this unit has begun since it stood up -
+                               // /coptest grades recovery partly on this
+                               // (a completion, not a strategy spam), and
+                               // the unit line can name a spammer
+    Vec3 recoveryFrom;         // where the running recovery began: the
+                               // completion is judged against it (moved
+                               // >= 1.5 m by the expiry = he is out)
     float fairStartT = 0.0f;   // fix round 5: the stuck witness's fair
                                // start - seconds after a fresh drive
                                // order (a spawn, a pursuit entry, a
@@ -207,6 +218,25 @@ void CopReset();
 bool CopSummon(const Vec3& at, const Vec3& playerPos);
 void CopTick(float dt, const Vec3& playerPos);
 bool CopActive();
+// Stand the whole force down: every body retired (no burn-out), the
+// books forgotten. /coptest's cleanup uses it; so does a plain re-summon
+// path if one ever needs it.
+void CopDismiss();
+// ---- /coptest support (the complete update). While a prey override is
+// armed, the force hunts the DECOY, not the player: CopTick fills the
+// threat record from the decoy's reports (a car decoy: in-vehicle true;
+// a ped decoy: the man himself, on foot), and every internal use of the
+// tick's player position follows the prey. The offences that read the
+// real player's own car (his impact ledger, his wheel offences) stay
+// silent under an override - the test prices felony directly through
+// CopForceFelony. -1 disarms (the player is the prey again, the default).
+void CopPreyOverride(int decoyVeh, int decoyPed);
+void CopForceFelony(float felony);
+// Seed the position-known flag once (a dispatcher's radio call: "the
+// car was reported at..."). Staged /coptest phases use it at their
+// start - detection itself is graded by the player phases, and after
+// the seed the ordinary sight/lost laws rule untouched.
+void CopKnownSeed();
 // The force's books, for tests and the log: living units (any slot with
 // a body), units in pursuit, roadblock cars placed (asleep or awake),
 // the ladder's wanted count this tick, and the cutoff distance the

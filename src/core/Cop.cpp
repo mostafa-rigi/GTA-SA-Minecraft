@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "CopTest.h"
 #include "Host.h"
 #include "NavGraph.h"
 
@@ -236,6 +237,14 @@ bool sBlockWasLow = true;   // the arm latch: felony was at/under 1318
 bool sBlockTimerOn = false;
 float sBlockTimer = 0.0f;   // the armed roadblock count, seconds
 
+// The /coptest prey override (the complete update): while one of these
+// is armed, CopTick fills the threat record from the DECOY's reports
+// instead of the player's, and the whole force hunts the decoy. -1/-1
+// is the standing state: the player is the prey.
+int sPreyVeh = -1;
+int sPreyPed = -1;
+bool PreyOverrideOn() { return sPreyVeh >= 0 || sPreyPed >= 0; }
+
 float BlockDelay() {
     return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick;
 }
@@ -269,6 +278,18 @@ int LadderWanted(float felony) {
 // range there is no cone test at all (the original's own shape), so
 // at 1-3 m - beside him, behind him - the geometry has no dead zone;
 // the own-car ray was the whole of the near blindness.
+// THE COMPLETE UPDATE - the two-shell flicker: round 5's pair of rays
+// still left a car-to-car chase's sight flickering 0/1 at aim 8-15 m
+// (the 02:00 session's unit lines), because EACH single-skip ray is
+// blinded by the OTHER car's shell: the ray that skips the cop's car
+// ends inside the PLAYER's car, and the ray that skips the player's
+// car starts inside the COP's. A third reading runs between the cars'
+// outer skins - from his nose to the prey's tail, plain oracle, both
+// shells excluded geometrically - and when the cars stand closer than
+// the two half-lengths (~5.2 m of centres) there is nothing between
+// them but air and the reading is clear by construction. Walls
+// between the cars still count: the segment only starts past his own
+// nose and ends before the prey's tail.
 bool CopSees(const CopState& c, bool hot) {
     const Vec3& copPos = c.pos;
     const Vec3& copFwd = c.fwd;
@@ -283,9 +304,20 @@ bool CopSees(const CopState& c, bool hot) {
     const auto clear = [&]() {
         if (!TheHost().LineBlockedSkipVeh(copPos, gThreat.playerPos, c.veh))
             return true;
-        if (gThreat.playerInVehicle && gThreat.playerVehicle >= 0)
-            return !TheHost().LineBlockedSkipVeh(copPos, gThreat.playerPos,
-                                                 gThreat.playerVehicle);
+        if (gThreat.playerInVehicle && gThreat.playerVehicle >= 0 &&
+            !TheHost().LineBlockedSkipVeh(copPos, gThreat.playerPos,
+                                          gThreat.playerVehicle))
+            return true;
+        if (gThreat.playerInVehicle) {
+            Vec3 dir = to;
+            dir.z = 0.0f;
+            const float dl = dir.Length();
+            if (dl < 5.2f)
+                return true; // the shells touch: nothing between them
+            dir = dir * (1.0f / dl);
+            return !TheHost().LineBlocked(copPos + dir * 2.6f,
+                                          gThreat.playerPos - dir * 2.6f);
+        }
         return false;
     };
     if (dist <= periph)
@@ -365,11 +397,14 @@ void Drive(CopState& c, float gas, float brake, float wheelNorm, bool siren) {
     // should be driving TOWARD, never the point it should stop at:
     // route drivers feed a look-ahead down their route, the far pursuit
     // feeds its descent point (floored, see CopControl), close pursuit
-    // feeds a point projected through the prey. A driver with no live
-    // feed (a standstill, reverse recovery) names his own position at
-    // zero pace, and a tick with no throttle disarms the autopilot on
-    // the bridge's own gate anyway - so the mirror never drives a unit
-    // the brain has told to stand, and never fights a recovery.
+    // feeds by the complete update's PursuitFeed law, and a recovery
+    // feeds its reverse point behind the car - the autopilot is the
+    // ONLY channel that moves this car, so every motion the brain
+    // orders, recovery included, is served through it (round 5's
+    // exception for recovery is overturned; see the recovery branch).
+    // A driver with no live feed names his own position at zero pace,
+    // which disarms the mirror: a unit the brain has told to stand is
+    // never driven by a stale order.
     TheHost().CopBodyDriveTarget(c.veh, c.feedLive ? c.feedPoint : c.pos,
                                  c.feedLive ? c.feedCruise : 0.0f);
     c.gas = gas;
@@ -597,6 +632,47 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
 }
 
 // ---------------------------------------------------------------------------
+// THE COMPLETE UPDATE's feed law, one helper for every close-pursuit
+// tick. The brain's desire is SIGNED in the original (reverse is a real
+// manoeuvre there: the back zone's -12.7, the blocked branch's -21.7),
+// and his own physics honours the sign. The host's autopilot channel
+// does not take signed pace at all - it takes a point and a positive
+// cruise - so the sign must live in the POINT, never in the pace:
+//  - desire >= 0: the round-5 law stands - the aim projected 5 m
+//    THROUGH the prey, pace the desire (floored at a crawl, never 0:
+//    a live feed with cruise <= the bridge's crawl disarms the mirror,
+//    and a pursuing unit must never hand the bridge a dead feed);
+//  - desire < 0: the manoeuvre is a REVERSE toward (or away past) the
+//    aim. The feed point is the aim itself when it lies behind him,
+//    else a point 10 m straight behind him, at a positive pace of
+//    |desire| - ProcessAI answers a destination behind the car the way
+//    a driver does: it backs toward it. Before this update the close
+//    branch fed the signed desire straight into the cruise slot
+//    (c.feedCruise = c.desiredSpeed, negative): the bridge printed
+//    |cruise| from a negative feed while its BLOCKPLAYER behaviour did
+//    the actual driving, and the back/blocked zones' feeds were dead
+//    on arrival. The unit line's `want -21.7 at every range` was this
+//    line's signature (with the corner probes' own-shell block making
+//    the blocked branch fire from everywhere - see the probe comment).
+void PursuitFeed(CopState& c, const Vec3& target) {
+    if (c.desiredSpeed >= 0.0f) {
+        Vec3 dir = target - c.pos;
+        dir.z = 0.0f;
+        const float dl = dir.Length();
+        dir = dl > 0.01f ? dir * (1.0f / dl) : c.fwd;
+        c.feedPoint = target + dir * 5.0f;
+        c.feedCruise = std::fmax(c.desiredSpeed, 2.0f);
+    } else {
+        Vec3 to = target - c.pos;
+        to.z = 0.0f;
+        const float behind = to.x * c.fwd.x + to.y * c.fwd.y;
+        c.feedPoint = behind < 0.0f ? target : c.pos - c.fwd * 10.0f;
+        c.feedCruise = Clamp(-c.desiredSpeed, 4.0f, 22.0f);
+    }
+    c.feedLive = true;
+}
+
+// ---------------------------------------------------------------------------
 // CopControl1 (COP_AI.C), ported whole onto metres, one instance per
 // unit. dt-driven: the original runs one decision per frame at 50
 // ticks/s, so every per-tick constant rides kTick. Step 2 changes two
@@ -623,8 +699,21 @@ void CopControl(CopState& c, float dt) {
         const float rl = right.Length();
         right = rl > 0.001f ? right * (1.0f / rl) : Vec3(1, 0, 0);
         const Vec3 base = c.pos + c.fwd * (400 * kM);
-        c.frontLClear = !TheHost().LineBlocked(c.pos, base - right * (150 * kM));
-        c.frontRClear = !TheHost().LineBlocked(c.pos, base + right * (150 * kM));
+        // THE COMPLETE UPDATE's first conviction: these two probes were
+        // the ONE place round 5's own-shell lesson was never applied.
+        // The probe segments start at the car's own centre and run
+        // 1.6 m - INSIDE his own body - and the plain oracle counts his
+        // own car as a wall, so both corners read blocked on every
+        // reading, at every range, forever. The zone law then read the
+        // blocked branch from everywhere: in FRONT the desire still
+        // came from the speed rows, but the moment the geometry leaned
+        // to a side zone the desire collapsed to kBlockedSpeed (-21.7),
+        // and that signed value is what the unit line reported as
+        // `want` at EVERY range, and what the feed law turned into the
+        // crawl the bridge printed. The probes now skip his own
+        // vehicle, exactly like the sight rays round 5 already fixed.
+        c.frontLClear = !TheHost().LineBlockedSkipVeh(c.pos, base - right * (150 * kM), c.veh);
+        c.frontRClear = !TheHost().LineBlockedSkipVeh(c.pos, base + right * (150 * kM), c.veh);
     }
 
     // the stuck witness's fair start runs down first (fix round 5):
@@ -638,9 +727,22 @@ void CopControl(CopState& c, float dt) {
     // anything else steers): reverse, on the rotating strategy's wheel.
     if (c.recoveryT > 0.0f) {
         c.recoveryT -= dt;
-        if (c.recoveryT <= 0.0f)
+        if (c.recoveryT <= 0.0f) {
             c.fairStartT = kCopFairStart; // a spent recovery is a fresh
                 // drive order: the swing out of it is not stuck evidence
+            // THE COMPLETE UPDATE: a recovery must be seen to COMPLETE,
+            // not just to expire - judged against where it began. (The
+            // 02:00 session's log tail was a wall of bare "stuck"
+            // lines at speed 0 with no completion anywhere; this line
+            // is the receipt the next wedge is graded against.)
+            const float moved = (c.pos - c.recoveryFrom).Length();
+            if (moved >= 1.5f)
+                Log("cop: recovery completed - he backed %.1f m clear and is moving again (strategy %d)",
+                    moved, c.recoverStrategy);
+            else
+                Log("cop: recovery spent but he is still on the spot (moved %.1f m) - the next witness will judge again",
+                    moved);
+        }
         const float strat = (float)(((c.recoverStrategy * 5) & 6) - 3) * 128.0f;
         c.wheel = WheelToward(c.wheel, strat, dt);
         // the direction was chosen ONCE, when the recovery started
@@ -651,8 +753,28 @@ void CopControl(CopState& c, float dt) {
         float pedal = Clamp(err / (50 * kV), -1.0f, 1.0f);
         const float g = pedal > 0.0f ? pedal : 0.0f;
         const float b = pedal < 0.0f ? -pedal : 0.0f;
-        c.feedLive = false; // the autopilot never shares a recovery:
-            // the manoeuvre is the pedals' alone (fix round 5)
+        // THE COMPLETE UPDATE overturns round 5's "the autopilot never
+        // shares a recovery", on the round-4 conviction itself: the
+        // pedals DO NOT drive this car - for an AI driver they are
+        // outputs ProcessAI recomputes. A recovery fed only pedals
+        // therefore had NO channel at all: the 02:00 log's tail is
+        // minutes of strategy cycles at speed 0.0, a manoeuvre that
+        // could not execute, ever. The recovery is now SERVED through
+        // the autopilot like every other motion: the feed point stands
+        // 11 m behind him, leaned sideways by the strategy's own wheel
+        // pattern (the same -384..384 swing the pedals carry), at a
+        // firm reverse pace - ProcessAI backs toward a rear point the
+        // way a driver backs out of a wedge. The pedals still carry the
+        // same word beside it, as they do everywhere.
+        {
+            const float lean = Clamp(c.wheel / 512.0f, -1.0f, 1.0f) * 0.6f;
+            const float ca = std::cos(lean), sa = std::sin(lean);
+            const Vec3 back(-c.fwd.x, -c.fwd.y, 0.0f);
+            Vec3 dir(back.x * ca - back.y * sa, back.x * sa + back.y * ca, 0.0f);
+            c.feedPoint = c.pos + dir * 11.0f;
+            c.feedCruise = 12.0f;
+            c.feedLive = true;
+        }
         Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
         return;
     }
@@ -689,7 +811,13 @@ void CopControl(CopState& c, float dt) {
         c.recoveryT = 22 * kTick; // the original's 22-tick recovery
         c.recoverStrategy = (c.recoverStrategy + 1) & 7;
         c.desiredSpeed = c.speed >= 0.0f ? -kRecoverSpeed : kRecoverSpeed;
-        Log("cop: stuck - reverse recovery, strategy %d", c.recoverStrategy);
+        c.recoveryFrom = c.pos; // the completion is judged from here
+        ++c.recoverCount;
+        if (c.recoverCount >= 6)
+            Log("cop: stuck - reverse recovery, strategy %d (recovery #%d for this unit - a count /coptest grades)",
+                c.recoverStrategy, c.recoverCount);
+        else
+            Log("cop: stuck - reverse recovery, strategy %d", c.recoverStrategy);
         return;
     }
 
@@ -725,7 +853,11 @@ void CopControl(CopState& c, float dt) {
             flat.z = 0.0f;
             if (flat.Length() > 2.0f) {
                 pFwd = flat * (1.0f / flat.Length());
-            } else if (playerInCar) {
+            } else if (playerInCar && sPreyVeh < 0 && sPreyPed < 0) {
+                // (the pose verb answers for the PLAYER's own car; under
+                // a /coptest prey override the prey is a decoy, whose
+                // standing nose the velocity fallback above already
+                // covers as well as a standstill allows)
                 Vec3 cc, f, chest, v;
                 if (TheHost().PlayerVehiclePose(&cc, &f, &chest, &v)) {
                     f.z = 0.0f;
@@ -899,25 +1031,15 @@ void CopControl(CopState& c, float dt) {
     const float g = pedal > 0.0f ? pedal : 0.0f;
     const float b = pedal < 0.0f ? -pedal : 0.0f;
     c.target = target;
-    // the feed is the aim projected THROUGH the prey (fix round 5):
-    // the brain's aim is the tail point 2.5 m behind the man (or his
-    // flank, or the man himself on foot) - a point the car should make
-    // CONTACT at, and ProcessAI brakes to arrive at its destination.
-    // A destination 5 m past the aim, on the line from the car through
-    // it, keeps the arrival braking on the far side of the contact:
-    // the car drives through the point the brain means, the way the
-    // original's own pedals carry him into the ram. In the back zone
-    // the desired speed is negative and the bridge's gate disarms the
-    // mirror on its own, so the reverse stays the pedals' word.
-    {
-        Vec3 dir = target - c.pos;
-        dir.z = 0.0f;
-        const float dl = dir.Length();
-        dir = dl > 0.01f ? dir * (1.0f / dl) : c.fwd;
-        c.feedPoint = target + dir * 5.0f;
-        c.feedCruise = c.desiredSpeed;
-        c.feedLive = true;
-    }
+    // the feed, by the complete update's one law (PursuitFeed above):
+    // round 5's through-the-prey projection for a forward desire, and
+    // for the back/blocked zones' NEGATIVE desires the sign now lives
+    // in the point (a reverse destination behind him) at a positive
+    // pace - round 5 fed the signed desire into the cruise slot
+    // itself and the bridge's gate "disarmed the mirror on its own",
+    // which is a polite name for the reverse never being served at
+    // all on a host whose pedals are outputs.
+    PursuitFeed(c, target);
     Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
 }
 
@@ -1051,7 +1173,13 @@ bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out) {
 // honest equivalent is a fan of ROUTES - for each fan direction, lay the
 // road route to a point 64 m out and read the road the player is
 // actually on. The first fan whose road runs at least ~35 m takes the
-// block: two cars across it, noses turned across the lanes, asleep.
+// block: TWO ROWS of two cars across it, asleep - the front row at the
+// block point (lateral ±2.3, noses across the lanes, piece 2's law) and
+// a second row one car-length of road BEHIND it toward the approaching
+// player, staggered to the opposite laterals (±1.4) with its noses
+// tipped ~25 degrees back toward the traffic, the original's angled
+// second row (piece 2 shipped one row and named this as its follow-up;
+// the complete update carries it in).
 bool PlaceRoadblock(const Vec3& playerPos) {
     Vec3 pDir(0, 1, 0);
     {
@@ -1061,7 +1189,7 @@ bool PlaceRoadblock(const Vec3& playerPos) {
             pDir = v * (1.0f / v.Length());
         } else {
             Vec3 cc, f, chest, vv;
-            if (gThreat.playerInVehicle && TheHost().PlayerVehiclePose(&cc, &f, &chest, &vv)) {
+            if (gThreat.playerInVehicle && !PreyOverrideOn() && TheHost().PlayerVehiclePose(&cc, &f, &chest, &vv)) {
                 f.z = 0.0f;
                 if (f.Length() > 0.01f)
                     pDir = f * (1.0f / f.Length());
@@ -1103,14 +1231,29 @@ bool PlaceRoadblock(const Vec3& playerPos) {
         for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed < kMaxBlockCars; ++slot) {
             if (UnitLiving(gCops[slot]))
                 continue;
-            const float side = placed == 0 ? 2.3f : -2.3f;
-            const Vec3 carAt = at + lateral * side;
-            // the nose turns across the road, toward the far side: the
-            // two cars meet nose-outward across the lanes between them
-            const Vec3 face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f);
+            const int row = placed / 2, col = placed % 2;
+            Vec3 carAt, face;
+            if (row == 0) {
+                const float side = col == 0 ? 2.3f : -2.3f;
+                carAt = at + lateral * side;
+                // the nose turns across the road, toward the far side:
+                // the two cars meet nose-outward across the lanes
+                // between them
+                face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f);
+            } else {
+                // the second row: 6 m of road back toward the player
+                // (segDir runs with his travel), staggered to the
+                // opposite laterals, noses across the road AND tipped
+                // back toward the traffic - the angled row: a driver
+                // who threads the first gap meets a nose, not a lane
+                const float side = col == 0 ? -1.4f : 1.4f;
+                carAt = at - segDir * 6.0f + lateral * side;
+                face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f) - segDir * 2.2f;
+            }
             if (SpawnUnit(slot, carAt, face, true)) {
                 ++placed;
-                Log("cop: roadblock car asleep across the road at (%.0f, %.0f)", carAt.x, carAt.y);
+                Log("cop: roadblock car asleep across the road at (%.0f, %.0f) (row %d)",
+                    carAt.x, carAt.y, row + 1);
             }
         }
         if (placed > 0) {
@@ -1136,10 +1279,36 @@ void CopReset() {
     sBlockWasLow = true;
     sBlockTimerOn = false;
     sBlockTimer = 0.0f;
+    sPreyVeh = -1;
+    sPreyPed = -1;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
     gThreat.felony = 0.0f;
     gThreat.ourUnitsLost = 0;
+    CopTestReset(); // a world reset forgets a running test too (its own
+                    // guard keeps a test that summoned us alive)
+}
+
+void CopDismiss() {
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (gCops[i].veh >= 0)
+            TheHost().CopBodyRetire(gCops[i].veh, false);
+    CopReset();
+}
+
+void CopPreyOverride(int decoyVeh, int decoyPed) {
+    sPreyVeh = decoyVeh;
+    sPreyPed = decoyPed;
+}
+
+void CopForceFelony(float felony) {
+    Page().felony = Clamp(felony, 0.0f, kFelonyCap);
+    gThreat.felony = Page().felony;
+}
+
+void CopKnownSeed() {
+    Page().known = true;
+    Page().unseenT = 0.0f;
 }
 
 bool CopActive() { return gCop.mode != COP_NONE && gCop.veh >= 0; }
@@ -1213,16 +1382,53 @@ void CopTick(float dt, const Vec3& playerPos) {
     CopState& page = Page();
 
     // the shared record's player page, refreshed every tick (piece 1's
-    // feed, unchanged: both brains read the same man from the same record)
-    gThreat.playerPos = playerPos;
-    gThreat.playerVel = TheHost().PlayerVelocity();
-    gThreat.playerVehicle = TheHost().PlayerVehicle();
-    gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
+    // feed, unchanged: both brains read the same man from the same record).
+    // THE COMPLETE UPDATE: while a /coptest prey override is armed, the
+    // record is filled from the DECOY instead - a car decoy reads as a
+    // man in a car, a ped decoy as the man on foot - and every use of
+    // the tick's `playerPos` below follows `preyPos`. The override is
+    // the only door through which the force ever hunts anything but
+    // the player, and only the test arms it.
+    if (sPreyVeh >= 0) {
+        Vec3 dp, dv;
+        if (TheHost().DecoyReport(sPreyVeh, &dp, &dv)) {
+            gThreat.playerPos = dp;
+            gThreat.playerVel = dv;
+            gThreat.playerVehicle = sPreyVeh;
+            gThreat.playerInVehicle = true;
+        } else {
+            gThreat.playerPos = playerPos;
+            gThreat.playerVel = TheHost().PlayerVelocity();
+            gThreat.playerVehicle = TheHost().PlayerVehicle();
+            gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
+        }
+    } else if (sPreyPed >= 0) {
+        Vec3 dp;
+        float hp = 0.0f;
+        if (TheHost().DecoyPedReport(sPreyPed, &dp, &hp)) {
+            gThreat.playerPos = dp;
+            gThreat.playerVel = Vec3();
+            gThreat.playerVehicle = -1;
+            gThreat.playerInVehicle = false;
+        } else {
+            gThreat.playerPos = playerPos;
+            gThreat.playerVel = TheHost().PlayerVelocity();
+            gThreat.playerVehicle = TheHost().PlayerVehicle();
+            gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
+        }
+    } else {
+        gThreat.playerPos = playerPos;
+        gThreat.playerVel = TheHost().PlayerVelocity();
+        gThreat.playerVehicle = TheHost().PlayerVehicle();
+        gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
+    }
+    const Vec3 preyPos = gThreat.playerPos;
 
     if (!sForce) {
         gThreat.copAlive = false;
         gThreat.copPursuing = false;
         gThreat.felony = page.felony;
+        CopTestTick(dt); // the test grades even a failed stand-up
         return;
     }
 
@@ -1364,7 +1570,12 @@ void CopTick(float dt, const Vec3& playerPos) {
     // player's car is type 5 on CarHitByPlayer's scale; being shot at
     // is our named extension (Driver 2's man has no gun), priced at
     // half the full scale. The victim of a hit knows the position.
-    if (gThreat.playerInVehicle && anySeen) {
+    // (under a prey override this block stays silent: the impact ledger
+    // it reads is the real player's own car, and the speeding note would
+    // price the decoy's cruise - /coptest sets the felony directly and
+    // grades its own scenarios; the struck notes below stay live, since
+    // a unit struck BY THE PREY is the prey's act whoever the prey is)
+    if (!PreyOverrideOn() && gThreat.playerInVehicle && anySeen) {
         if (gThreat.playerVel.Length() > 25.0f * 19.0f / 16.0f)
             NoteFelony(2, 0);
         const float impact = TheHost().PlayerVehicleImpact();
@@ -1416,20 +1627,39 @@ void CopTick(float dt, const Vec3& playerPos) {
             ++livingLadder;
     sWanted = LadderWanted(page.felony);
 
-    // a summon's spike runs to its end whatever the felony does (piece 0's
-    // proof is not the ladder's to cancel); afterwards slot 0 is a unit.
+    // a summon's spike runs while the case is cold (piece 0's proof is
+    // not the ladder's to cancel) - but piece 1's design always said the
+    // SAME unit leaves the spike and pursues the moment the felony
+    // crosses with the position known. THE COMPLETE UPDATE's fourth
+    // conviction: the loop below used to skip COP_SPIKE unconditionally,
+    // so the spike NEVER ended early - in the 02:00 session the anchor
+    // sat in mode 1 (COP_SPIKE) at felony 4096 for the whole sampled
+    // window while the ladder hunted without its lead car. Restored:
     for (int slot = 0; slot < kMaxCopUnits; ++slot) {
         CopState& c = gCops[slot];
         if (!UnitLiving(c))
             continue;
         c.batter = page.felony >= kBatterFelony;
+        if (c.mode == COP_SPIKE && wantPursue && page.steerCalDone) {
+            // (the calibration second always runs first: it is the
+            // session's only source for the steering sign every unit
+            // reads, and an informed summon into the boss's fight does
+            // not get to skip it - he rolls out facing the man, the
+            // sign settles, and THEN he pursues)
+            c.spikeDone = true; // the spike's proof is superseded by the
+                                // real thing: the anchor is a unit now
+            c.mode = COP_PURSUE;
+            c.fairStartT = kCopFairStart;
+            Log("cop: the spike is over - the anchor joins the pursuit himself (felony %.0f)", page.felony);
+            continue;
+        }
         if (c.mode == COP_SPIKE || c.mode == COP_LEAVE)
             continue;
         if (c.mode == COP_BLOCK) {
             // PassiveCopTasks' conversion, on our wake terms: felony hot,
             // position known, and the player closing on the block - or
             // the block car itself struck, which wakes it on the spot
-            const float d = (c.pos - playerPos).Length();
+            const float d = (c.pos - preyPos).Length();
             if ((wantPursue && d < kBlockWakeDist) || struckRamU[slot] > 0.5f ||
                 struckShotU[slot] > 0.5f) {
                 c.mode = COP_PURSUE;
@@ -1506,7 +1736,7 @@ void CopTick(float dt, const Vec3& playerPos) {
                     CopState& c = gCops[slot];
                     if (!UnitLiving(c) || c.mode == COP_LEAVE || c.mode == COP_SPIKE)
                         continue; // the anchor never leaves; the spike is proof
-                    const float d = (c.pos - playerPos).Length();
+                    const float d = (c.pos - preyPos).Length();
                     if (d > farDist) {
                         farDist = d;
                         farSlot = slot;
@@ -1532,7 +1762,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         int nP = 0;
         for (int slot = 0; slot < kMaxCopUnits; ++slot)
             if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
-                pDist[nP++] = (gCops[slot].pos - playerPos).Length();
+                pDist[nP++] = (gCops[slot].pos - preyPos).Length();
         for (int i = 1; i < nP; ++i) {
             const float d = pDist[i];
             int j = i - 1;
@@ -1549,7 +1779,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         for (int slot = 0; slot < kMaxCopUnits; ++slot) {
             CopState& c = gCops[slot];
             if (UnitLiving(c) && c.mode == COP_PURSUE)
-                c.powerScale = (c.pos - playerPos).Length() > sCutoff ? kCutoffScale : 1.0f;
+                c.powerScale = (c.pos - preyPos).Length() > sCutoff ? kCutoffScale : 1.0f;
             else
                 c.powerScale = 1.0f;
         }
@@ -1568,10 +1798,10 @@ void CopTick(float dt, const Vec3& playerPos) {
                 if (UnitLiving(gCops[slot]))
                     continue;
                 Vec3 at;
-                if (LadderSpawnPoint(playerPos, &at)) {
-                    if (SpawnUnit(slot, at, playerPos, false)) {
+                if (LadderSpawnPoint(preyPos, &at)) {
+                    if (SpawnUnit(slot, at, preyPos, false)) {
                         Log("cop: the ladder sends another unit - he enters at %.0f m on the road (felony %.0f, wanted %d)",
-                            (at - playerPos).Length(), page.felony, sWanted);
+                            (at - preyPos).Length(), page.felony, sWanted);
                         ++livingLadder;
                     }
                 } else {
@@ -1605,7 +1835,7 @@ void CopTick(float dt, const Vec3& playerPos) {
                 if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
                     pursuing = true;
             if (pursuing && page.felony >= kBlockFireFelony)
-                PlaceRoadblock(playerPos);
+                PlaceRoadblock(preyPos);
             sBlockTimer = BlockDelay();
         }
     }
@@ -1619,10 +1849,10 @@ void CopTick(float dt, const Vec3& playerPos) {
             anyWillPursue = true;
     if (anyWillPursue) {
         page.fieldT -= dt;
-        if (page.fieldT <= 0.0f || (page.fieldGoal - playerPos).Length() > 25.0f) {
+        if (page.fieldT <= 0.0f || (page.fieldGoal - preyPos).Length() > 25.0f) {
             page.fieldT = 0.75f;
-            page.fieldGoal = playerPos;
-            page.fieldOk = VehicleFieldTo(playerPos);
+            page.fieldGoal = preyPos;
+            page.fieldOk = VehicleFieldTo(preyPos);
         }
     }
 
@@ -1639,7 +1869,7 @@ void CopTick(float dt, const Vec3& playerPos) {
             CopControl(c, dt);
             break;
         case COP_LEAVE:
-            LeaveDrive(c, dt, playerPos);
+            LeaveDrive(c, dt, preyPos);
             break;
         case COP_IDLE:
         case COP_BLOCK:
@@ -1681,7 +1911,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         alive = true;
         if (c.mode == COP_PURSUE)
             pursuing = true;
-        const float d = (c.pos - playerPos).Length();
+        const float d = (c.pos - preyPos).Length();
         if (d < leadDist) {
             leadDist = d;
             leadPos = c.pos;
@@ -1692,6 +1922,10 @@ void CopTick(float dt, const Vec3& playerPos) {
     gThreat.copAlive = alive;
     gThreat.copPursuing = pursuing;
     gThreat.copPos = leadPos;
+
+    // the self-test grades the tick just driven (it set the prey and
+    // the felony before it, and reads the outcome after it)
+    CopTestTick(dt);
 }
 
 // ---- piece 3: the decoded profile's accessors -------------------------

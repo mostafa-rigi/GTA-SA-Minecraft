@@ -7,6 +7,7 @@
 #include "BossTest.h"
 #include "Chat.h"
 #include "Cop.h"
+#include "CopTest.h"
 #include "GameState.h"
 #include "Host.h"
 #include "Inventory.h"
@@ -446,6 +447,20 @@ void CmdBossTest(const Args& a) {
     Ok(Fmt("bosstest: %s %s", name, *flag ? "OFF" : "ON"));
 }
 
+// /coptest: the cop force's self-test (the complete update) - one
+// session grades spike, pursuit arrival, the ram, the run-over stance,
+// recovery, the roadblock, the no-freeze soak, and two player phases.
+// Typed while a run is going, it aborts the run (with cleanup).
+void CmdCopTest(const Args& a) {
+    if (CopTestRunning()) {
+        CopTestAbort();
+        return Ok("coptest: aborted (see the sheet above)");
+    }
+    if (!CopTestStart())
+        return Fail("coptest: a run is already going");
+    Ok("coptest: running - watch the chat sheet; YOUR TURN lines are yours to play");
+}
+
 void CmdWanted(const Args& a) {
     int level = 0;
     if (a.size() < 2 || !ParseInt(a[1], &level) || level < 0 || level > 6)
@@ -464,6 +479,7 @@ struct Command {
 const Command kCommands[] = {
     { "bosstest", "/bosstest <proxy|fx|blend|layers|driver>", CmdBossTest },
     { "clear", "/clear [item]", CmdClear },
+    { "coptest", "/coptest", CmdCopTest },
     { "effect", "/effect <give|clear> <effect> [seconds] [amplifier]", CmdEffect },
     { "fill", "/fill <x1> <y1> <z1> <x2> <y2> <z2> <block>", CmdFill },
     { "gamemode", "/gamemode <survival|creative>", CmdGamemode },

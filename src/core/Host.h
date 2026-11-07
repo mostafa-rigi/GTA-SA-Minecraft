@@ -212,10 +212,20 @@ struct Host {
     // the bridge mirrors the intent into the autopilot (a straight-line
     // goto at the brain's point and pace) and the pedals ride beside it:
     // whichever channel the automobile truly honours, the brain's order
-    // is on it. A cruise at or under the bridge's crawl, or a tick with
-    // no throttle, disarms the autopilot back to its rest state, so a
-    // stopped, reversing or stood-down unit is never driven by a stale
-    // order. The full conviction stands in DRIVER2-STEP3-fa.md.
+    // is on it. THE COMPLETE UPDATE's arming law: a named feed with a
+    // cruise above the bridge's crawl arms the autopilot, and nothing
+    // else gates it - the pedal gas is an OUTPUT of this host's AI cars,
+    // so the round-5 contract that also demanded gas > 0 disarmed live
+    // pursuits mid-chase (the pedals read ~0 while the autopilot eases
+    // off, and the mirror fell silent exactly when the brain was
+    // ordering motion). A tick with no feed, or a cruise at or under the
+    // crawl, disarms the autopilot back to its rest state, so a stopped
+    // or stood-down unit is never driven by a stale order. The core's
+    // feed law in turn guarantees: a live feed always carries a positive
+    // cruise - the signed brain desires (reverse for the back and blocked
+    // manoeuvres) are translated into a point and a positive pace before
+    // they ever reach this channel. The full conviction stands in
+    // DRIVER2-STEP3-fa.md.
     virtual void CopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) {}
     // His survival law is HIS, not the host's (the user's order): the core
     // keeps his damage book on the original's scale and commands the
@@ -233,6 +243,27 @@ struct Host {
     // felony system's ears for "he hit something", read off his own car's
     // damage the way the game's books would show it.
     virtual float PlayerVehicleImpact() { return 0.0f; }
+    // Move a cop body outright (test staging only: /coptest wedges a unit
+    // nose-to-wall to grade its recovery). The bridge writes the matrix
+    // the way the spawn does and forgets its mirror bookkeeping, so the
+    // next feed re-arms from clean. Nothing in play ever calls this.
+    virtual void CopBodyPlace(int veh, const Vec3& at, float headingDeg) {}
+    // ---- the /coptest decoys: plain host bodies the force is graded
+    // against, so one session can answer what a night of free play used
+    // to answer one defect at a time. A decoy car is an ordinary civilian
+    // car with an ordinary contained driver, driven by the game's own
+    // autopilot through DecoyCarDrive; a decoy ped is an ordinary man
+    // standing where he was put. The core grades OUTCOMES off their
+    // reports (positions, speeds, health) - never off intentions.
+    virtual int SpawnDecoyCar(const Vec3& at, float headingDeg) { return -1; }
+    virtual void DecoyCarDrive(int veh, const Vec3& at, float cruiseMps) {}
+    virtual bool DecoyReport(int veh, Vec3* pos, Vec3* vel) { return false; }
+    virtual void RetireDecoy(int veh) {}
+    virtual int SpawnDecoyPed(const Vec3& at) { return -1; }
+    // health: the man's current host health (a run-over shows here and in
+    // his displacement from where he was put).
+    virtual bool DecoyPedReport(int ped, Vec3* pos, float* health) { return false; }
+    virtual void RetireDecoyPed(int ped) {}
     // ---- the fishing hook
     virtual HostHit HookTrace(const Vec3& from, const Vec3& dir, float len) { return HostHit(); } // in the way of the flying hook
     virtual bool HookPoint(const HostHit& hooked, Vec3* at) { return false; } // where the hook on its thing is now (false: gone)
