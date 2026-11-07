@@ -37,5 +37,16 @@ void GtaCopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps);
 void GtaCopBodySetHealth(int veh, float book01);
 void GtaCopBodyRetire(int veh, bool burnOut);
 float GtaPlayerVehicleImpact();
+// /coptest staging and decoys (the complete update): move a cop body
+// outright; stand up / drive / read / retire the plain decoy bodies the
+// self-test grades the force against.
+void GtaCopBodyPlace(int veh, const Vec3& at, float headingDeg);
+int GtaSpawnDecoyCar(const Vec3& at, float headingDeg);
+void GtaDecoyCarDrive(int veh, const Vec3& at, float cruiseMps);
+bool GtaDecoyReport(int veh, Vec3* pos, Vec3* vel);
+void GtaRetireDecoy(int veh);
+int GtaSpawnDecoyPed(const Vec3& at);
+bool GtaDecoyPedReport(int ped, Vec3* pos, float* health);
+void GtaRetireDecoyPed(int ped);
 
 } // namespace mc

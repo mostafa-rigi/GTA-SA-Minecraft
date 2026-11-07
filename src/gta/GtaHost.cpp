@@ -253,6 +253,24 @@ struct GtaHost : Host {
     void CopBodySetHealth(int veh, float book01) override { GtaCopBodySetHealth(veh, book01); }
     void CopBodyRetire(int veh, bool burnOut) override { GtaCopBodyRetire(veh, burnOut); }
     float PlayerVehicleImpact() override { return GtaPlayerVehicleImpact(); }
+    void CopBodyPlace(int veh, const Vec3& at, float headingDeg) override {
+        GtaCopBodyPlace(veh, at, headingDeg);
+    }
+    int SpawnDecoyCar(const Vec3& at, float headingDeg) override {
+        return GtaSpawnDecoyCar(at, headingDeg);
+    }
+    void DecoyCarDrive(int veh, const Vec3& at, float cruiseMps) override {
+        GtaDecoyCarDrive(veh, at, cruiseMps);
+    }
+    bool DecoyReport(int veh, Vec3* pos, Vec3* vel) override {
+        return GtaDecoyReport(veh, pos, vel);
+    }
+    void RetireDecoy(int veh) override { GtaRetireDecoy(veh); }
+    int SpawnDecoyPed(const Vec3& at) override { return GtaSpawnDecoyPed(at); }
+    bool DecoyPedReport(int ped, Vec3* pos, float* health) override {
+        return GtaDecoyPedReport(ped, pos, health);
+    }
+    void RetireDecoyPed(int ped) override { GtaRetireDecoyPed(ped); }
     // ---- the boss's vehicle senses (workstream L)
     bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {
         CPlayerPed* ped = FindPlayerPed();

@@ -86,6 +86,10 @@ struct CopBodyState {
         // advanced by CopBodyPre; a live mission is re-written at most
         // ~3 times a second, so ProcessAI's own route bookkeeping is
         // not reset under it faster than it can drive
+    float apRescueLogT = 1e9f; // the complete update: seconds since the
+        // mirror last LOGGED a rescue (a dropped or foreign mission
+        // found under a live feed) - the rescue itself is never
+        // throttled, only its voice is (once a second per body)
     // piece 3's sound state: the pursuit edge (for his radio) and the
     // engine layer currently sounding (his idle/revs swap rides it)
     bool sirenPrev = false;
@@ -121,6 +125,64 @@ float sPlayerImpactPeak = 0.0f;
 // The force keeps its own clock now, read off the player's weapon the
 // same way - two lines, no borrowed byproducts.
 float sCopShotAge = 99.0f;
+
+// ---- the /coptest decoys (the complete update): plain host bodies,
+// owned by no brain - a civilian car with an ordinary contained driver
+// for the game's own autopilot to drive, and a plain man standing where
+// he was put. The same pool discipline as the cop bodies: a stored
+// pointer is touched only after the pool confirms the slot still holds
+// it, resolved through refs and nothing else.
+struct DecoyCarState {
+    bool used = false;
+    CVehicle* veh = nullptr;
+    int vehRef = -1;
+    CPed* driver = nullptr;
+    int driverRef = -1;
+};
+DecoyCarState sDecoyCars[2];
+struct DecoyPedState {
+    bool used = false;
+    CPed* ped = nullptr;
+    int pedRef = -1;
+};
+DecoyPedState sDecoyPeds[2];
+constexpr int kDecoyCarModel = 445; // an Admiral: an ordinary sedan
+constexpr int kDecoyManModel = 7;   // an ordinary man
+
+DecoyCarState* FindDecoyCar(int vehRef) {
+    if (vehRef < 0)
+        return nullptr;
+    for (int i = 0; i < 2; ++i)
+        if (sDecoyCars[i].used && sDecoyCars[i].vehRef == vehRef)
+            return &sDecoyCars[i];
+    return nullptr;
+}
+DecoyPedState* FindDecoyPed(int pedRef) {
+    if (pedRef < 0)
+        return nullptr;
+    for (int i = 0; i < 2; ++i)
+        if (sDecoyPeds[i].used && sDecoyPeds[i].pedRef == pedRef)
+            return &sDecoyPeds[i];
+    return nullptr;
+}
+CVehicle* LiveDecoyVeh(const DecoyCarState& d) {
+    if (d.vehRef < 0 || !CPools::ms_pVehiclePool)
+        return nullptr;
+    CVehicle* v = CPools::ms_pVehiclePool->GetAtRef(d.vehRef);
+    return v == d.veh ? v : nullptr;
+}
+CPed* LiveDecoyDriver(const DecoyCarState& d) {
+    if (d.driverRef < 0 || !CPools::ms_pPedPool)
+        return nullptr;
+    CPed* p = CPools::ms_pPedPool->GetAtRef(d.driverRef);
+    return p == d.driver ? p : nullptr;
+}
+CPed* LiveDecoyPed(const DecoyPedState& d) {
+    if (d.pedRef < 0 || !CPools::ms_pPedPool)
+        return nullptr;
+    CPed* p = CPools::ms_pPedPool->GetAtRef(d.pedRef);
+    return p == d.ped ? p : nullptr;
+}
 
 CopBodyState* FindBody(int vehRef) {
     if (vehRef < 0)
@@ -184,7 +246,20 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
     veh->m_fBreakPedal = b.brake;
     veh->m_fSteerAngle = b.steer;
     veh->bSirenOrAlarm = b.siren;
-    veh->bIsLawEnforcer = b.siren; // he is, while he pursues
+    // THE COMPLETE UPDATE removes a write this function used to make:
+    // veh->bIsLawEnforcer = b.siren. The header's own words for that
+    // flag (CVehicle.h:150) are "is this guy chasing the player at the
+    // moment" - it is the marker by which the game's OWN police
+    // behaviours (its block-player autopilot family among them) claim
+    // a car. Asserting it on a siren unit handed that unit's autopilot
+    // to the game's block-player logic: the 02:00 session's bodies read
+    // missions 4/5/6 (BLOCKPLAYER_FARAWAY / _CLOSE / _HANDBRAKESTOP,
+    // eCarMission.h) - values this bridge never writes - on siren
+    // units only, never on stood-down ones, and an IDLE unit with its
+    // siren latched kept driving a block mission at the player on its
+    // own with the core's book saying it stood down. The siren flag
+    // above (sound and light) is untouched; the law-enforcer flag is
+    // simply never ours to assert again.
     if (b.seated) {
         veh->bEngineOn = true;
         // the parked car's other switch (fix round 4): a car the game
@@ -223,8 +298,20 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
         // mission back to NONE, so the mirror never drives a unit the
         // brain has told to stand.
         CAutoPilot& ap = veh->m_autoPilot;
-        const bool wantArm = b.apFeed && b.gas > 0.05f && b.apCruise > 1.0f &&
-                             b.book01 > 0.0f;
+        // THE COMPLETE UPDATE's arming law: the feed alone arms the
+        // mirror - a named feed with a cruise above the crawl and a
+        // living book. Round 5's extra gate (the pedal gas > 0.05) is
+        // REMOVED on round 4's own conviction: the pedals are OUTPUTS
+        // ProcessAI recomputes, and they read ~0 exactly while the
+        // autopilot eases off in a close chase - so the old contract
+        // disarmed live pursuits mid-chase, silently, at the very
+        // ranges the ram lives at (the 02:00 session: units in pursuit
+        // at felony 4096, speed 0.0, body mission 0 = NONE, frozen for
+        // tens of seconds while the core believed it was feeding). The
+        // core's half of the contract is its new feed law: a live feed
+        // always carries a positive cruise, so this gate can rest on
+        // the feed alone.
+        const bool wantArm = b.apFeed && b.apCruise > 1.0f && b.book01 > 0.0f;
         if (wantArm) {
             const float dx = b.apTarget.x - b.apWritten.x;
             const float dy = b.apTarget.y - b.apWritten.y;
@@ -237,10 +324,29 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
             // for ProcessAI's route bookkeeping in the same struct,
             // and a car whose route is replanned faster than it can
             // drive never settles into its pace.
-            if (!b.apArmed ||
+            // THE COMPLETE UPDATE adds the RESCUE on top of it: the
+            // mission is read back LIVE, and when it is not one of ours
+            // (ours: GOTOCOORDS, the routing form ProcessAI itself
+            // settles our STRAIGHT order into, or GOTOCOORDS_STRAIGHT)
+            // the order is re-written IMMEDIATELY - no material gate,
+            // no cadence. A dropped mission (NONE) or a foreign one
+            // (the block-player family the game's own behaviours write
+            // into flagged cars) under a live feed is not a refresh
+            // detail; it is the unit being stolen mid-pursuit, and the
+            // 02:00 session's frozen units sat exactly there: material
+            // gates don't move for a car standing still, so a static
+            // target never re-armed them. Each rescue is logged (the
+            // write never is throttled; its voice is, at 1/s per body).
+            const int liveMission = (int)ap.m_nCarMission;
+            const bool ours = liveMission == MISSION_GOTOCOORDS ||
+                              liveMission == MISSION_GOTOCOORDS_STRAIGHT;
+            const bool dropped = !ours;
+            const bool needWrite = !b.apArmed || dropped ||
                 ((dx * dx + dy * dy > 9.0f ||
                   std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) &&
-                 b.apWriteAge >= 0.3f)) {
+                 b.apWriteAge >= 0.3f);
+            if (needWrite) {
+                const bool rescue = dropped && (b.apArmed || liveMission != MISSION_NONE);
                 ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
                 // the driving style (fix round 5): a CREATE_CAR
                 // autopilot rests at DRIVINGSTYLE_STOP_FOR_CARS - it
@@ -268,6 +374,12 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
                 b.apWrittenCruise = b.apCruise;
                 b.apWriteAge = 0.0f;
                 b.apArmed = true;
+                if (rescue && b.apRescueLogT >= 1.0f) {
+                    b.apRescueLogT = 0.0f;
+                    Log("cop mirror: unit %d re-armed - the autopilot read mission %d under a live feed "
+                        "(dropped or foreign order); the brain's goto is written again",
+                        b.vehRef, liveMission);
+                }
             }
         } else if (b.apArmed) {
             ap.m_nCarMission = MISSION_NONE;
@@ -289,6 +401,10 @@ void CopSessionReset() {
     StopPosLoops();
     for (int i = 0; i < kMaxCopUnits; ++i)
         sBodies[i] = CopBodyState();
+    for (int i = 0; i < 2; ++i) {
+        sDecoyCars[i] = DecoyCarState();
+        sDecoyPeds[i] = DecoyPedState();
+    }
     sPlayerVeh = nullptr;
     sPlayerVehHealth = 0.0f;
     sPlayerImpactPeak = 0.0f;
@@ -336,6 +452,8 @@ void CopBodyPre(float dt) {
             continue;
         b.apWriteAge += dt; // the mirror's refresh cadence clock
             // (fix round 5), read in ApplyCommand
+        b.apRescueLogT += dt; // the rescue log's throttle clock (the
+            // complete update), read in ApplyCommand
         // his drawn wheels turn with his own travel (piece 3): signed
         // speed along the nose off the vehicle itself, spun at his
         // wheel radius - forward travel decreases the angle, the
@@ -974,6 +1092,288 @@ float GtaPlayerVehicleImpact() {
     const float peak = sPlayerImpactPeak;
     sPlayerImpactPeak = 0.0f;
     return peak;
+}
+
+// Test staging only (/coptest's recovery wedge): move a cop body
+// outright - the same basis write the spawn proves, then the mirror's
+// bookkeeping forgotten so the next feed re-arms from clean. Nothing in
+// play calls this; it exists so the self-test can put a unit nose-to-
+// wall exactly, instead of hoping a chase ends in a wedge.
+void GtaCopBodyPlace(int veh, const Vec3& at, float headingDeg) {
+    CopBodyState* bp = FindBody(veh);
+    if (!bp)
+        return;
+    CVehicle* v = LiveVeh(*bp);
+    if (!v || !v->m_matrix)
+        return;
+    bool found = false;
+    float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
+    if (!found)
+        gz = at.z;
+    const float h = headingDeg * 0.0174533f;
+    const CVector fwd(std::sin(h), std::cos(h), 0.0f);
+    CMatrix& m = *v->m_matrix;
+    m.right = CVector(fwd.y, -fwd.x, 0.0f);
+    m.up = CVector(fwd.x, fwd.y, 0.0f);
+    m.at = CVector(0.0f, 0.0f, 1.0f);
+    m.pos = CVector(at.x, at.y, gz + 0.6f);
+    v->UpdateRwMatrix();
+    v->m_vecMoveSpeed = CVector(0.0f, 0.0f, 0.0f);
+    v->m_vecTurnSpeed = CVector(0.0f, 0.0f, 0.0f);
+    if (CPed* driver = LiveDriver(*bp)) {
+        if (driver->m_matrix) {
+            driver->m_matrix->pos = m.pos;
+            driver->UpdateRwMatrix();
+        } else {
+            driver->SetPosn(m.pos);
+        }
+    }
+    bp->apArmed = false;
+    bp->apFeed = false;
+    bp->apWrittenCruise = -1.0f;
+    bp->prevVelOk = false;
+    bp->impactPeak = 0.0f;
+    Log("cop body: unit %d placed by the test at (%.0f, %.0f), facing %.0f deg",
+        veh, at.x, at.y, headingDeg);
+}
+
+// ---- the decoys' bodies ----------------------------------------------
+int GtaSpawnDecoyCar(const Vec3& at, float headingDeg) {
+    DecoyCarState* slot = nullptr;
+    for (int i = 0; i < 2; ++i)
+        if (!sDecoyCars[i].used) {
+            slot = &sDecoyCars[i];
+            break;
+        }
+    if (!slot)
+        return -1;
+    DecoyCarState& s = *slot;
+    s = DecoyCarState();
+    s.used = true;
+    Command<Commands::REQUEST_MODEL>(kDecoyCarModel);
+    Command<Commands::REQUEST_MODEL>(kDecoyManModel);
+    Command<Commands::LOAD_ALL_MODELS_NOW>();
+    if (!Command<Commands::HAS_MODEL_LOADED>(kDecoyCarModel) ||
+        !Command<Commands::HAS_MODEL_LOADED>(kDecoyManModel)) {
+        s = DecoyCarState();
+        return -1;
+    }
+    bool found = false;
+    float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
+    if (!found)
+        gz = at.z;
+    int handle = 0;
+    Command<Commands::CREATE_CAR>(kDecoyCarModel, at.x, at.y, gz + 0.6f, &handle);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kDecoyCarModel);
+    // CREATE_CAR hands back a pool REF (the cop spawn's round-1 crash
+    // lesson): resolve only through GetAtRef and prove the round-trip
+    auto* vpool = CPools::ms_pVehiclePool;
+    CVehicle* veh = (vpool && handle > 0) ? vpool->GetAtRef(handle) : nullptr;
+    if (!veh || vpool->GetRef(veh) != handle) {
+        Log("coptest decoy: CREATE_CAR handle %d does not resolve - spawn refused", handle);
+        s = DecoyCarState();
+        return -1;
+    }
+    if (!veh->m_matrix)
+        veh->AllocateMatrix();
+    if (!veh->m_matrix) {
+        CWorld::Remove(veh);
+        delete veh;
+        s = DecoyCarState();
+        return -1;
+    }
+    const float h = headingDeg * 0.0174533f;
+    const CVector fwd(std::sin(h), std::cos(h), 0.0f);
+    CMatrix& m = *veh->m_matrix;
+    m.right = CVector(fwd.y, -fwd.x, 0.0f);
+    m.up = CVector(fwd.x, fwd.y, 0.0f);
+    m.at = CVector(0.0f, 0.0f, 1.0f);
+    m.pos = CVector(at.x, at.y, gz + 0.6f);
+    veh->UpdateRwMatrix();
+    s.veh = veh;
+    s.vehRef = vpool->GetRef(veh);
+    // the driver: an ordinary man of the game's, contained the cop
+    // driver's way (mission-created, senses zeroed, seat warp) - he has
+    // no brain of ours; the car's autopilot is his whole instruction
+    auto* ppool = CPools::ms_pPedPool;
+    if (!ppool) {
+        CWorld::Remove(veh);
+        delete veh;
+        s = DecoyCarState();
+        return -1;
+    }
+    CPed* driver = new CPed(PED_TYPE_CIVMALE);
+    if (!driver) {
+        CWorld::Remove(veh);
+        delete veh;
+        s = DecoyCarState();
+        return -1;
+    }
+    driver->SetModelIndex(kDecoyManModel);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kDecoyManModel);
+    driver->SetCharCreatedBy(kCreatedByMission);
+    driver->ClearWeapons();
+    CWorld::Add(driver);
+    const int idx = ppool->GetIndex(driver);
+    if (idx < 0 || idx >= ppool->m_nSize || ppool->GetAt(idx) != driver ||
+        ppool->IsFreeSlotAtIndex(idx)) {
+        CWorld::Remove(driver);
+        delete driver;
+        CWorld::Remove(veh);
+        delete veh;
+        s = DecoyCarState();
+        return -1;
+    }
+    if (driver->m_pIntelligence) {
+        driver->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
+        driver->m_pIntelligence->SetSeeingRange(0.0f);
+        driver->m_pIntelligence->SetHearingRange(0.0f);
+    }
+    if (driver->m_matrix)
+        driver->m_matrix->pos = CVector(at.x, at.y, gz + 1.0f);
+    else
+        driver->SetPosn(CVector(at.x, at.y, gz + 1.0f));
+    Command<Commands::TASK_WARP_CHAR_INTO_CAR_AS_DRIVER>(CPools::GetPedRef(driver),
+                                                         CPools::GetVehicleRef(veh));
+    s.driver = driver;
+    s.driverRef = ppool->GetRef(driver);
+    Log("coptest decoy: car %d up at (%.0f, %.0f) with its driver", s.vehRef, at.x, at.y);
+    return s.vehRef;
+}
+
+void GtaDecoyCarDrive(int veh, const Vec3& at, float cruiseMps) {
+    DecoyCarState* dp = FindDecoyCar(veh);
+    if (!dp)
+        return;
+    CVehicle* v = LiveDecoyVeh(*dp);
+    if (!v)
+        return;
+    // the game's own autopilot, written plainly every call: the core
+    // re-issues as its route look-ahead advances. A civilian's style -
+    // AVOID_CARS: he is prey, not a second ram
+    CAutoPilot& ap = v->m_autoPilot;
+    ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
+    ap.m_nCarDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
+    ap.m_vecDestinationCoors = CVector(at.x, at.y, at.z);
+    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 60.0f);
+    ap.m_fMaxTrafficSpeed = cruiseMps;
+    v->bEngineOn = true;
+    v->bIsHandbrakeOn = false;
+}
+
+bool GtaDecoyReport(int veh, Vec3* pos, Vec3* vel) {
+    DecoyCarState* dp = FindDecoyCar(veh);
+    if (!dp || !pos || !vel)
+        return false;
+    CVehicle* v = LiveDecoyVeh(*dp);
+    if (!v || !v->m_matrix)
+        return false;
+    *pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
+    *vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
+    return true;
+}
+
+void GtaRetireDecoy(int veh) {
+    DecoyCarState* dp = FindDecoyCar(veh);
+    if (!dp)
+        return;
+    DecoyCarState& s = *dp;
+    if (CPed* driver = LiveDecoyDriver(s)) {
+        CWorld::Remove(driver);
+        delete driver;
+    }
+    if (CVehicle* v = LiveDecoyVeh(s)) {
+        CWorld::Remove(v);
+        delete v;
+    }
+    s = DecoyCarState();
+}
+
+int GtaSpawnDecoyPed(const Vec3& at) {
+    DecoyPedState* slot = nullptr;
+    for (int i = 0; i < 2; ++i)
+        if (!sDecoyPeds[i].used) {
+            slot = &sDecoyPeds[i];
+            break;
+        }
+    if (!slot)
+        return -1;
+    DecoyPedState& s = *slot;
+    s = DecoyPedState();
+    s.used = true;
+    Command<Commands::REQUEST_MODEL>(kDecoyManModel);
+    Command<Commands::LOAD_ALL_MODELS_NOW>();
+    if (!Command<Commands::HAS_MODEL_LOADED>(kDecoyManModel)) {
+        s = DecoyPedState();
+        return -1;
+    }
+    auto* ppool = CPools::ms_pPedPool;
+    if (!ppool) {
+        s = DecoyPedState();
+        return -1;
+    }
+    CPed* man = new CPed(PED_TYPE_CIVMALE);
+    if (!man) {
+        s = DecoyPedState();
+        return -1;
+    }
+    man->SetModelIndex(kDecoyManModel);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kDecoyManModel);
+    man->SetCharCreatedBy(kCreatedByMission);
+    man->ClearWeapons();
+    CWorld::Add(man);
+    const int idx = ppool->GetIndex(man);
+    if (idx < 0 || idx >= ppool->m_nSize || ppool->GetAt(idx) != man ||
+        ppool->IsFreeSlotAtIndex(idx)) {
+        CWorld::Remove(man);
+        delete man;
+        s = DecoyPedState();
+        return -1;
+    }
+    if (man->m_pIntelligence) {
+        man->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
+        man->m_pIntelligence->SetSeeingRange(0.0f);
+        man->m_pIntelligence->SetHearingRange(0.0f);
+    }
+    bool found = false;
+    float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
+    if (!found)
+        gz = at.z;
+    if (man->m_matrix) {
+        man->m_matrix->pos = CVector(at.x, at.y, gz + 1.0f);
+        man->UpdateRwMatrix();
+    } else {
+        man->SetPosn(CVector(at.x, at.y, gz + 1.0f));
+    }
+    s.ped = man;
+    s.pedRef = ppool->GetRef(man);
+    Log("coptest decoy: a man stands at (%.0f, %.0f)", at.x, at.y);
+    return s.pedRef;
+}
+
+bool GtaDecoyPedReport(int ped, Vec3* pos, float* health) {
+    DecoyPedState* dp = FindDecoyPed(ped);
+    if (!dp || !pos || !health)
+        return false;
+    CPed* man = LiveDecoyPed(*dp);
+    if (!man)
+        return false;
+    const CVector p = man->GetPosition();
+    *pos = Vec3(p.x, p.y, p.z);
+    *health = man->m_fHealth;
+    return true;
+}
+
+void GtaRetireDecoyPed(int ped) {
+    DecoyPedState* dp = FindDecoyPed(ped);
+    if (!dp)
+        return;
+    DecoyPedState& s = *dp;
+    if (CPed* man = LiveDecoyPed(s)) {
+        CWorld::Remove(man);
+        delete man;
+    }
+    s = DecoyPedState();
 }
 
 } // namespace mc
