@@ -141,9 +141,11 @@ struct BossProxyState {
 BossProxyState gBossProxy;
 
 // seconds since the player's gun last fired - BossBodyDuties keeps it, the
-// cop's body reads it to price a shot against a ram (one clock, two users)
+// cop's body reads it to price a shot against a ram (one clock, two users).
+// The reader (BridgePlayerShotAge) is declared in the header, so its
+// definition lives OUTSIDE this anonymous namespace, below - a definition
+// in here would be a different, invisible symbol and the link fails.
 float gPlayerShotAge = 99.0f;
-float BridgePlayerShotAge() { return gPlayerShotAge; }
 
 // CPed::m_nCreatedBy, the game's own ownership bookkeeping: a ped the
 // population system spawned for the street is RANDOM (1) and population may
@@ -851,6 +853,12 @@ void BossProxySync(float dt, CPlayerPed* player) {
         ped->UpdateRpHAnim();
 }
 } // namespace
+
+// the header-declared reader of the shot clock above (mc::BridgePlayerShotAge,
+// GtaMobs.h): it must sit at mc scope like every other declared symbol in
+// this file - inside the anonymous namespace it compiled to a namesake the
+// linker cannot see, which is exactly the LNK2019 the cop's first CI hit.
+float BridgePlayerShotAge() { return gPlayerShotAge; }
 
 void BossProxySessionReset() {
     // a new session (load / new game): the game has torn every ped in the
