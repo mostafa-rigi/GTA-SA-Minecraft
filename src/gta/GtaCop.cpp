@@ -381,6 +381,25 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     d.z = 0.0f;
     const float dl = d.Length();
     Vec3 fwd = dl > 0.01f ? d * (1.0f / dl) : Vec3(0, 1, 0);
+    // the matrix is not this code's to assume yet: CPlaceable::m_matrix
+    // (the pointer at +0x14, per the SDK header in-tree) is allocated
+    // lazily by the game, and a car fresh from CREATE_CAR still lives on
+    // its simple transform - the SDK's own GetPosition falls back to
+    // m_placement for exactly that state. Writing the basis through the
+    // pointer as it stood was the first-summon crash of 2026-11-07
+    // (fault at the [veh+0x14] read, this very block - the first time
+    // this spawn ever ran in the game). Allocate it the game's own way;
+    // if even that leaves none, refuse the spawn like the pool-landing
+    // refusal further down: every later touch of this body (Pre's wheel
+    // spin, the Report, Post's sound position, CopRender) reads the
+    // same pointer, so a body without a matrix cannot enter service.
+    if (!veh->m_matrix)
+        veh->AllocateMatrix();
+    if (!veh->m_matrix) {
+        Log("cop body: the new car has no matrix and AllocateMatrix gave none - spawn refused");
+        s = CopBodyState();
+        return -1;
+    }
     CMatrix& m = *veh->m_matrix;
     m.right = CVector(fwd.y, -fwd.x, 0.0f);
     m.up = CVector(fwd.x, fwd.y, 0.0f);
@@ -431,8 +450,18 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     // the one door the SDK opens into a car (the drive task itself is not
     // in the SDK, and no task is ever built from raw addresses here)
     const CVector door(at.x - fwd.y * 1.3f, at.y + fwd.x * 1.3f, gz + 1.0f);
-    driver->m_matrix->pos = door;
-    driver->UpdateRwMatrix();
+    // the same lazy-matrix law, one door down: nothing between the
+    // driver's construction and here allocates his matrix either, so
+    // the door placement writes through it only when it exists, and
+    // otherwise goes through the SDK's null-safe SetPosn (the boss
+    // body's own teleport verb) - his simple transform holds the
+    // position until the game gives him a matrix of its own.
+    if (driver->m_matrix) {
+        driver->m_matrix->pos = door;
+        driver->UpdateRwMatrix();
+    } else {
+        driver->SetPosn(door);
+    }
     driver->m_pIntelligence->m_TaskMgr.SetTask(new CTaskComplexEnterCarAsDriver(veh),
                                                TASK_PRIMARY_PRIMARY, false);
     s.driver = driver;
