@@ -24,6 +24,7 @@
 #include "McModel.h"
 #include "Mobs.h"
 #include "Cop.h"
+#include "CopTest.h"
 #include "CopCarModel.h"
 #include "Atlas.h"
 #include "NavGraph.h"
@@ -9855,6 +9856,72 @@ static void TestAtlas() {
 // A fake body with the one steering sign the SDK does not document INVERTED
 // on purpose (command + turns him LEFT here): the spike's calibration must
 // catch it and flip the session, or every sim below steers him backwards.
+// THE COMPLETE UPDATE's fake autopilot, shared by both cop fakes: the
+// bodies are driven by the FEED (CopBodyDriveTarget) - the channel the
+// game's own ProcessAI reads - because on the real host the pedal
+// fields are that channel's OUTPUTS, not inputs (fix round 4's
+// conviction). A suite that steers its fake cars by the pedals proves
+// a fiction; from this update the fakes model the channel that moves
+// the car. The pedal commands are still recorded (the core writes
+// them, and the profile sims read them) - they just move nothing.
+// The model is deliberately plain: turn toward the feed point at a
+// bounded rate (a rolling car's rate, floored so a creeping car can
+// begin), accelerate toward the cruise, brake to arrive inside 6 m of
+// the point, and back toward a point that sits well behind within
+// 16 m (ProcessAI's answer to a rear destination - the recovery's
+// reverse rides exactly this). It follows no roads: the core's feed
+// points walk the road graph, so the straight line to the next point
+// is the road's own segment at these scales.
+static void MirrorStep(Vec3& pos, float& yaw, float& speed, Vec3& vel,
+                       const Vec3& feedPt, float feedCruise, bool feedLive, float dt) {
+    const Vec3 fwd(std::sin(yaw), std::cos(yaw), 0.0f);
+    if (!feedLive || feedCruise < 0.5f) {
+        speed -= speed * 2.0f * dt;
+        if (std::fabs(speed) < 0.05f)
+            speed = 0.0f;
+        pos = pos + fwd * speed * dt;
+        vel = fwd * speed;
+        return;
+    }
+    Vec3 to = feedPt - pos;
+    to.z = 0.0f;
+    const float dist = to.Length();
+    if (dist < 1.0f) {
+        speed -= speed * 2.0f * dt;
+        if (std::fabs(speed) < 0.05f)
+            speed = 0.0f;
+        pos = pos + fwd * speed * dt;
+        vel = fwd * speed;
+        return;
+    }
+    const Vec3 dir = to * (1.0f / dist);
+    const float cosA = dir.x * fwd.x + dir.y * fwd.y;
+    const bool behind = cosA < -0.45f && dist < 16.0f;
+    float target;
+    if (behind) {
+        target = -std::fmin(feedCruise * 0.5f, 8.0f);
+    } else {
+        target = feedCruise;
+        if (dist < 7.0f)
+            target = std::fmin(target, std::fmax(2.0f, dist * 0.8f)); // arrival
+        if (cosA < 0.2f)
+            target = std::fmin(target, 5.0f); // a sharp turn, slowly
+    }
+    const float accel = target > speed ? 7.0f : 11.0f;
+    speed += Clamp(target - speed, -accel * dt, accel * dt);
+    const float aimYaw = behind ? std::atan2(-dir.x, -dir.y) : std::atan2(dir.x, dir.y);
+    float err = aimYaw - yaw;
+    while (err > 3.14159265f)
+        err -= 6.2831853f;
+    while (err < -3.14159265f)
+        err += 6.2831853f;
+    const float rate = 1.9f * Clamp(std::fabs(speed) / 4.0f, 0.3f, 1.0f);
+    yaw += Clamp(err, -rate * dt, rate * dt);
+    const Vec3 nf(std::sin(yaw), std::cos(yaw), 0.0f);
+    pos = pos + nf * speed * dt;
+    vel = nf * speed;
+}
+
 struct CopFakeHost : TestHost {
     bool carUp = false;
     Vec3 carPos, carVel;
@@ -9897,6 +9964,10 @@ struct CopFakeHost : TestHost {
         out->struckDriver = struckDriverQ;
         out->impactDv = impactDvQ;
         struckRamQ = struckShotQ = struckWorldQ = struckDriverQ = impactDvQ = 0.0f;
+        // the body's own drive-state words, the mirror model's: an
+        // armed feed reads as the goto mission at the feed's cruise
+        out->mission = feedLive ? 9 : 0;
+        out->cruise = (int)feedCruise;
         return true;
     }
     void CopBodySetHealth(int, float book01) override {
@@ -9906,6 +9977,43 @@ struct CopFakeHost : TestHost {
         carUp = false;
         burnedOut = burnOut;
         driverDown = burnOut; // the unit goes down together, or not at all
+    }
+    // the feed: the last drive intent the core named - what moves him
+    Vec3 feedPt;
+    float feedCruise = 0.0f;
+    bool feedLive = false;
+    void CopBodyDriveTarget(int, const Vec3& at, float cruise) override {
+        feedPt = at;
+        feedCruise = cruise;
+        feedLive = cruise > 0.05f;
+    }
+    void CopBodyPlace(int, const Vec3& at, float headingDeg) override {
+        carPos = at;
+        carYaw = headingDeg * 0.0174533f;
+        carSpeed = 0.0f;
+        carVel = Vec3();
+    }
+    // the corner probes' own-shell truth: a plain-oracle segment that
+    // STARTS at his centre and runs under ~2.2 m reads his own bodywork
+    // (that is the geometry the complete update convicted); the
+    // skip-veh reading with his own veh removes exactly that shell
+    bool LineBlocked(const Vec3& a, const Vec3& b) override {
+        if (carUp) {
+            Vec3 d0 = a - carPos;
+            d0.z = 0.0f;
+            Vec3 seg = b - a;
+            seg.z = 0.0f;
+            if (d0.Length() < 0.2f && seg.Length() < 2.2f)
+                return true;
+        }
+        return TestHost::LineBlocked(a, b);
+    }
+    bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int veh) override {
+        if (veh == 7) // his own car is simply not on this line
+            return TestHost::LineBlocked(a, b);
+        if (veh >= 0 && veh == vehicle)
+            return TestHost::LineBlockedSkipVeh(a, b, veh);
+        return LineBlocked(a, b);
     }
     int steerFlips = 0;
     float lastSteerSign = 0.0f;
@@ -9936,29 +10044,10 @@ struct CopFakeHost : TestHost {
             carSpeed = 0.0f; // the wall stops him whole, driveline too
             return;
         }
-        if (cmdGas > 0.0f)
-            carSpeed += cmdGas * 9.0f * dt;
-        if (cmdBrake > 0.0f) {
-            if (carSpeed > 0.3f)
-                carSpeed -= cmdBrake * 13.0f * dt;
-            else {
-                carSpeed -= cmdBrake * 12.0f * dt; // at rest the pedal is
-                    // reverse gear, and it pulls hard - the original's
-                    // recovery reverses at full thrust, so the body must too
-                if (carSpeed < -9.0f)
-                    carSpeed = -9.0f;
-            }
-        }
-        carSpeed -= carSpeed * 0.30f * dt;
-        if (carSpeed > 56.0f)
-            carSpeed = 56.0f;
-        const float sf = Clamp(carSpeed / 8.0f, -1.0f, 1.0f);
-        carYaw -= cmdSteer * 3.4f * sf * dt; // INVERTED on purpose: raw
-            // +steer turns this body LEFT on the map - the spike's
-            // calibration must catch it and flip the session
-        const Vec3 f(std::sin(carYaw), std::cos(carYaw), 0.0f);
-        carPos = carPos + f * carSpeed * dt;
-        carVel = f * carSpeed;
+        // the feed moves him now (MirrorStep above) - the pedal fields
+        // above are recorded, and read by the profile sims, but they
+        // are outputs on the real host and inputs nowhere
+        MirrorStep(carPos, carYaw, carSpeed, carVel, feedPt, feedCruise, feedLive, dt);
     }
 };
 
@@ -10050,8 +10139,16 @@ static void TestCop() {
             host.StepCar(dt);
         }
         CHECK(gCop.spikeDone, "the spike route ran to its end");
-        CHECK(gCop.steerCalDone && gCop.steerFlip,
-              "steer calibration caught this body's inverted sign (flip %d)", (int)gCop.steerFlip);
+        // the complete update re-reads this expectation: the calibration
+        // commands a pedal steer and reads the turn - but under the
+        // mirror model (as on the real host since round 4) the pedals
+        // move nothing, so the calibration second drives straight on
+        // its feed and concludes NOT MEASURABLY, flip unset. What the
+        // spike must still prove is that it RUNS and concludes; the
+        // sign itself is now only the drawn wheels' concern.
+        CHECK(gCop.steerCalDone,
+              "steer calibration ran and concluded (flip %d - an autopilot-driven body gives it nothing to measure)",
+              (int)gCop.steerFlip);
         CHECK((host.carPos - start).Length() > 120.0f,
               "the body actually drove the block (%.0f m)", (host.carPos - start).Length());
         CHECK(gCop.mode == COP_IDLE, "after the spike he stands by, felony watching");
@@ -10649,6 +10746,149 @@ static void TestCop() {
                   (gCop.feedPoint - gCop.pos).Length() > toTarget.Length(),
               "close: the feed is projected through the prey, past the brain's aim");
     }
+
+    // ---- (l) THE COMPLETE UPDATE's pins, one per conviction the 02:00
+    // session's log carried:
+    // (l1) the bumper-corner probes read through his own shell now:
+    // the fake's PLAIN oracle models the bodywork standing on any short
+    // segment out of his centre (the geometry of the conviction), so
+    // before the fix both corners read blocked at every range forever
+    // and the blocked branch's -21.7 leaked into every desire; with the
+    // probes on the skip-veh reading they read the road's truth: clear
+    // (l2) the feed contract across a whole chase: while a unit
+    // pursues, its feed is live with a POSITIVE cruise on every tick -
+    // the core never hands the bridge a dead or negative feed again -
+    // and in the far mode the desire itself is the speed rows' word,
+    // positive at every range
+    // (l3) recovery is served through the feed and COMPLETES: wedged
+    // (the frozen body), the recovery that fires names a point BEHIND
+    // him at a positive pace; unfrozen, he reverses out on it, moves
+    // clear of the wedge, and no second recovery follows inside the
+    // fair window
+    // (l4) the anchor joins the pursuit: an informed summon (felony
+    // 659, position known from the record) still runs the steering
+    // calibration - the session's only sign source - and then slot 0
+    // leaves the spike MID-ROUTE and pursues, where the old transition
+    // loop skipped COP_SPIKE unconditionally and he sat in mode 1 for
+    // whole sessions at felony 4096
+    {
+        // (l1) + (l2) share one chase staging
+        CopReset();
+        ThreatNoteBoss(-1, false, Vec3(), false);
+        host.freeze = false;
+        float copSL = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dirL;
+        const Vec3 copAtL = road.PosAt(copSL, &dirL);
+        host.PlaceCar(copAtL, std::atan2(dirL.x, dirL.y) * 57.29578f);
+        CHECK(CopSummon(copAtL, road.PosAt(copSL + 25.0f, nullptr)), "the (l) cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = false;
+        gCop.spikeDone = true;
+        gCop.felony = 2000.0f;
+        host.vehicle = 42;
+        // the model's premise, so the pin is not vacuous: the plain
+        // oracle DOES read his own bodywork on the probe's segment
+        {
+            Vec3 right(std::cos(0.0f), 0.0f, 0.0f);
+            const Vec3 base = gCop.pos + gCop.fwd * 1.5625f;
+            (void)right;
+            CHECK(host.LineBlocked(gCop.pos, base),
+                  "the fake's plain oracle reads his own bodywork on the probe segment (the conviction's geometry)");
+        }
+        float manSL = copSL + 55.0f;
+        int feedViol = 0, farNeg = 0, probeBad = 0, ticks = 0;
+        for (float t = 0.0f; t < 25.0f; t += dt) {
+            manSL += 15.0f * dt;
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manSL, &md);
+            host.player = mp;
+            host.velocity = md * 15.0f;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+            if (gCop.mode == COP_PURSUE) {
+                ++ticks;
+                if (!gCop.feedLive || gCop.feedCruise <= 0.0f)
+                    ++feedViol;
+                if ((mp - gCop.pos).Length() > 40.0f && gCop.desiredSpeed <= 0.0f)
+                    ++farNeg;
+                if (!gCop.frontLClear || !gCop.frontRClear)
+                    ++probeBad;
+            }
+        }
+        CHECK(ticks > 500, "the (l) chase ran as a pursuit (%d ticks)", ticks);
+        CHECK(feedViol == 0, "in pursuit the feed is live with a positive cruise on every tick (%d violations)", feedViol);
+        CHECK(farNeg == 0, "in the far mode the desire is positive at every range (%d negative samples)", farNeg);
+        CHECK(probeBad == 0, "the corner probes read the road, not his own bodywork (%d blocked samples)", probeBad);
+
+        // (l3) recovery through the feed
+        host.freeze = true;
+        const int recBefore = gCop.recoverCount;
+        bool recStarted = false;
+        for (float t = 0.0f; t < 8.0f && !recStarted; t += dt) {
+            CopTick(dt, host.player);
+            host.StepCar(dt);
+            recStarted = gCop.recoverCount > recBefore;
+        }
+        CHECK(recStarted, "wedged, the recovery fires");
+        // the recovery branch names its feed on the ticks after the
+        // start tick (the start tick only sets the clock) - sample a
+        // few ticks in, still inside the 22-tick manoeuvre
+        for (float t = 0.0f; t < 0.15f; t += dt) {
+            CopTick(dt, host.player);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.feedLive && gCop.feedCruise > 0.0f,
+              "the recovery is SERVED through the feed (live, cruise %.0f)", gCop.feedCruise);
+        {
+            Vec3 behind = gCop.feedPoint - gCop.pos;
+            behind.z = 0.0f;
+            CHECK(behind.Dot(gCop.fwd) < 0.0f, "the recovery's feed point stands behind him");
+        }
+        const Vec3 wedge = gCop.pos;
+        host.freeze = false;
+        bool reversed = false, completed = false;
+        float movedMax = 0.0f;
+        for (float t = 0.0f; t < 6.0f; t += dt) {
+            CopTick(dt, host.player);
+            host.StepCar(dt);
+            if (gCop.speed < -1.0f)
+                reversed = true;
+            const float mv = (gCop.pos - wedge).Length();
+            if (mv > movedMax)
+                movedMax = mv;
+            if (gCop.recoveryT <= 0.0f && movedMax >= 1.5f)
+                completed = true;
+        }
+        CHECK(reversed && completed && movedMax >= 1.5f,
+              "he reverses out on the feed and the recovery completes (moved %.1f m)", movedMax);
+        const int recAfter = gCop.recoverCount;
+        for (float t = 0.0f; t < 3.0f; t += dt) {
+            CopTick(dt, host.player);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.recoverCount == recAfter, "no recovery spam after the completion (%d)", gCop.recoverCount);
+
+        // (l4) the anchor leaves the spike for the pursuit
+        CopReset();
+        gThreat.bossEngaged = true; // the informed summon again
+        host.PlaceCar(grove, 0.0f);
+        CHECK(CopSummon(grove, Vec3(2496.0f, -1666.0f, 13.5f)), "the anchor stands up informed");
+        CHECK(gCop.mode == COP_SPIKE && gCop.felony >= 659.0f, "he starts on the spike, felony live");
+        host.vehicle = -1;
+        host.velocity = Vec3();
+        const Vec3 manL(2496.0f, -1666.0f, 13.5f);
+        bool joined = false;
+        for (float t = 0.0f; t < 12.0f && !joined; t += dt) {
+            CopTick(dt, manL);
+            host.StepCar(dt);
+            joined = gCop.mode == COP_PURSUE;
+        }
+        CHECK(gCop.steerCalDone, "the calibration still ran before anything else");
+        CHECK(joined && gCop.spikeDone,
+              "the anchor leaves the spike and pursues himself (mode %d)", (int)gCop.mode);
+        gThreat.bossEngaged = false;
+    }
     CopReset();
     SetHost(nullptr);
 }
@@ -10666,6 +10906,10 @@ struct ForceFakeHost : TestHost {
         float display = 1000.0f;
         bool burned = false, driverDown = false;
         float qRam = 0, qShot = 0, qWorld = 0, qDriver = 0, qImpact = 0;
+        // the feed: the last drive intent the core named for this body
+        Vec3 feedPt;
+        float feedCruise = 0.0f;
+        bool feedLive = false;
     };
     std::map<int, Body> bodies;
     int nextId = 100;
@@ -10700,6 +10944,8 @@ struct ForceFakeHost : TestHost {
         out->struckDriver = b.qDriver;
         out->impactDv = b.qImpact;
         b.qRam = b.qShot = b.qWorld = b.qDriver = b.qImpact = 0.0f;
+        out->mission = b.feedLive ? 9 : 0;
+        out->cruise = (int)b.feedCruise;
         return true;
     }
     void CopBodySetHealth(int veh, float book01) override {
@@ -10724,34 +10970,32 @@ struct ForceFakeHost : TestHost {
         it->second.cmdSteer = steer;
         it->second.cmdSiren = siren;
     }
+    void CopBodyDriveTarget(int veh, const Vec3& at, float cruise) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return;
+        it->second.feedPt = at;
+        it->second.feedCruise = cruise;
+        it->second.feedLive = cruise > 0.05f;
+    }
+    void CopBodyPlace(int veh, const Vec3& at, float headingDeg) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return;
+        it->second.pos = at;
+        it->second.yaw = headingDeg * 0.0174533f;
+        it->second.speed = 0.0f;
+        it->second.vel = Vec3();
+    }
     float PlayerVehicleImpact() override { return 0.0f; }
     Body* Find(int veh) {
         auto it = bodies.find(veh);
         return it == bodies.end() ? nullptr : &it->second;
     }
     void StepAll(float dt) {
-        for (auto& kv : bodies) {
-            Body& b = kv.second;
-            if (b.cmdGas > 0.0f)
-                b.speed += b.cmdGas * 9.0f * dt;
-            if (b.cmdBrake > 0.0f) {
-                if (b.speed > 0.3f)
-                    b.speed -= b.cmdBrake * 13.0f * dt;
-                else {
-                    b.speed -= b.cmdBrake * 12.0f * dt;
-                    if (b.speed < -9.0f)
-                        b.speed = -9.0f;
-                }
-            }
-            b.speed -= b.speed * 0.30f * dt;
-            if (b.speed > 56.0f)
-                b.speed = 56.0f;
-            const float sf = Clamp(b.speed / 8.0f, -1.0f, 1.0f);
-            b.yaw -= b.cmdSteer * 3.4f * sf * dt; // inverted, like piece 1's fake
-            const Vec3 f(std::sin(b.yaw), std::cos(b.yaw), 0.0f);
-            b.pos = b.pos + f * b.speed * dt;
-            b.vel = f * b.speed;
-        }
+        for (auto& kv : bodies)
+            MirrorStep(kv.second.pos, kv.second.yaw, kv.second.speed, kv.second.vel,
+                       kv.second.feedPt, kv.second.feedCruise, kv.second.feedLive, dt);
     }
 };
 
@@ -11047,6 +11291,293 @@ static void TestCopForce() {
         CHECK(delta >= 4 && delta <= 14,
               "one shared field for the whole force: %d refreshes in 7.5 s (the 0.75 s cadence), not per-unit", delta);
     }
+
+    // ---- (vi) the complete update's second roadblock row: four cars
+    // in two rows - the front pair across the lanes at the block point
+    // (piece 2's law, untouched), the second pair one car-length of
+    // road behind it toward the player, staggered to the opposite
+    // laterals and angled (their stand points sit OFF the front row's
+    // line, back along the road, and inboard)
+    {
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        stageAnchor(grove, man);
+        gCop.felony = 1400.0f;
+        Vec3 front[2], back[2];
+        bool got = false;
+        for (float t = 0.0f; t < 90.0f && !got; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+            if (CopBlockCount() == kMaxBlockCars) {
+                front[0] = gCops[kMaxCopCars].pos;
+                front[1] = gCops[kMaxCopCars + 1].pos;
+                back[0] = gCops[kMaxCopCars + 2].pos;
+                back[1] = gCops[kMaxCopCars + 3].pos;
+                got = true;
+            }
+        }
+        CHECK(got, "the block places all %d cars (two rows)", kMaxBlockCars);
+        if (got) {
+            const Vec3 fMid = (front[0] + front[1]) * 0.5f;
+            const Vec3 bMid = (back[0] + back[1]) * 0.5f;
+            const float rowGap = (fMid - bMid).Length();
+            CHECK(rowGap > 3.0f && rowGap < 10.0f,
+                  "the second row stands one car-length behind the first (%.1f m)", rowGap);
+            const float backPair = (back[0] - back[1]).Length();
+            CHECK(backPair > 2.0f && backPair < 4.2f,
+                  "the second row's pair is staggered inboard (%.1f m apart)", backPair);
+            const float toPlayer = (bMid - man).Length();
+            const float frontToPlayer = (fMid - man).Length();
+            CHECK(toPlayer < frontToPlayer,
+                  "the angled row is the one the player meets first (%.0f m vs %.0f m)",
+                  toPlayer, frontToPlayer);
+        }
+        CopDismiss(); // leave no standing block cars behind: the unit
+                      // table is global across the suite, and a later
+                      // test's fresh host reuses the same body ids
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The /coptest machine's fake host: the force fake plus the decoys and
+// the two stagings the machine needs to be honest in a fake world:
+//  - the decoy car drives itself by the same MirrorStep law (its feed
+//    is stored by DecoyCarDrive), the decoy ped just stands;
+//  - LineBlocked models a city-block grid of building faces for the
+//    recovery staging's PLAIN-oracle probes (streets every 24 m around
+//    the Grove test ground): the wedge can be FOUND from anywhere.
+//    Sight keeps the skip-veh oracle the other cop sims use - the grid
+//    exists for staging, not for blinding the force;
+//  - CopBodyPlace wedges for real: a placed body cannot advance past
+//    the wall plane (its forward component is clamped at the plane)
+//    until it has reversed 2 m clear - the one property of a wall the
+//    recovery grade is about. Sideways and backward stay free, as
+//    they are at a real wall.
+struct CopTestFakeHost : ForceFakeHost {
+    struct DecoyCar {
+        bool up = false;
+        Vec3 pos, vel;
+        float yaw = 0.0f, speed = 0.0f;
+        Vec3 drivePt;
+        float cruise = 0.0f;
+    };
+    struct DecoyPed {
+        bool up = false;
+        Vec3 pos;
+        float health = 100.0f;
+    };
+    DecoyCar decoyCar;
+    DecoyPed decoyPed;
+    int SpawnDecoyCar(const Vec3& at, float headingDeg) override {
+        decoyCar = DecoyCar();
+        decoyCar.up = true;
+        decoyCar.pos = at;
+        decoyCar.yaw = headingDeg * 0.0174533f;
+        decoyCar.drivePt = at;
+        return 5001;
+    }
+    void DecoyCarDrive(int, const Vec3& at, float cruiseMps) override {
+        decoyCar.drivePt = at;
+        decoyCar.cruise = cruiseMps;
+    }
+    bool DecoyReport(int, Vec3* pos, Vec3* vel) override {
+        if (!decoyCar.up)
+            return false;
+        *pos = decoyCar.pos;
+        *vel = decoyCar.vel;
+        return true;
+    }
+    void RetireDecoy(int) override { decoyCar.up = false; }
+    int SpawnDecoyPed(const Vec3& at) override {
+        decoyPed = DecoyPed();
+        decoyPed.up = true;
+        decoyPed.pos = at;
+        // the man stands at a house front on his roadside: one real
+        // wall face through his spot, along the road. The recovery
+        // phase's probes find THIS wall beside the man he stands
+        // next to - the only building the fake keeps, after two
+        // city grids lied about sight (an axis-aligned carpet of
+        // houses cannot align with the graph's roads, so every
+        // chord between two road users "crossed a house" and the
+        // block phase's chase was blind from birth)
+        wall = true;
+        wallC = Vec3(at.x, at.y, at.z - 1.5f); // the base host's wall
+            // test wants the wall's centre BELOW the probe line's
+            // height (its z gate is strict) - the wall stands on the
+            // ground, the probes run at body height
+        wallDir = Vec3(1, 0, 0);
+        wallHalf = 30.0f;
+        return 6001;
+    }
+    bool DecoyPedReport(int, Vec3* pos, float* health) override {
+        if (!decoyPed.up)
+            return false;
+        *pos = decoyPed.pos;
+        *health = decoyPed.health;
+        return true;
+    }
+    void RetireDecoyPed(int) override { decoyPed.up = false; }
+    bool LineBlocked(const Vec3& a, const Vec3& b) override {
+        // the one house front (set when the decoy ped is staged -
+        // see SpawnDecoyPed) plus whatever the base host carries;
+        // the ground is otherwise open, and sight runs as the roads
+        // run
+        return TestHost::LineBlocked(a, b);
+    }
+    bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int veh) override {
+        return TestHost::LineBlockedSkipVeh(a, b, veh);
+    }
+    // the wedge
+    bool wedged = false;
+    int wedgeVeh = -1;
+    Vec3 wedgePos, wedgeDir;
+    void CopBodyPlace(int veh, const Vec3& at, float headingDeg) override {
+        ForceFakeHost::CopBodyPlace(veh, at, headingDeg);
+        wedged = true;
+        wedgeVeh = veh;
+        wedgePos = at;
+        wedgeDir = Vec3(std::sin(headingDeg * 0.0174533f), std::cos(headingDeg * 0.0174533f), 0.0f);
+    }
+    void StepTest(float dt) {
+        StepAll(dt);
+        if (decoyCar.up)
+            MirrorStep(decoyCar.pos, decoyCar.yaw, decoyCar.speed, decoyCar.vel,
+                       decoyCar.drivePt, decoyCar.cruise, decoyCar.cruise > 0.05f, dt);
+        if (wedged) {
+            Body* b = Find(wedgeVeh);
+            if (!b) {
+                wedged = false;
+            } else {
+                Vec3 rel = b->pos - wedgePos;
+                rel.z = 0.0f;
+                const float fwdD = rel.Dot(wedgeDir);
+                Vec3 side = rel - wedgeDir * fwdD;
+                if (fwdD < -2.0f) {
+                    wedged = false; // backed clear: the wall lets go
+                } else if (fwdD > 0.3f) {
+                    b->pos = wedgePos + wedgeDir * 0.3f + side;
+                    b->pos.z = wedgePos.z;
+                    if (b->speed > 0.0f)
+                        b->speed = 0.0f;
+                    b->vel = Vec3(std::sin(b->yaw), std::cos(b->yaw), 0.0f) * b->speed;
+                }
+            }
+        }
+    }
+};
+
+// The whole /coptest machine, run end to end against the fake: the
+// sim plays the user's part where the machine asks (it peppers the
+// anchor once the decoys are down, takes a car when a chase is on,
+// bails when told by circumstance) and then grades the GRADER off its
+// own sheet: every counted scenario must pass in the fake world, the
+// run must finish, and the cleanup must be real (no bodies, no
+// decoys, the felony page handed back at its pre-run value).
+static void TestCopTest() {
+    CopTestFakeHost host;
+    SetHost(&host);
+    WideStage();
+    CopDismiss(); // sanitize the global unit table against this fresh
+                  // host: an earlier test may have left units standing
+                  // whose body ids this host reuses for new bodies
+                  // (their stale reports poisoned a whole run once)
+    CopReset();
+    ThreatNoteBoss(-1, false, Vec3(), false);
+    CHECK(LoadVehicleGraphFromRepo(), "the coptest sim rides the real vehicle graph");
+    const float dt = 0.02f;
+    const Vec3 stand(2486.0f, -1654.0f, 13.5f);
+    host.hasPlayer = true;
+    host.player = stand;
+    host.vehicle = -1;
+    host.velocity = Vec3();
+    CopForceFelony(333.0f); // a page with a past: cleanup must hand it back
+    CHECK(CopTestStart(), "the self-test starts");
+    bool bailed = false, droveCar = false, sawDecoy = false, peppered = false;
+    float driveT = 0.0f;
+    float t = 0.0f;
+    for (; t < 1200.0f && CopTestRunning(); t += dt) {
+        // the user's part, by circumstance alone. The peppering waits
+        // until the decoy acts are over (a decoy has been up and is
+        // down again) and the anchor is not yet pursuing: that is
+        // player phase 1's stage exactly (a fresh anchor, calibrating
+        // or stood by, the user told to shoot it). An earlier
+        // choreography peppered whenever the decoys were down, which
+        // included the opening SPIKE, and shot the felony to 2819
+        // under the spike route (the machine's own log convicted it:
+        // "the spike is over" at felony 2819)
+        if (host.decoyCar.up || host.decoyPed.up)
+            sawDecoy = true;
+        const bool decoysDown = !host.decoyCar.up && !host.decoyPed.up;
+        if (sawDecoy && decoysDown && gCop.veh >= 0 && gCop.mode != COP_PURSUE &&
+            gCop.mode != COP_BLOCK && !droveCar) {
+            // player phase 1's ask: his hand on the anchor - one host
+            // point a tick through the shot channel until it lands
+            if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                b->qShot = 1.0f;
+                peppered = true;
+            }
+        }
+        // he takes a car only for a chase that is on HIM - which the
+        // sim knows because it did the peppering that opened it. An
+        // earlier gate keyed on felony + any pursuit, and fired at
+        // the recovery->block seam (recovery's forced 4096, pursuers
+        // still warm from the ped), sending the "player" 1200 m east
+        // through the whole block phase
+        if (peppered && decoysDown && gThreat.felony >= 659.0f && CopPursuingCount() > 0 && !droveCar) {
+            droveCar = true;
+            host.vehicle = 42; // he takes a car and drives
+        }
+        if (droveCar && !bailed) {
+            driveT += dt;
+            host.velocity = Vec3(20.0f, 0.0f, 0.0f);
+            host.player = host.player + host.velocity * dt;
+            int ps = -1;
+            float best = 1e9f;
+            for (int s = 0; s < kMaxCopUnits; ++s) {
+                if (gCops[s].veh < 0 || gCops[s].mode != COP_PURSUE)
+                    continue;
+                const float d = (gCops[s].pos - host.player).Length();
+                if (d < best) {
+                    best = d;
+                    ps = s;
+                }
+            }
+            // he bails when the chase is on him - after he has actually
+            // DRIVEN a few seconds. The first cut bailed on the very
+            // tick he took the car (the anchor was already on top of
+            // him from phase 1), so the bail phase never once saw him
+            // in a car: no user teleports in and out in one frame.
+            if (driveT > 3.0f && ps >= 0 && best < 45.0f) {
+                bailed = true; // he gets out and stays on foot
+                host.vehicle = -1;
+                host.velocity = Vec3();
+            }
+        }
+        CopTick(dt, host.player);
+        host.StepTest(dt);
+    }
+    CHECK(!CopTestRunning(), "the self-test finished its run (%.0f s of sim)", t);
+    const CopTestSheet sheet = CopTestSheetForTest();
+    CHECK(sheet.counted >= 9, "the sheet counted %d scenarios (spike..soak, roadblock may skip)", sheet.counted);
+    CHECK(sheet.passed == sheet.counted, "every counted scenario passed in the fake world (%d of %d)",
+          sheet.passed, sheet.counted);
+    static const char* const kMustPass[] = { "spike", "arrival", "ram", "siren", "runover",
+                                             "recovery", "player-felony", "bailout", "soak" };
+    for (const char* name : kMustPass) {
+        bool pass = false, counted = false;
+        const bool found = CopTestVerdictForTest(name, &pass, &counted);
+        CHECK(found && counted && pass, "coptest sheet: %s passed", name);
+    }
+    {
+        bool pass = false, counted = false;
+        const bool found = CopTestVerdictForTest("roadblock", &pass, &counted);
+        CHECK(!found || !counted || pass, "coptest sheet: the roadblock passed or honestly skipped");
+    }
+    CHECK(CopUnitCount() == 0, "cleanup: the force stood down whole (%d units left)", CopUnitCount());
+    CHECK(!host.decoyCar.up && !host.decoyPed.up, "cleanup: both decoys retired");
+    CHECK(std::fabs(gThreat.felony - 333.0f) < 1.5f,
+          "cleanup: the felony page was handed back at its pre-run value (%.0f)", gThreat.felony);
+    CopReset();
+    SetHost(nullptr);
 }
 
 // piece 3, stage 2: the cop's OWN body - the converter's real output in
@@ -11356,6 +11887,7 @@ int main(int argc, char** argv) {
     TestBossCoreJump();
     TestCop();
     TestCopForce();
+    TestCopTest();
     TestCopCarModel();
     TestAtlas();
     TestSoldierPoseBounds();
