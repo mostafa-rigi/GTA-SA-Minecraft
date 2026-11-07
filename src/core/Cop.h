@@ -215,11 +215,19 @@ struct CopProfileData {
                       // difficulty's cop type (InitCopState, COP_AI.C):
                       // WHEELFORCES.C applies it as frontFS/rearFS
                       // scale * 68 / 32 on top of traction / 4096
-    float wheelDisp[4][3]; // his wheel placements, metres at 256 units
-                      // = 1 m, POST-FixCarCos: (x, y, z) per wheel in
-                      // the LCF's own order [0..3]
+    float wheelDisp[4][3]; // his wheel placements, metres at the
+                      // convicted 153.6 units = 1 m (fix round 3: the
+                      // geometry factor - his length 754 u -> 4.9 m and
+                      // wheelbase 429 u -> 2.8 m convict it; 256 was
+                      // the speed rescale's constant, not geometry's),
+                      // POST-FixCarCos: (x, y, z) per wheel in the
+                      // LCF's own order [0..3]
     float colBox[3];  // his collision cage half-extents (129, 88, 382)
-    float cog[3];     // his centre of gravity, POST-fix (0, -95, 13)
+    float cog[3];     // his centre of gravity (0, -95, 0) - the data's
+                      // own values: FixCarCos shifts wheelDisp/cPoints
+                      // and touches nothing else, cog included (piece
+                      // 3's "+13" here was the wheel shift's mirror,
+                      // not data; nothing consumed it)
 };
 const CopProfileData& CopProfile();
 // powerRatio as a gain on the pedal: in his physics the delivered

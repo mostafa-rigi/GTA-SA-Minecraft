@@ -146,23 +146,46 @@ bool CopCarBodyExtents(Vec3* lo, Vec3* hi) {
     return true;
 }
 
-// The drawn wheel centre's height, measured by the converter off the
-// body's own arch: the arch lip sits at core z -0.01 and the floor pan
-// at -0.344; the tyre's swept radius is CARS.C's sizeScale (wheelSize
-// 49 * 14142 / 10000 = 69 units = 0.27 m), which puts the centre at
-// -0.25 (0.18 m of clearance under the pan). DrawCarWheels' own
-// sWheelPos.vy formula does not reproduce this under the frame map the
-// body render proves, so the measurement rules - the gap is named in
-// DRIVER2-STEP3-fa.md.
-constexpr float kCopWheelCenterZ = -0.25f;
+// The drawn wheel centres, from the game's own placement law
+// (CARS.C DrawCarWheels), re-derived in fix round 3 - piece 3 placed
+// them at the raw LCF wheelDisp with only the frame map applied, which
+// dropped two terms of the law and glued the wheels on:
+// - SIDE: DrawCarWheels places a wheel at sWheelPos.x = 17 - vx for
+//   wheelnums 0,1 and -17 - vx for 2,3 (the 17 is the wheel model's
+//   own half-width: the LCF vx is not the centre). Centres land at
+//   |x| = 105..109 of his units, the tyre's outer face at 122.5 - just
+//   inside the body slab (132), as the original sits. Piece 3's
+//   centres (122..126, outer face up to 143) poked the tyres ~0.07 m
+//   OUTSIDE the slab: the eye test's "wheels glued on".
+// - FORWARD: sWheelPos.z = -vz with vz post-FixCarCos, and the body
+//   frame's cog z is 0 in the data (FixCarCos never touches cog), so
+//   the core's forward is vz itself: wheels 0,2 at +222 (the front
+//   axle - even wheelnums steer, DrawCarWheels' front model), 1,3
+//   at -207. Wheelbase 429 units = 2.79 m at the convicted factor.
+// - HEIGHT: the law's vy term puts the centre at (-wheelSize - vy)
+//   - sus + 14 = -5 - sus under the physics origin; the model origin
+//   rides cog y = -95 over that origin, so in the body frame the
+//   centre is 90 - sus, and the measured rest compression (26) fixes
+//   it at 64 units under the model origin. Piece 3's arch measurement
+//   (lip at core z -0.017, pan at -0.573 at this factor) fixed the
+//   same 64 independently - formula and measurement agree, and the
+//   tyre's swept radius is CARS.C's sizeScale (wheelSize 49 * 14142
+//   / 10000 = 69 units = 0.449 m), so the contact patch sits at
+//   -0.866 m in the body frame, 0.29 m under the pan.
+constexpr float kHisUnitsPerMetre = 153.6f; // the profile's own factor
+constexpr float kCopWheelCenterZ = -64.0f / kHisUnitsPerMetre;
 
 void CopWheelCenters(Vec3 out[4]) {
     const CopProfileData& prof = CopProfile();
     for (int k = 0; k < 4; ++k) {
-        // the profile's wheelDisp is the LCF frame (x, y, z) post-fix;
-        // the draw law negates vz (it is the axle's forward distance),
-        // and the frame map negates x (see the converter's docstring).
-        out[k] = Vec3(-prof.wheelDisp[k][0], prof.wheelDisp[k][2], kCopWheelCenterZ);
+        // back to his units for the law's own arithmetic, then out in
+        // metres: drawn x = (k & 2) == 0 ? 17 - vx : -17 - vx, and the
+        // frame map negates x (see the converter's docstring); forward
+        // is the profile's post-fix vz, unchanged by the law's frame.
+        const float vx = prof.wheelDisp[k][0] * kHisUnitsPerMetre;
+        const float drawnX = ((k & 2) == 0 ? 17.0f : -17.0f) - vx;
+        out[k] = Vec3(-drawnX / kHisUnitsPerMetre, prof.wheelDisp[k][2],
+                      kCopWheelCenterZ);
     }
 }
 

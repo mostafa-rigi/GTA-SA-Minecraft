@@ -10332,6 +10332,85 @@ static void TestCop() {
         }
     }
 
+    // ---- (j) fix round 3: the blast cap. One frame can strip the host
+    // body whole (a point-blank RPG takes it 1000 -> 0 in the host's own
+    // arithmetic); billed raw at the anchor that is the entire book in
+    // one tick - the eye test's one-RPG death, logged at 27503. The cap
+    // makes one tick bill at most one blast-class price (8100) across
+    // the shot, world and driver channels together: an RPG costs what
+    // the design always said (~8100), three-plus of them retire him,
+    // and a blast that hits the car and the driver in the same frame
+    // is still ONE blast.
+    {
+        auto stageBlastCop = [&]() {
+            CopReset();
+            host.burnedOut = false;
+            host.driverDown = false;
+            float copS = road.NearestDist(Vec3(2480, -1660, 13)) + 30.0f;
+            Vec3 dir;
+            const Vec3 copAt = road.PosAt(copS, &dir);
+            host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+            CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the blast-cap cop stands up");
+            gCop.mode = COP_IDLE;
+            gCop.steerCalDone = true;
+            gCop.steerFlip = true;
+            gCop.spikeDone = true;
+            host.vehicle = 42;
+            Vec3 md;
+            const Vec3 mp = road.PosAt(copS + 25.0f, &md);
+            host.velocity = md * 35.0f;
+            host.player = mp;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        };
+        auto oneTick = [&]() {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(road.NearestDist(host.carPos) + 25.0f, &md);
+            host.velocity = md * 15.0f;
+            host.player = mp;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        };
+        stageBlastCop();
+        // four full-strip frames: the first three bill one blast each
+        // and he fights on; the fourth crosses his own line
+        for (int hit = 1; hit <= 4; ++hit) {
+            const float before = gCop.totalDamage;
+            host.struckShotQ = 1019.0f; // the host body stripped whole, and below
+            oneTick();
+            CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
+                  "blast %d billed one blast-class price, not the raw frame (%.0f)",
+                  hit, gCop.totalDamage - before);
+            if (hit < 4)
+                CHECK(CopActive() && !host.burnedOut, "blast %d does not retire him", hit);
+        }
+        CHECK(!CopActive() && host.burnedOut,
+              "the fourth blast retires him - three-plus RPG hits, never one");
+        // a blast that strips car and driver in the SAME frame is one blast
+        stageBlastCop();
+        {
+            const float before = gCop.totalDamage;
+            host.struckShotQ = 1000.0f;
+            host.struckDriverQ = 1000.0f;
+            oneTick();
+            CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
+                  "car and driver stripped together bill one blast (%.0f)",
+                  gCop.totalDamage - before);
+            CHECK(CopActive() && !host.burnedOut, "he survives the combined blast");
+        }
+        // the driver channel alone, stripped whole, is likewise one blast
+        stageBlastCop();
+        {
+            const float before = gCop.totalDamage;
+            host.struckDriverQ = 1019.0f;
+            oneTick();
+            CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
+                  "the driver stripped whole bills one blast (%.0f)",
+                  gCop.totalDamage - before);
+            CHECK(CopActive(), "the unit is not the driver's life - he drives on");
+        }
+    }
+
     // ---- (e) shared knowledge: the boss in combat, a fresh cop starts
     // informed; the record is one, read both ways
     {
@@ -10366,11 +10445,25 @@ static void TestCop() {
         CHECK(prof.powerRatio == 4096 && prof.traction == 4096 && prof.susCoeff == 4096 &&
                   prof.mass == 4096 && prof.wheelSize == 49 && prof.frictionScaleRatio == 68,
               "the profile is the decoded row: power/traction/sus/mass 4096, wheel 49, friction 68");
-        CHECK(std::fabs(prof.wheelDisp[0][2] - 222.0f / 256.0f) < 1e-4f &&
-                  std::fabs(prof.wheelDisp[1][2] + 207.0f / 256.0f) < 1e-4f &&
-                  std::fabs(prof.wheelDisp[0][2] - prof.wheelDisp[1][2] - 429.0f / 256.0f) < 1e-4f,
+        CHECK(std::fabs(prof.wheelDisp[0][2] - 222.0f / 153.6f) < 1e-4f &&
+                  std::fabs(prof.wheelDisp[1][2] + 207.0f / 153.6f) < 1e-4f &&
+                  std::fabs(prof.wheelDisp[0][2] - prof.wheelDisp[1][2] - 429.0f / 153.6f) < 1e-4f,
               "his wheels sit at the post-FixCarCos placements (wheelbase %.3f m)",
               prof.wheelDisp[0][2] - prof.wheelDisp[1][2]);
+        // fix round 3: the geometry factor itself is pinned - at the
+        // convicted 153.6 units = 1 m his wheelbase is a real sedan's
+        // 2.79 m and his collision cage is 4.97 m long; at the old 256
+        // both came out at 0.6x (1.68 m / 2.98 m), the drawn body's
+        // "much smaller than the other cars" in numbers
+        CHECK(prof.wheelDisp[0][2] - prof.wheelDisp[1][2] > 2.7f &&
+                  prof.wheelDisp[0][2] - prof.wheelDisp[1][2] < 2.9f,
+              "his wheelbase is a real car's (%.3f m)",
+              prof.wheelDisp[0][2] - prof.wheelDisp[1][2]);
+        CHECK(std::fabs(prof.colBox[2] - 382.0f / 153.6f) < 1e-4f &&
+                  2.0f * prof.colBox[2] > 4.8f && 2.0f * prof.colBox[2] < 5.1f,
+              "his collision cage is a real car's length (%.3f m)", 2.0f * prof.colBox[2]);
+        CHECK(prof.cog[1] < -0.6f && prof.cog[1] > -0.65f && prof.cog[2] == 0.0f,
+              "his cog is the data's own (0, -95, 0) - FixCarCos never touches it");
         CHECK(CopProfilePowerGain() == 1.0f,
               "his power coefficient is the reference 1.0 - the gain is exactly one");
         CHECK(std::fabs(CopProfileGrip() - 2.125f) < 1e-6f,
@@ -10668,16 +10761,25 @@ static void TestCopForce() {
             }
         CHECK(slotA > 0 && slotB > 0, "two ladder units to spend (%d, %d)", slotA, slotB);
         // the player's gun spends the first: his book fills past 27000
-        // through the shot channel alone, so the loss is wholly his
-        if (ForceFakeHost::Body* b = host.Find(gCops[slotA].veh))
-            b->qShot = 1200.0f;
-        tick(0.1f);
+        // through the shot channel alone, so the loss is wholly his.
+        // Fix round 3: the staging rides over several ticks because one
+        // tick now bills at most one blast-class price (8100) however
+        // much raw damage the fake host queues - that cap is the law
+        // under test in block (j); the attribution intent here is
+        // unchanged (shot channel = the player's work, world = not).
+        for (int i = 0; i < 12 && gCops[slotA].veh >= 0; ++i) {
+            if (ForceFakeHost::Body* b = host.Find(gCops[slotA].veh))
+                b->qShot = 1200.0f;
+            tick(dt);
+        }
         CHECK(gCops[slotA].veh < 0, "the shot-spent unit retired");
         CHECK(gThreat.ourUnitsLost == 1, "a player-caused retirement counted (%d)", gThreat.ourUnitsLost);
         // the world spends the second: nothing of it is the player's
-        if (ForceFakeHost::Body* b = host.Find(gCops[slotB].veh))
-            b->qWorld = 1200.0f;
-        tick(0.1f);
+        for (int i = 0; i < 12 && gCops[slotB].veh >= 0; ++i) {
+            if (ForceFakeHost::Body* b = host.Find(gCops[slotB].veh))
+                b->qWorld = 1200.0f;
+            tick(dt);
+        }
         CHECK(gCops[slotB].veh < 0, "the world-spent unit retired");
         CHECK(gThreat.ourUnitsLost == 1, "a world-caused retirement did NOT count (%d)", gThreat.ourUnitsLost);
         // replacements ride the respawn timer in, at range
@@ -10879,10 +10981,14 @@ static void TestCopCarModel() {
     CHECK(CopCarBodyTris() == 252, "his body is 252 triangles (got %d)", CopCarBodyTris());
     Vec3 lo, hi;
     CHECK(CopCarBodyExtents(&lo, &hi), "the body measures out");
-    CHECK(std::fabs(lo.x + 0.5156f) < 0.01f && std::fabs(hi.x - 0.5156f) < 0.01f &&
-              std::fabs(lo.y + 1.4727f) < 0.01f && std::fabs(hi.y - 1.4727f) < 0.01f &&
-              std::fabs(lo.z + 0.3438f) < 0.01f && std::fabs(hi.z - 0.3438f) < 0.01f,
-          "his dimensions are the disc's own: x +-0.516, y +-1.473, z +-0.344 (got %.3f..%.3f, %.3f..%.3f, %.3f..%.3f)",
+    // fix round 3: at the convicted geometry factor (153.6 units = 1 m)
+    // the disc's own units (x +-132, y +-377, z +-88) are a real sedan:
+    // 1.72 m wide, 4.91 m long, 1.15 m tall. At the old 256 factor this
+    // same check pinned the 0.6x body the eye test rejected.
+    CHECK(std::fabs(lo.x + 0.8594f) < 0.01f && std::fabs(hi.x - 0.8594f) < 0.01f &&
+              std::fabs(lo.y + 2.4544f) < 0.01f && std::fabs(hi.y - 2.4544f) < 0.01f &&
+              std::fabs(lo.z + 0.5729f) < 0.01f && std::fabs(hi.z - 0.5729f) < 0.01f,
+          "his dimensions are the disc's own: x +-0.859, y +-2.454, z +-0.573 (got %.3f..%.3f, %.3f..%.3f, %.3f..%.3f)",
           lo.x, hi.x, lo.y, hi.y, lo.z, hi.z);
 
     // broken files are refused, whole and loudly
@@ -10894,16 +11000,23 @@ static void TestCopCarModel() {
     CHECK(LoadCopCarModel(bytes.data(), bytes.size()), "the real bin loads back");
 
     // his wheel centres, from his own LCF through the draw law
+    // (DrawCarWheels, fix round 3): side = (17 - vx) / (-17 - vx) by
+    // wheelnum half - the LCF vx is not the centre - forward = the
+    // post-FixCarCos vz, height = the measured 64 units. At the old
+    // law this check pinned centres at -vx outright: the tyres sat
+    // ~0.07 m outside the body's slab, the eye test's "glued on".
     Vec3 centers[4];
     CopWheelCenters(centers);
-    CHECK(std::fabs(centers[0].x + 0.4766f) < 0.005f && std::fabs(centers[0].y - 0.8672f) < 0.005f &&
-              std::fabs(centers[2].x - 0.4805f) < 0.005f && std::fabs(centers[2].y - 0.8672f) < 0.005f,
+    CHECK(std::fabs(centers[0].x - 0.6836f) < 0.005f && std::fabs(centers[0].y - 1.4453f) < 0.005f &&
+              std::fabs(centers[2].x + 0.6901f) < 0.005f && std::fabs(centers[2].y - 1.4453f) < 0.005f,
           "the front axle sits at his LCF placements (got %.3f/%.3f and %.3f/%.3f)",
           centers[0].x, centers[0].y, centers[2].x, centers[2].y);
-    CHECK(std::fabs(centers[1].y + 0.8086f) < 0.005f && std::fabs(centers[3].y + 0.8086f) < 0.005f,
+    CHECK(std::fabs(centers[1].y + 1.3477f) < 0.005f && std::fabs(centers[3].y + 1.3477f) < 0.005f,
           "the rear axle sits at his LCF placements (got %.3f, %.3f)", centers[1].y, centers[3].y);
     CHECK(centers[0].z == centers[1].z && centers[1].z == centers[2].z && centers[2].z == centers[3].z,
           "all four centres share the measured arch height");
+    CHECK(std::fabs(centers[0].z + 64.0f / 153.6f) < 0.005f,
+          "the centres ride 64 of his units under his origin (z %.3f)", centers[0].z);
 
     // the draw: body + four wheels through the sink, at the identity pose
     RecordSink sink;
@@ -10913,10 +11026,10 @@ static void TestCopCarModel() {
     DrawCopCar(pose, 0.0f, centers, 0.0f, 0.0f, false, 1.0f, 1.0f, 1.0f, 1.0f);
     CHECK(sink.quads[0] == 252 + 4 * 16, "the draw emits his 252 body tris + 4x16 wheel tris (%d)",
           sink.quads[0]);
-    CHECK(sink.lo.z < -0.50f && sink.lo.z > -0.56f,
+    CHECK(sink.lo.z < -0.84f && sink.lo.z > -0.89f,
           "the wheels reach the ground line his arch measures (lo z %.3f)", sink.lo.z);
-    CHECK(std::fabs(sink.hi.z - 0.3438f) < 0.01f, "the light bar is the highest point (hi z %.3f)", sink.hi.z);
-    CHECK(std::fabs(sink.hi.y - 1.4727f) < 0.01f && std::fabs(sink.lo.y + 1.4727f) < 0.01f,
+    CHECK(std::fabs(sink.hi.z - 0.5729f) < 0.01f, "the light bar is the highest point (hi z %.3f)", sink.hi.z);
+    CHECK(std::fabs(sink.hi.y - 2.4544f) < 0.01f && std::fabs(sink.lo.y + 2.4544f) < 0.01f,
           "nose and tail are his own length (y %.3f..%.3f)", sink.lo.y, sink.hi.y);
 
     // dented to his book's end and spun a quarter turn: same count, sane box
@@ -10924,7 +11037,11 @@ static void TestCopCarModel() {
     DrawCopCar(pose, 1.0f, centers, 0.3f, 1.5708f, true, 1.0f, 1.0f, 1.0f, 1.0f);
     CHECK(sink.quads[0] == 252 + 4 * 16, "dent + steer + spin + fast wheels draw the same count (%d)",
           sink.quads[0]);
-    CHECK(sink.lo.x > -0.85f && sink.hi.x < 0.85f && sink.lo.z > -0.60f && sink.hi.z < 0.60f,
+    // the envelope is his own at the convicted factor: body x +-0.859
+    // plus a dent's reach, z from the wheels' contact patch (-0.866)
+    // to the roof (0.573) plus the same dent reach - a vert outside
+    // this box has flown off, anything inside is his own geometry
+    CHECK(sink.lo.x > -1.05f && sink.hi.x < 1.05f && sink.lo.z > -0.95f && sink.hi.z < 0.75f,
           "the dented, spun draw stays inside his own envelope (x %.2f..%.2f, z %.2f..%.2f)",
           sink.lo.x, sink.hi.x, sink.lo.z, sink.hi.z);
 

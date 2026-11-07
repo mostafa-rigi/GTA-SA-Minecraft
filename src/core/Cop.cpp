@@ -78,11 +78,29 @@ constexpr float kWreckLine = 27000.0f;     // the original's retirement line
 //   points == the host body's own 1000-point life, 27 per point. An RPG
 //   that would take ~300 host points off the body bills ~8100 of his:
 //   expensive, and three-plus direct hits from retiring him - never one.
+//   FIX ROUND 3 (2026-11-07): the "~300 host points" was the design's
+//   assumption, and the host does not honour it - a point-blank blast
+//   strips the body 1000 -> 0 (or below) inside one frame, so the raw
+//   per-tick delta billed the WHOLE book at once (the eye test's log
+//   reads the proof: one retirement at 27503 of his points, billed by a
+//   single event). The anchor now rules as a CAP, not a hope: one tick
+//   (one report) can bill at most one blast-class price - 300 host
+//   points' worth, 8100 - across the shot, world and driver channels
+//   together. Honest traffic never reaches it (a bullet's per-tick
+//   delta is a few host points; fire drains a fraction of a point a
+//   tick and accumulates uncapped over time), so bullets stay cheap,
+//   fire stays a priced drain, and no single frame can counterfeit a
+//   whole life. Collisions keep their own BCOLLIDE-shaped channel
+//   (impactPrice, capped per impact) beside this one.
 constexpr float kImpactFree = 2.8f;    // m/s of velocity change: free
 constexpr float kImpactRate = 340.0f;  // his points per m/s past it
 constexpr float kImpactCap = 1500.0f;  // per single impact, before discount
 constexpr float kPursuerToughness = 0.875f; // ApplyDamage, difficulty 2
 constexpr float kSaBookRate = 27.0f;   // host health point -> his points
+constexpr float kBlastPrice = 8100.0f; // one blast-class event: 300 host
+                                       // points at the anchor - the most
+                                       // one tick's health-delta channels
+                                       // may bill, all of them together
 
 // FELONY.C's own tables.
 constexpr int kPlacid[12] = { 659, 659, 659, 659, 659, 1318, 659, 659, 659, 659, 659, 4096 };
@@ -177,14 +195,21 @@ constexpr float kBlockWakeDist = 45.0f;
 // - colBox (129, 88, 382) and the 12 cPoints: his collision cage.
 //   Carried as measurement; collision stays the host car's (the body
 //   step states what the eye sees vs what collides).
+// the geometry factor (fix round 3): his metres are his units over
+// 153.6 - convicted from his own length and wheelbase, cross-checked
+// on the cone and the road tile in his level data (DRIVER2-STEP3-fa.md
+// carries the whole derivation). The 256 that stood here before was
+// the brain's speed-rescale constant wearing geometry's clothes; it
+// shrank every carried length to 0.6x.
+constexpr float kHisUnitsPerMetre = 153.6f;
 const CopProfileData kCopProfile = {
     4096, 4096, 4096, 4096, 49, 68,
-    { { 122.0f / 256.0f, -30.0f / 256.0f, 222.0f / 256.0f },
-      { 125.0f / 256.0f, -30.0f / 256.0f, -207.0f / 256.0f },
-      { -123.0f / 256.0f, -30.0f / 256.0f, 222.0f / 256.0f },
-      { -126.0f / 256.0f, -30.0f / 256.0f, -207.0f / 256.0f } },
-    { 129.0f / 256.0f, 88.0f / 256.0f, 382.0f / 256.0f },
-    { 0.0f, -95.0f / 256.0f, 13.0f / 256.0f },
+    { { 122.0f / kHisUnitsPerMetre, -30.0f / kHisUnitsPerMetre, 222.0f / kHisUnitsPerMetre },
+      { 125.0f / kHisUnitsPerMetre, -30.0f / kHisUnitsPerMetre, -207.0f / kHisUnitsPerMetre },
+      { -123.0f / kHisUnitsPerMetre, -30.0f / kHisUnitsPerMetre, 222.0f / kHisUnitsPerMetre },
+      { -126.0f / kHisUnitsPerMetre, -30.0f / kHisUnitsPerMetre, -207.0f / kHisUnitsPerMetre } },
+    { 129.0f / kHisUnitsPerMetre, 88.0f / kHisUnitsPerMetre, 382.0f / kHisUnitsPerMetre },
+    { 0.0f, -95.0f / kHisUnitsPerMetre, 0.0f },
 };
 int sProfilePowerOverride = -1; // the sims' hook; -1 = the decoded row
 
@@ -1078,8 +1103,20 @@ void CopTick(float dt, const Vec3& playerPos) {
                           kPursuerToughness;
             c.totalDamage += impactPrice;
         }
-        c.totalDamage += (rep.struckShot + rep.struckWorld + rep.struckDriver) * kSaBookRate;
-        c.playerBookDamage += rep.struckShot * kSaBookRate + rep.struckDriver * kSaBookRate +
+        // the health-delta channels, blast-capped as one sum (fix round
+        // 3, see kBlastPrice): a frame that strips the whole body bills
+        // one blast, never the whole book. The player's share of the
+        // delta (shot + driver channels) scales by the same fraction
+        // the cap leaves standing, so the ourUnitsLost attribution at
+        // retirement reads the billed book, not the raw host numbers.
+        const float rawDeltaPts =
+            (rep.struckShot + rep.struckWorld + rep.struckDriver) * kSaBookRate;
+        const float deltaBill = std::fmin(rawDeltaPts, kBlastPrice);
+        c.totalDamage += deltaBill;
+        float playerDeltaPts = (rep.struckShot + rep.struckDriver) * kSaBookRate;
+        if (rawDeltaPts > deltaBill && rawDeltaPts > 0.0f)
+            playerDeltaPts *= deltaBill / rawDeltaPts;
+        c.playerBookDamage += playerDeltaPts +
                               (rep.struckRam > 0.5f ? impactPrice : 0.0f);
         c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
         // the book is DISPLAYED on the body (step 1's display band): the
