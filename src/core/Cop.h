@@ -4,10 +4,12 @@
 // the city ours. The brain is a port of REDRIVER 2's CopControl1 +
 // FELONY.C - read from the decompiled PS1 code, not reconstructed from
 // behaviour; every rescale from the original's units is documented in
-// Cop.cpp and in DRIVER2-STEP1-fa.md / DRIVER2-STEP2-fa.md. His model's
-// own physics constants (powerRatio and friends) live in the original
-// disc's CHICAGO.LCF; what drives him today is the original's handling
-// TYPE and control law on the host car's own physics - stated, never
+// Cop.cpp and in DRIVER2-STEP1-fa.md / DRIVER2-STEP2-fa.md. Piece 3
+// (DRIVER2-STEP3-fa.md) brought the rest of him from the user's own
+// disc: his CHICAGO.LCF constants as the control profile below, his own
+// body drawn over the host car (CopCarModel), and his own voice
+// (VOICES2.BLK). What still is not his: the host car's physics under
+// the body, and the collision the host resolves - stated, never
 // dressed up.
 //
 // Step 2 grows the one cop into the force the original manages: a ladder

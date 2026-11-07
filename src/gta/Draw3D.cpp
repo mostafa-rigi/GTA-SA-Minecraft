@@ -150,6 +150,8 @@ struct Im3DSink : ModelSink {
             SetRaster(gAtlasTex.Raster());
         else if (tex >= MT_SOLDIER && tex < MT_SOLDIER + 3 && gSoldierTex[tex - MT_SOLDIER].tex)
             SetRaster(gSoldierTex[tex - MT_SOLDIER].Raster()); // the CS soldier's own files
+        else if (tex >= MT_COP && tex < MT_COP + kCopTexMax && gCopTex[tex - MT_COP].tex)
+            SetRaster(gCopTex[tex - MT_COP].Raster()); // the Driver 2 cop's own files
         else
             SetRaster(gEntityTex.Raster());
     }

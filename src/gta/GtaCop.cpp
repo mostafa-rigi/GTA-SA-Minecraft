@@ -13,11 +13,15 @@
 #include "common.h"
 #include "extensions/ScriptCommands.h"
 
+#include "CCamera.h"   // TheCamera: CopRender's distance/frustum courtesy
 #include "Cop.h"
+#include "CopCarModel.h" // DrawCopCar / CopWheelCenters: his own body (piece 3)
 #include "Core.h"
 #include "GtaMobs.h"   // BridgePlayerShotAge
 #include "PedSkins.h"  // PedSkinsExcludePed
+#include "Render3D.h"  // AddShadow
 #include "Sound.h"     // SetPosLoop / PlaySfx: his own siren, engine and radio (piece 3)
+#include "Textures.h"  // CopBodyFilesReady
 
 using namespace plugin;
 
@@ -67,6 +71,10 @@ struct CopBodyState {
     // engine layer currently sounding (his idle/revs swap rides it)
     bool sirenPrev = false;
     int engineEv = -1;
+    // piece 3's drawn-body state: the wheels' spin angle (accumulated
+    // in Pre off the car's own travel) and his speed, for the render
+    float wheelSpin = 0.0f;
+    float speedMps = 0.0f;
 };
 CopBodyState sBodies[kMaxCopUnits];
 
@@ -141,6 +149,14 @@ void CopSessionReset() {
     sPlayerImpactPeak = 0.0f;
 }
 
+// the drawn wheel's radius: CARS.C's rewrite scales the ring by
+// wheelSize * 14142 / 10000 = 69 of his units at 256 units = 1 m
+constexpr float kCopWheelRadiusM = 69.0f / 256.0f;
+// DrawCarWheels swaps CLEANWHEEL for FASTWHEEL when the wheel's angular
+// increment passes 400 of 4096 per 1/50 s tick: 400/4096 of a turn per
+// tick is ~30.7 rad/s, which at his wheel radius is ~8.3 m/s of road
+constexpr float kCopFastWheelMps = 8.3f;
+
 void CopBodyPre(float dt) {
     // every body's driver, every frame (the one-unit law): what he lost
     // since the last frame is measured for his unit's book, and his
@@ -149,6 +165,18 @@ void CopBodyPre(float dt) {
         CopBodyState& b = sBodies[i];
         if (!b.used)
             continue;
+        // his drawn wheels turn with his own travel (piece 3): signed
+        // speed along the nose off the vehicle itself, spun at his
+        // wheel radius - forward travel decreases the angle, the
+        // convention DrawCopCar documents
+        if (CVehicle* veh = LiveVeh(b)) {
+            const float fwdSpeed = (veh->m_vecMoveSpeed.x * veh->m_matrix->up.x +
+                                    veh->m_vecMoveSpeed.y * veh->m_matrix->up.y +
+                                    veh->m_vecMoveSpeed.z * veh->m_matrix->up.z) * 50.0f;
+            b.speedMps = Vec3(veh->m_vecMoveSpeed.x, veh->m_vecMoveSpeed.y,
+                              veh->m_vecMoveSpeed.z).Length() * 50.0f;
+            b.wheelSpin -= fwdSpeed * dt / kCopWheelRadiusM;
+        }
         if (CPed* driver = LiveDriver(b)) {
             if (driver->m_fHealth < 1000.0f)
                 b.driverHitAcc += 1000.0f - driver->m_fHealth;
@@ -215,6 +243,16 @@ void CopBodyPost() {
             StopBodyLoops(i); // the world took the body: no frozen siren
             continue;
         }
+        // piece 3: while his whole body set is loaded, the host car and
+        // its driver are not seen - his own body (CopRender, in the
+        // render pass) wears the unit. Written every frame, so a file
+        // set that completes late, or a body the game re-shows, heals
+        // itself either way; with any file missing both stay visible
+        // and the force drives on the named stand-in.
+        const bool shown = CopBodyFilesReady();
+        veh->bIsVisible = !shown;
+        if (CPed* driver = LiveDriver(b))
+            driver->bIsVisible = !shown;
         // ---- piece 3: his own voice, driven off the same state the
         // pedals are. The siren is his pursuit flag (the core sets it
         // exactly while CopControl1 drives), looped positionally from
@@ -244,6 +282,57 @@ void CopBodyPost() {
         if (b.siren && !b.sirenPrev)
             PlaySfx((rand() % 2) ? SND_COP_RADIO_07 : SND_COP_RADIO_08, &pos, 1.0f, 1.0f);
         b.sirenPrev = b.siren;
+    }
+}
+
+void CopRender(float light) {
+    if (!CopBodyFilesReady())
+        return; // no body set: the host cars stay visible (CopBodyPost)
+    Vec3 centers[4];
+    CopWheelCenters(centers);
+    const CVector cam = TheCamera.GetPosition();
+    // the drawn wheels' yaw off the vehicle's own steer field, through
+    // the spike's calibration: the core's Drive writes the field as
+    // (flip ? -norm : norm) for a brain whose +norm is a right turn, and
+    // DrawCopCar's +steer is a yaw toward his left - so the raw field
+    // passes unchanged when the session flipped, and negated when it
+    // did not. Until the calibration lands (the first summon's first
+    // second) the unflipped reading is the standing guess.
+    const float steerSign = gCops[0].steerFlip ? 1.0f : -1.0f;
+    for (int i = 0; i < kMaxCopUnits; ++i) {
+        CopBodyState& b = sBodies[i];
+        if (!b.used)
+            continue;
+        CVehicle* veh = LiveVeh(b);
+        if (!veh)
+            continue;
+        const CMatrix& m = *veh->m_matrix;
+        CVector d = m.pos - cam;
+        if (d.x * d.x + d.y * d.y + d.z * d.z > 120.0f * 120.0f)
+            continue; // MobsRender's own distance courtesy
+        if (!TheCamera.IsSphereVisible(m.pos, 2.6f))
+            continue;
+        // the pose is the vehicle's own matrix, read in the core's car
+        // frame: the matrix's "up" slot is the car's forward, its "at"
+        // slot is the car's up (the spawn's own basis write proves the
+        // layout). His origin lands on the vehicle's origin - the
+        // settled 596 carries its origin ~0.53 m over its contact
+        // patch and his wheel bottoms sit 0.526 m under his, so the
+        // two ground lines meet with no lift; the eye test owns the
+        // last centimetres and this is the constant it would tune.
+        Pose pose;
+        pose.X = Vec3(m.right.x, m.right.y, m.right.z);
+        pose.Y = Vec3(m.up.x, m.up.y, m.up.z);
+        pose.Z = Vec3(m.at.x, m.at.y, m.at.z);
+        pose.o = Vec3(m.pos.x, m.pos.y, m.pos.z);
+        DrawCopCar(pose, 1.0f - b.book01, centers, steerSign * veh->m_fSteerAngle,
+                   b.wheelSpin, b.speedMps > kCopFastWheelMps, light, 1.0f, 1.0f, 1.0f);
+        // his shadow: hiding the 596 takes the game's own blob with it,
+        // so ours stands in (the mob shadow's own mechanism)
+        bool found = false;
+        const float gz = CWorld::FindGroundZFor3DCoord(m.pos.x, m.pos.y, m.pos.z + 2.0f, &found, nullptr);
+        if (found)
+            AddShadow(CVector(m.pos.x, m.pos.y, gz), 1.6f, 0.55f);
     }
 }
 

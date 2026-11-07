@@ -1,10 +1,14 @@
 #pragma once
 // The GTA side of the Driver 2 cop (src/core/Cop.h has the brain itself):
-// one real police car of the game's (model 596 for now - his own shape
-// waits for the original disc, piece 3) and one contained driver of the
-// game's own cop kind sitting in it, driven by pedal and steering fields
-// the core writes every tick. Thin, like every bridge file: bodies and
-// field writes live here, decisions never do.
+// one real police car of the game's (model 596) and one contained driver
+// of the game's own cop kind sitting in it, driven by pedal and steering
+// fields the core writes every tick. Since piece 3 the 596 is only the
+// body UNDERNEATH: his own Chicago shape (cop_car.bin from his disc) is
+// drawn over it through the ModelSink and the host car + driver are
+// hidden while the whole body set is loaded - what collides, drives
+// and burns is still the 596; what the eye sees is him. Thin, like
+// every bridge file: bodies and field writes live here, decisions
+// never do.
 
 #include "Host.h"
 
@@ -19,6 +23,9 @@ void CopSessionReset();
 // fields, and the read-back in Report is where any overwrite shows
 void CopBodyPre(float dt);
 void CopBodyPost();
+// draws his own body over every living unit (called from Render3D in
+// the same pass as MobsRender, the one CleanSA keeps)
+void CopRender(float light);
 
 int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face);
 bool GtaCopBodyReport(int veh, Host::CopBody* out);

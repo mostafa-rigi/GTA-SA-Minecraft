@@ -20,6 +20,7 @@
 #include "GtaFishing.h"
 #include "GameState.h"
 #include "McModel.h"
+#include "GtaCop.h"
 #include "GtaMobs.h"
 #include "PedSkins.h"
 #include "Player3D.h"
@@ -477,6 +478,7 @@ void Render3D() {
         // and the shadow he stands on (his shadow is queued inside MobsRender).
         const auto renderT0 = std::chrono::steady_clock::now();
         MobsRender(light);
+        CopRender(light); // his own body over the (hidden) host cars
         BossTestNoteRenderMs(
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - renderT0).count());
         RenderShotFx();
@@ -503,6 +505,7 @@ void Render3D() {
     {
         const auto renderT0 = std::chrono::steady_clock::now();
         MobsRender(light);
+        CopRender(light); // his own body over the (hidden) host cars
         BossTestNoteRenderMs(
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - renderT0).count());
     }

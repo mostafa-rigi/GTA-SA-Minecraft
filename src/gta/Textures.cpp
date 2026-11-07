@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "CopCarModel.h"
 #include "Image.h"
 #include "NavGraph.h"
 #include "Other.h"
@@ -12,6 +13,8 @@ namespace mc {
 
 Tex gAtlasTex, gGuiTex, gFontTex, gEntityTex, gMenuTex;
 Tex gSoldierTex[3];
+Tex gCopTex[kCopTexMax];
+int gCopTexLoaded = 0; // how many of the bin's textures actually loaded
 
 RwRaster* Tex::Raster() const { return tex ? RwTextureGetRaster(tex) : nullptr; }
 
@@ -161,6 +164,66 @@ static void LoadSoldierFiles() {
     LoadNavGraph(nbytes.data(), nbytes.size());
 }
 
+// The Driver 2 cop's own body files live in the MinecraftSA\driver2
+// folder (the soldier's folder discipline: the folder first, a loose
+// file as the fallback, so neither install layout silently loses him).
+static std::string CopFilePath(const char* file) {
+    const std::string inFolder = ModPath((std::string("driver2\\\\") + file).c_str());
+    FILE* probe = std::fopen(inFolder.c_str(), "rb");
+    if (probe) {
+        std::fclose(probe);
+        return inFolder;
+    }
+    return ModPath(file);
+}
+
+// His body, read whole and handed to the core, then every texture the
+// bin names. A missing or broken file is not fatal to the mod - the
+// force keeps the host body and the log says why (CopBodyFilesReady
+// stays false, GtaCop keeps the 596 visible).
+static void LoadCopFiles() {
+    const std::string path = CopFilePath("cop_car.bin");
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        Log("cop_car.bin not found in the MinecraftSA folder - the Driver 2 cop keeps the host body");
+        return;
+    }
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes(size > 0 ? (size_t)size : 0);
+    if (size <= 0 || std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size()) {
+        Log("ERROR: could not read %s - the Driver 2 cop keeps the host body", path.c_str());
+        std::fclose(f);
+        return;
+    }
+    std::fclose(f);
+    if (!LoadCopCarModel(bytes.data(), bytes.size()))
+        return; // the core's loader has already said why
+    const int want = CopCarTextureCount();
+    if (want > kCopTexMax) {
+        Log("cop_car.bin names %d textures - more than the %d slots here; the cop keeps the host body",
+            want, kCopTexMax);
+        UnloadCopCarModel();
+        return;
+    }
+    char name[32];
+    gCopTexLoaded = 0;
+    for (int i = 0; i < want; ++i) {
+        std::snprintf(name, sizeof(name), "cop_tex%d.png", i);
+        if (LoadPngAt(CopFilePath(name), name, gCopTex[i]))
+            ++gCopTexLoaded;
+    }
+    if (gCopTexLoaded == want)
+        Log("cop body: his own body is ready - %d textures", want);
+    else
+        Log("cop body: %d of %d textures loaded - the cop keeps the host body", gCopTexLoaded, want);
+}
+
+bool CopBodyFilesReady() {
+    return CopCarModelReady() && gCopTexLoaded == CopCarTextureCount();
+}
+
 bool LoadTextures() {
     bool ok = LoadPng("atlas.png", gAtlasTex, &gAtlasAlpha);
     ok &= LoadPng("gui.png", gGuiTex);
@@ -168,6 +231,7 @@ bool LoadTextures() {
     ok &= LoadPng("entity.png", gEntityTex);
     LoadPng("menu.png", gMenuTex); // without it GTA's own menu stays
     LoadSoldierFiles();           // the soldier is an extra, never a reason to fail the mod
+    LoadCopFiles();               // the cop's body likewise
     return ok;
 }
 
@@ -187,6 +251,10 @@ void UnloadTextures() {
     for (auto& t : gSoldierTex)
         Free(t);
     UnloadSoldierModel();
+    for (auto& t : gCopTex)
+        Free(t);
+    gCopTexLoaded = 0;
+    UnloadCopCarModel();
 }
 
 } // namespace mc
