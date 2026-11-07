@@ -247,6 +247,9 @@ struct GtaHost : Host {
     void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) override {
         GtaCopBodyDrive(veh, gas, brake, steer, siren);
     }
+    void CopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) override {
+        GtaCopBodyDriveTarget(veh, at, cruiseMps);
+    }
     void CopBodySetHealth(int veh, float book01) override { GtaCopBodySetHealth(veh, book01); }
     void CopBodyRetire(int veh, bool burnOut) override { GtaCopBodyRetire(veh, burnOut); }
     float PlayerVehicleImpact() override { return GtaPlayerVehicleImpact(); }

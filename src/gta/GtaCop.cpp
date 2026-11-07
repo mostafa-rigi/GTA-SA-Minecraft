@@ -6,6 +6,7 @@
 #include "CCopPed.h"
 #include "CDecisionMakerTypes.h"
 #include "CPools.h"
+#include "eCarMission.h" // the autopilot's mission words (fix round 4)
 #include "CPlayerPed.h"
 #include "CTask.h"
 #include "CVehicle.h"
@@ -68,6 +69,17 @@ struct CopBodyState {
     float gas = 0.0f, brake = 1.0f, steer = 0.0f;
     bool siren = false;
     bool haveCmd = false;
+    // fix round 4: the core's drive intent, mirrored into the car's own
+    // autopilot by ApplyCommand - the feed (what the brain last named)
+    // and the writing (what the autopilot last heard, so a standing
+    // order is not re-issued every frame and the game's own route
+    // bookkeeping in the same struct is left alone between changes)
+    bool apFeed = false;
+    Vec3 apTarget;
+    float apCruise = 0.0f;
+    bool apArmed = false;
+    Vec3 apWritten;
+    float apWrittenCruise = -1.0f;
     // piece 3's sound state: the pursuit edge (for his radio) and the
     // engine layer currently sounding (his idle/revs swap rides it)
     bool sirenPrev = false;
@@ -142,7 +154,7 @@ void StopBodyLoops(int slot) {
     SetPosLoop(slot * 2 + 1, SND_COP_ENGINE_IDLE, false, kNowhere, 0.0f, 1.0f, 1.0f);
 }
 
-void ApplyCommand(CVehicle* veh, const CopBodyState& b) {
+void ApplyCommand(CVehicle* veh, CopBodyState& b) {
     // The control surface, verified against the SDK headers in-tree:
     // m_fGasPedal 0x49C, m_fBreakPedal right behind it, m_fSteerAngle
     // 0x494 (CVehicle.h VALIDATE_OFFSETs), the siren as the vehicle's own
@@ -152,8 +164,72 @@ void ApplyCommand(CVehicle* veh, const CopBodyState& b) {
     veh->m_fSteerAngle = b.steer;
     veh->bSirenOrAlarm = b.siren;
     veh->bIsLawEnforcer = b.siren; // he is, while he pursues
-    if (b.seated)
+    if (b.seated) {
         veh->bEngineOn = true;
+        // the parked car's other switch (fix round 4): a car the game
+        // counts as parked sits on its handbrake (CVehicle.h:155). The
+        // engine flag beside it has been written since piece 0 and the
+        // seated, gassed, motionless sessions proved it is not the
+        // missing link on its own - the handbrake is cleared with it
+        // so no parked-car switch is left set under a driving order.
+        veh->bIsHandbrakeOn = false;
+        // THE AUTOPILOT MIRROR (fix round 4) - the round's conviction,
+        // in short: on this host the pedal fields above are not an
+        // input an AI-driven car is steered by. The SDK headers name
+        // exactly two producers of a car's controls: ProcessControl-
+        // Inputs(playerNum) - the player's pad path (CVehicle.h:341) -
+        // and CAutomobile::ProcessAI (CAutomobile.h:141), whose input
+        // is the vehicle's own CAutoPilot: mission, destination,
+        // cruise (CAutoPilot.h), written in the game's own design by a
+        // car-drive task (TASK_COMPLEX_CAR_DRIVE exists in eTaskType.h;
+        // the class itself is not in the SDK - the same wall the boss's
+        // hybrid met for the go-to task). Our driver is a contained
+        // ped whose only task ever was the seat warp, so his car's
+        // autopilot has sat at its CREATE_CAR rest state (MISSION_NONE)
+        // since birth - and every value read back outside the game's
+        // processing window showed our writes, while inside it the car
+        // was a parked car: engine housekeeping, handbrake, no drive.
+        // The mirror therefore puts the brain's own intent where this
+        // host reads intent from: a straight-line goto at the brain's
+        // current aim point, at the brain's desired speed, refreshed
+        // only when the order materially changes (a fresh destination
+        // every frame would churn the autopilot's own route state).
+        // The pedals above keep being written exactly as before - if
+        // the automobile honours them after all, nothing is lost; if
+        // it honours only its autopilot, the brain's order is finally
+        // on the channel that moves the car. A stop, a reverse or a
+        // stand-down (no throttle, or a crawl's cruise) disarms the
+        // mission back to NONE, so the mirror never drives a unit the
+        // brain has told to stand.
+        CAutoPilot& ap = veh->m_autoPilot;
+        const bool wantArm = b.apFeed && b.gas > 0.05f && b.apCruise > 1.0f &&
+                             b.book01 > 0.0f;
+        if (wantArm) {
+            const float dx = b.apTarget.x - b.apWritten.x;
+            const float dy = b.apTarget.y - b.apWritten.y;
+            if (!b.apArmed || dx * dx + dy * dy > 4.0f ||
+                std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) {
+                ap.m_nCarMission = MISSION_GOTO_COORDS_STRAIGHT;
+                ap.m_vecDestinationCoors =
+                    CVector(b.apTarget.x, b.apTarget.y, b.apTarget.z);
+                // the cruise char and the traffic-speed cap are the
+                // autopilot's own pace words; the brain's m/s is the
+                // closest honest reading of both (traffic cruise
+                // settings live in the same range) - the read-back in
+                // the Report prints what landed, and the spike's speed
+                // lines are the pace's judge
+                ap.m_nCruiseSpeed = (char)Clamp(b.apCruise, 0.0f, 60.0f);
+                ap.m_fMaxTrafficSpeed = b.apCruise;
+                b.apWritten = b.apTarget;
+                b.apWrittenCruise = b.apCruise;
+                b.apArmed = true;
+            }
+        } else if (b.apArmed) {
+            ap.m_nCarMission = MISSION_NONE;
+            b.apArmed = false;
+            b.apWrittenCruise = -1.0f;
+        }
+    }
     // the displayed health is re-asserted with the pedals: the host's own
     // damage may have bitten into it this frame, and the core's Report
     // (which runs before Post) is where that bite was measured and priced
@@ -672,6 +748,20 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->brake = v->m_fBreakPedal;
     out->steer = v->m_fSteerAngle;
     out->siren = v->bSirenOrAlarm;
+    // the drive state, read back the same way (fix round 4): the
+    // switches on the automobile's road to the wheels, so a body that
+    // answers the pedals but never moves names its blocker in the log
+    // instead of leaving the next round to guess. The mission and
+    // cruise are the autopilot's own words as they stand NOW - what
+    // the mirror wrote, or the rest state it never left.
+    out->engineOn = v->bEngineOn;
+    out->handbrake = v->bIsHandbrakeOn;
+    out->engineBroken = v->bEngineBroken;
+    out->status = (int)v->m_nStatus;
+    out->mission = (int)v->m_autoPilot.m_nCarMission;
+    out->cruise = (int)v->m_autoPilot.m_nCruiseSpeed;
+    if (CPed* drv = LiveDriver(s))
+        out->driverInVehicle = drv->bInVehicle;
     // the impact channel: the car's own velocity change since the last
     // report - the collision signature the core prices his book by (his
     // own acceleration is ~0.15 m/s a frame; a strike stands out whole)
@@ -715,8 +805,11 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     s.driverHitAcc = 0.0f;
     if (!s.reportedOnce) {
         s.reportedOnce = true;
-        Log("cop spawn: first report for car %d read back gas %.2f brake %.2f steer %.2f - the body answers",
-            s.vehRef, out->gas, out->brake, out->steer);
+        Log("cop spawn: first report for car %d read back gas %.2f brake %.2f steer %.2f"
+            " | engine %d handbrake %d broken %d status %d mission %d cruise %d driver-in %d - the body answers",
+            s.vehRef, out->gas, out->brake, out->steer,
+            out->engineOn ? 1 : 0, out->handbrake ? 1 : 0, out->engineBroken ? 1 : 0,
+            out->status, out->mission, out->cruise, out->driverInVehicle ? 1 : 0);
     }
     return true;
 }
@@ -745,6 +838,18 @@ void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {
         ApplyCommand(v, *bp); // now; Post asserts it again after the game
 }
 
+void GtaCopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) {
+    CopBodyState* bp = FindBody(veh);
+    if (!bp)
+        return;
+    // only the feed is stored here: the mirror itself is written in
+    // ApplyCommand, beside the pedals, so the Drive-time write and
+    // Post's re-assert carry the autopilot order in the same pass
+    bp->apFeed = true;
+    bp->apTarget = at;
+    bp->apCruise = cruiseMps;
+}
+
 void GtaCopBodyRetire(int veh, bool burnOut) {
     CopBodyState* bp = FindBody(veh);
     if (!bp)
@@ -771,8 +876,14 @@ void GtaCopBodyRetire(int veh, bool burnOut) {
             CWorld::Remove(driver);
             delete driver;
         }
-        if (v)
+        if (v) {
+            // no stale orders on a handed-over body (fix round 4): the
+            // autopilot mirror is disarmed before the fire takes him,
+            // so the wreck the city keeps is a wreck, not a driverless
+            // car still holding a mission
+            v->m_autoPilot.m_nCarMission = MISSION_NONE;
             v->m_fHealth = 90.0f;
+        }
         s = CopBodyState();
         return;
     }

@@ -2,7 +2,10 @@
 // The GTA side of the Driver 2 cop (src/core/Cop.h has the brain itself):
 // one real police car of the game's (model 596) and one contained driver
 // of the game's own cop kind sitting in it, driven by pedal and steering
-// fields the core writes every tick. Since piece 3 the 596 is only the
+// fields the core writes every tick - and, since fix round 4, by the
+// drive intent the bridge mirrors into the car's own autopilot, the
+// channel this host's AI cars are actually driven through (the
+// conviction and the evidence chain are in DRIVER2-STEP3-fa.md). Since piece 3 the 596 is only the
 // body UNDERNEATH: his own Chicago shape (cop_car.bin from his disc) is
 // drawn over it through the ModelSink and the host car + driver are
 // hidden while the whole body set is loaded - what collides, drives
@@ -30,6 +33,7 @@ void CopRender(float light);
 int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face);
 bool GtaCopBodyReport(int veh, Host::CopBody* out);
 void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren);
+void GtaCopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps);
 void GtaCopBodySetHealth(int veh, float book01);
 void GtaCopBodyRetire(int veh, bool burnOut);
 float GtaPlayerVehicleImpact();
