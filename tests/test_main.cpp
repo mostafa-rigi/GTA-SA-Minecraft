@@ -8132,6 +8132,241 @@ static void TestBossStateChurn() {
     }
 }
 
+// ------------------------------------------------------------------
+// The hybrid step (2026-11-07): the game's own ped locomotion walks him,
+// this brain commands. The harness has no game, so the test plays the
+// bridge's part with a fake body: it reports a position before each tick
+// (as MobDriverReport requires) and, after the tick, walks that position
+// straight at the issued objective at the objective's speed - the honest
+// miniature of feet that pathfind on the street's own nodes. What the sims
+// pin is the CONTRACT, not the walking: the entity tracks the reported
+// body; no objective engages before the aggro law opens; the objective
+// refreshes when the tactic changes; and when the body stops, the soldier
+// stops - the core never walks him itself underneath the commander.
+struct FakeDriverBody {
+    Vec3 pos;
+    bool frozen = false; // the body reports but does not walk (a wedged body)
+    void Report(int s, float dt) const { MobDriverReport(s, pos, true, dt); }
+    void Walk(int s, float dt) {
+        if (frozen)
+            return;
+        const Mob& m = gMobs[s];
+        if (!m.drvObjValid || m.drvObjSpeed <= 0.01f)
+            return;
+        Vec3 to = m.drvObj - pos;
+        to.z = 0.0f;
+        const float d = to.Length();
+        if (d < 0.05f)
+            return;
+        const float step = std::min(d, m.drvObjSpeed * dt);
+        pos = pos + to * (step / d);
+        pos.z = m.drvObj.z;
+    }
+};
+
+static void RunDriven(FakeDriverBody& drv, int s, float seconds, const Vec3& player,
+                      const std::vector<BeingInfo>* beings) {
+    const float dt = 0.05f;
+    for (float t = 0.0f; t < seconds; t += dt) {
+        drv.Report(s, dt);
+        MobsTick(dt, player, 0, true, beings);
+        drv.Walk(s, dt);
+    }
+}
+
+static void TestBossDriver() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // (b) before the aggro law opens, no objective engages the player: his
+    // feet walk his patrol posts and stands only, at patrol pace, and none
+    // of it is aimed at the man standing in the open watching him.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 25.5f, 11.0f); // 25 m off, in the open, doing nothing
+        std::vector<Vec3> objs;
+        std::vector<float> speeds;
+        int seenCount = 0;
+        for (int i = 0; i < 80; ++i) { // 4 s of driven calm
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            drv.Walk(s, 0.05f);
+            const Mob& m = gMobs[s];
+            CHECK(m.bossState != 2, "an unprovoking man in the open never starts a fight");
+            if (m.drvObjCount != seenCount) {
+                seenCount = m.drvObjCount;
+                objs.push_back(m.drvObj);
+                speeds.push_back(m.drvObjSpeed);
+            }
+        }
+        CHECK(!objs.empty(), "his feet were given orders even at peace (patrol lives)");
+        for (size_t i = 0; i < objs.size(); ++i) {
+            CHECK(speeds[i] <= 2.6f, "a peacetime objective never runs: patrol pace or a stand");
+            Vec3 d = objs[i] - man;
+            d.z = 0.0f;
+            CHECK(d.Length() > 6.0f, "no peacetime objective is aimed at the watching man");
+        }
+    }
+
+    // (a) the entity tracks the driver body's transform exactly: a jump of
+    // the body (a native detour around a car the core never ordered) is
+    // simply where he is next frame - he is where his body is.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 25.5f, 11.0f);
+        RunDriven(drv, s, 0.5f, man, none);
+        drv.pos = drv.pos + Vec3(7.0f, -3.0f, 0.0f);
+        drv.Report(s, 0.05f);
+        MobsTick(0.05f, man, 0, true, none);
+        const Mob& m = gMobs[s];
+        CHECK(std::fabs(m.pos.x - drv.pos.x) < 1e-4f && std::fabs(m.pos.y - drv.pos.y) < 1e-4f &&
+              std::fabs(m.pos.z - drv.pos.z) < 1e-4f,
+              "the soldier stands exactly where his driver body reports");
+    }
+
+    // (c) the objective refreshes when the tactic changes: a fight opens
+    // with a running order toward the man; wounding him trades it for the
+    // bounded fallback; losing him far away trades combat for the hunt.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 20.5f, 11.0f);
+        host.aimingAtHim = true;
+        RunDriven(drv, s, 0.7f, man, none);
+        host.aimingAtHim = false;
+        bool sawRunOrder = false;
+        for (int i = 0; i < 40 && !sawRunOrder; ++i) { // 2 s of fight
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            drv.Walk(s, 0.05f);
+            const Mob& m = gMobs[s];
+            if (m.drvObjValid && m.drvObjSpeed > 2.6f) {
+                Vec3 d = m.drvObj - man;
+                d.z = 0.0f;
+                if (d.Length() < 14.0f)
+                    sawRunOrder = true; // a running order at the man's ground
+            }
+        }
+        CHECK(gMobs[s].bossState == 2, "the aim provocation opened the fight");
+        CHECK(sawRunOrder, "the fight's first orders run at the man (the intercept)");
+
+        gMobs[s].health = 1200.0f; // a wound past the threshold (30% of his 4000)
+        bool sawFallback = false;
+        for (int i = 0; i < 60 && !sawFallback; ++i) { // 3 s
+            const Vec3 before = gMobs[s].pos;
+            const int count0 = gMobs[s].drvObjCount;
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            drv.Walk(s, 0.05f);
+            const Mob& m = gMobs[s];
+            if (m.drvObjCount != count0 && m.drvObjValid) {
+                Vec3 d = m.drvObj - before;
+                d.z = 0.0f;
+                Vec3 toMan = man - before;
+                toMan.z = 0.0f;
+                // the fallback: a bounded bound AWAY from the man, never a
+                // fresh advance order wearing the wounded man's name
+                if (d.Length() > 3.0f && d.Length() <= 15.5f && d.Dot(toMan) < 0.0f)
+                    sawFallback = true;
+            }
+        }
+        CHECK(sawFallback, "wounded past the threshold, his orders become the bounded fallback");
+
+        const int countAtLoss = gMobs[s].drvObjCount;
+        const Vec3 far(0.5f, 140.5f, 11.0f); // the man vanishes, far beyond the hunt gate
+        bool sawHunt = false;
+        for (int i = 0; i < 300 && !sawHunt; ++i) { // up to 15 s: grace, then the hunt
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, far, 0, true, none);
+            drv.Walk(s, 0.05f);
+            if (gMobs[s].bossState == 3 && gMobs[s].drvObjCount > countAtLoss)
+                sawHunt = true;
+        }
+        CHECK(sawHunt, "a far, cold loss trades combat for the hunt, with fresh orders under it");
+    }
+
+    // (d) one writer: with the body frozen mid-fight (it reports, it does
+    // not walk), the soldier does not move a hair - the brain commands, the
+    // feet execute, and nobody else touches his position.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 20.5f, 11.0f);
+        host.aimingAtHim = true;
+        RunDriven(drv, s, 0.7f, man, none);
+        host.aimingAtHim = false;
+        RunDriven(drv, s, 1.0f, man, none); // the fight is on, the feet are walking
+        drv.frozen = true;
+        drv.Report(s, 0.05f); // one report syncs the entity onto the body exactly
+        const Vec3 stuck = drv.pos;
+        const int count0 = gMobs[s].drvObjCount;
+        RunDriven(drv, s, 3.0f, man, none);
+        const Mob& m = gMobs[s];
+        CHECK(m.bossState == 2, "the fight still burns around a wedged body");
+        Vec3 d = m.pos - stuck;
+        d.z = 0.0f;
+        CHECK(d.Length() < 0.01f, "a frozen body means a frozen soldier: the core never walks him itself");
+        CHECK(m.drvObjCount > count0, "the commander kept issuing orders the whole time");
+    }
+}
+
+// ------------------------------------------------------------------
+// The jetpack conviction (the user's report, 2026-11-07): with the flight
+// cheat on, his shots "have no effect". The mechanism lived in BossShoot:
+// the senses are honest 3D, but every range gate on the bullet's line read
+// the brain's HORIZONTAL range - a target above him (a jetpack hover, a
+// rooftop: same geometry) put its body samples' true line distance past
+// every gate, so no round could ever register. The control below proves
+// the channel on the ground; the second block is the conviction geometry
+// itself - 14 m of ground range, the man's chest ~19.6 m of true line -
+// which scored exactly zero before the fix and takes real damage after it.
+static void TestBossJetpack() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 20.5f, 11.0f);
+        ProvokeByAim(host, man, none);
+        RunMobsB(3.0f, man, none);
+        CHECK(host.playerHurt > 0.0f, "control: the same man on the ground takes damage");
+    }
+    {
+        WideStage();
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        // hovering: his feet 13 m above the boss's level, 14 m of ground
+        // range away - his middle at (0.5, 14.5, 24) over a boss whose
+        // feet stand at z 10. The true line to his chest is ~19.6 m; the
+        // old gates cut the samples at the ground range + 2 = 16 m.
+        const Vec3 air(0.5f, 14.5f, 24.0f);
+        ProvokeByAim(host, air, none);
+        RunMobsB(5.0f, air, none);
+        CHECK(gMobs[s].bossState == 2, "he fights the man above him (his senses were always 3D)");
+        CHECK(host.playerHurt > 0.0f,
+              "a hovering man takes real damage: the bullet's range is its own true line now");
+    }
+}
+
 // =====================================================================
 // THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
 // the POI database, the zone/gang map and the interior door families
@@ -8488,6 +8723,8 @@ int main(int argc, char** argv) {
     TestBossFixRound();
     TestBossAggroLaw();
     TestBossStateChurn();
+    TestBossDriver();
+    TestBossJetpack();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

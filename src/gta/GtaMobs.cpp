@@ -3,19 +3,26 @@
 #include <algorithm>
 #include <chrono>
 
+#include "CAtomicModelInfo.h"
 #include "CCamera.h"
+#include "CColModel.h"
 #include "CColPoint.h"
 #include "CCopPed.h"
+#include "CDecisionMakerTypes.h"
+#include "CModelInfo.h"
+#include "CObject.h"
 #include "CPad.h"
 #include "CPlayerPed.h"
 #include "CPools.h"
 #include "CStreaming.h"
 #include "CTaskComplexKillPedOnFoot.h"
+#include "CTaskComplexSeekEntityMove.h"
 #include "CTaskSimpleDuck.h"
 #include "CVehicle.h"
 #include "CWaterLevel.h"
 #include "CWorld.h"
 #include "ePedType.h"
+#include "extensions/ScriptCommands.h"
 
 #include "BossTest.h"
 #include "Config.h"
@@ -190,6 +197,134 @@ void BossProxyForget() {
     gBossProxy.mobId = 0;
 }
 
+// ------------------------------------------------------------------
+// The driver (the hybrid step, 2026-11-07): the same body, promoted. While
+// the driver mode is on (the default; /bosstest driver turns it off), the
+// body is no longer glued to the boss - it IS his feet. The game's own ped
+// locomotion walks it: one persistent CTaskComplexSeekEntityMove aimed at
+// an invisible anchor object the bridge teleports to the objective point
+// the core's brain issues (Mob::drvObj, written only by BossDriveObjective
+// in the core). The brain stays the commander - decisions, memory, the
+// aggro law, the Counter-Strike pricing, the atlas - and this layer only
+// executes movement, the way the game's own peds flow around cars, fences
+// and corners on the street's node graph. What the SDK honestly offers was
+// inventoried before a line was designed: there is NO go-to-point task
+// class in this SDK (TASK_COMPLEX_GO_TO_POINT_AND_STAND_STILL exists as an
+// enum value with no class behind it), so the seek-an-entity task plus a
+// movable anchor is the directed native locomotion that exists - the
+// anchor is a point made into an entity, nothing more is claimed.
+// The body's own will is contained at birth (BossProxyCreate): the EMPTY
+// decision maker (the game's own choice for script peds that must never
+// decide anything), senses zeroed so no event scanner can feed even that,
+// and no weapon it could fire with. What containment cannot reach - a
+// physical-contact event answer the engine gives below the decision maker
+// (a shove answered with a brace) - is watched for, not hidden: the apply
+// step below never stomps a foreign primary task, it waits it out and
+// reclaims the slot only when the body has somewhere to be.
+struct BossDriverState {
+    bool active = false;     // the driver mode is carrying him right now
+    bool didPre = false;     // the pre-tick reported for this frame (MobsUpdate's book)
+    bool anchored = false;   // the CURRENT body has been placed at his feet for driving
+    CObject* anchorObj = nullptr; // the seek target: an invisible mission object
+    int anchorRef = 0;            // its pool handle, the only name trusted across frames
+    int anchorModel = -1;         // the synthetic model id (process-lifetime registration)
+    CTask* seekTask = nullptr;    // the task we issued - an identity to compare, NEVER to dereference
+    eMoveState appliedMove = PEDMOVE_STILL; // the speed class the feet currently walk under
+    Vec3 appliedObj{ 0, 0, 0 };   // the objective point the anchor currently sits at
+    bool appliedValid = false;
+    float watchT = 0.0f; // how long a foreign primary task has owned his feet
+};
+BossDriverState gBossDriver;
+
+// The anchor dies with the driver state: delete it through its ref, only
+// if the ref still resolves to it (the pool discipline, same as the body).
+void BossDriverTeardown() {
+    if (gBossDriver.anchorObj) {
+        CObject* cur = CPools::GetObject(gBossDriver.anchorRef);
+        if (cur == gBossDriver.anchorObj && cur->m_nModelIndex == gBossDriver.anchorModel)
+            plugin::Command<plugin::Commands::DELETE_OBJECT>(gBossDriver.anchorRef);
+        gBossDriver.anchorObj = nullptr;
+        gBossDriver.anchorRef = 0;
+    }
+    gBossDriver.seekTask = nullptr;
+    gBossDriver.active = false;
+    gBossDriver.anchored = false;
+    gBossDriver.appliedValid = false;
+    gBossDriver.watchT = 0.0f;
+}
+
+// Retire the driver: the core is told its feet are gone (MobDriverGone -
+// it steers him itself again, from exactly where he stands) and the
+// driver's own state is torn down. The body itself is NOT touched here:
+// killing it is BossProxyKill's work, and a mode switch hands it back to
+// the legacy glue alive.
+void BossDriverRetire() {
+    if (gBossProxy.mobId)
+        for (size_t j = 0; j < gMobs.size(); ++j)
+            if (gMobs[j].id == gBossProxy.mobId)
+                MobDriverGone((int)j);
+    BossDriverTeardown();
+}
+
+// Stand the anchor up (once per body loss): register its synthetic model
+// the way the collision system registers its block columns - an id the
+// game does not use, draw distance zero so the streamer never asks for
+// files that do not exist - with an EMPTY collision model and collision
+// off besides: the anchor is a point to walk to, never a wall.
+bool BossDriverAnchorEnsure() {
+    if (gBossDriver.anchorObj) {
+        CObject* cur = CPools::GetObject(gBossDriver.anchorRef);
+        if (cur == gBossDriver.anchorObj && cur->m_nModelIndex == gBossDriver.anchorModel)
+            return true;
+        gBossDriver.anchorObj = nullptr; // the game took it: rebuild below
+        gBossDriver.anchorRef = 0;
+        gBossDriver.appliedValid = false;
+    }
+    if (gBossDriver.anchorModel < 0) {
+        int count = CModelInfo::ms_modelInfoCount;
+        if (count <= 0 || count > 100000)
+            count = 20000;
+        int id = -1;
+        for (int cand = count - 1; cand > 18630; --cand) {
+            if (CModelInfo::ms_modelInfoPtrs[cand])
+                continue;
+            CStreamingInfo& si = CStreaming::ms_aInfoForModel[cand];
+            if (si.m_nLoadState != 0 || si.m_nCdSize != 0)
+                continue;
+            id = cand;
+            break;
+        }
+        if (id < 0)
+            return false;
+        CColModel* col = static_cast<CColModel*>(calloc(1, sizeof(CColModel)));
+        CCollisionData* data = static_cast<CCollisionData*>(calloc(1, sizeof(CCollisionData)));
+        col->m_nColSlot = 0; // "generic" slot, never streamed out
+        col->m_bHasCollisionVolumes = 0;
+        col->m_bIsActive = 1;
+        col->m_pColData = data;
+        CAtomicModelInfo* mi = CModelInfo::AddAtomicModel(id);
+        mi->m_fDrawDistance = 0.0f;
+        mi->SetColModel(col, false); // false: the game must not delete our col model
+        gBossDriver.anchorModel = id;
+        Log("boss driver: anchor model %d registered - an invisible point his feet will seek", id);
+    }
+    CObject* obj = CObject::Create(gBossDriver.anchorModel);
+    if (!obj)
+        return false;
+    obj->m_nObjectType = OBJECT_MISSION;
+    obj->bIsVisible = false;
+    obj->bDontStream = true;
+    obj->bUsesCollision = false;
+    obj->SetPosn(CVector(0.0f, 0.0f, -50.0f)); // parked underground until the first objective
+    obj->UpdateRwMatrix();
+    obj->UpdateRwFrame();
+    CWorld::Add(obj);
+    gBossDriver.anchorObj = obj;
+    gBossDriver.anchorRef = CPools::GetObjectRef(obj);
+    gBossDriver.appliedValid = false;
+    return true;
+}
+
 // The one lawful question about a ped held across frames: does his ref
 // still resolve, and to the same body? GetAtRef compares the slot's full
 // flag byte (generation + occupied) against the ref, so a freed slot and a
@@ -206,6 +341,7 @@ CPed* BossProxyResolve() {
 }
 
 void BossProxyKill() {
+    BossDriverRetire(); // his feet go with his body: the core steers again
     if (gBossProxy.ped) {
         CPed* ped = BossProxyResolve();
         if (!ped) {
@@ -247,6 +383,22 @@ bool BossProxyCreate(const Mob& m) {
         Log("boss proxy: creation did not land in the ped pool (index %d) - proxy stays off for this session", idx);
         return false;
     }
+    // Containment, from birth, whatever mode he serves in: the EMPTY
+    // decision maker (the game's own answer for a script ped that must
+    // never decide anything - no wanted-level reactions, no fleeing, no
+    // fighting of its own) and his senses zeroed, so the event scanners
+    // that feed a decision maker have nothing to feed it with. As a sensor
+    // he was taskless by glue; as the driver he walks only where the one
+    // seek task we issue takes him - and he carries no weapon either way.
+    if (ped->m_pIntelligence) {
+        ped->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
+        ped->m_pIntelligence->SetSeeingRange(0.0f);
+        ped->m_pIntelligence->SetHearingRange(0.0f);
+    }
+    gBossDriver.anchored = false; // a fresh body has not been placed at his feet yet
+    gBossDriver.seekTask = nullptr; // ...and it carries no seek of ours: the old body's
+                                    // task pointer is a stale identity from here on
+    gBossDriver.appliedValid = false;
     gBossProxy.ped = ped;
     gBossProxy.ref = pool->GetRef(ped);
     gBossProxy.mobId = m.id;
@@ -260,28 +412,19 @@ bool BossProxyCreate(const Mob& m) {
     return true;
 }
 
-void BossProxySync(float dt, CPlayerPed* player) {
-    if (gBossTest.proxyOff) {
-        // /bosstest proxy: the bisect removes his perception body entirely -
-        // the street has nothing of his to aim at and he takes no relayed
-        // fire, for as long as the toggle stays off this session
-        if (gBossProxy.ped) {
-            BossProxyKill();
-            Log("BOSS TEST: proxy removed - he has no perception body while the toggle is off");
-        }
-        return;
-    }
-    int bi = -1;
+int BossFindSoldier() {
     for (size_t j = 0; j < gMobs.size(); ++j)
-        if (gMobs[j].kind == MOB_SOLDIER && gMobs[j].death < 0.0f) {
-            bi = (int)j;
-            break;
-        }
-    if (bi < 0) {
-        BossProxyKill();
-        return;
-    }
-    Mob& m = gMobs[bi];
+        if (gMobs[j].kind == MOB_SOLDIER && gMobs[j].death < 0.0f)
+            return (int)j;
+    return -1;
+}
+
+// Stand his body up and prove it lives, the one way both modes share:
+// another soldier's body is retired, a body the game recycled is
+// forgotten untouched and rebuilt, a body that died in the game is
+// retired for a fresh one next frame. False means: no live body this
+// frame, the caller stands down.
+bool BossBodyEnsure(Mob& m) {
     if (gBossProxy.ped && gBossProxy.mobId != m.id)
         BossProxyKill();
     if (gBossProxy.ped && !BossProxyResolve()) {
@@ -295,12 +438,11 @@ void BossProxySync(float dt, CPlayerPed* player) {
     }
     if (!gBossProxy.ped && !gBossProxy.createFailed) {
         if (!BossProxyCreate(m))
-            return;
+            return false;
     }
     if (!gBossProxy.ped)
-        return;
-    CPed* ped = gBossProxy.ped;
-    if (!BossProxyAlive(ped)) {
+        return false;
+    if (!BossProxyAlive(gBossProxy.ped)) {
         // He died in the game: the health top-up only runs while we sync,
         // and a single explosion-class hit can take the whole 1000 between
         // frames. A corpse is no perception body - the game is already
@@ -309,8 +451,17 @@ void BossProxySync(float dt, CPlayerPed* player) {
         // let the creation above build a fresh body next frame.
         Log("boss proxy: he died in the game - retiring the body, a fresh one is built next sync");
         BossProxyKill();
-        return;
+        return false;
     }
+    return true;
+}
+
+// The body's standing duties, identical in both modes: who is fighting
+// him (read off the street's own kill tasks), the damage relay into the
+// core's books, and the street's fear. Only the feet differ between the
+// sensor and the driver - everything the body is FOR stays one code path.
+void BossBodyDuties(float dt, CPlayerPed* player, int bi, CPed* ped) {
+    Mob& m = gMobs[bi];
     // who is fighting him, by the game's own books: a ped whose kill task
     // names the proxy. Throttled to 4 Hz and to the street around him.
     gBossProxy.scanT -= dt;
@@ -372,30 +523,6 @@ void BossProxySync(float dt, CPlayerPed* player) {
         }
         MobProxyDamage(bi, (1000.0f - h) * 2.0f, from, who);
     }
-    if (m.death >= 0.0f) {
-        BossProxyKill();
-        return;
-    }
-    // top the sensor back up and glue him to the boss, every frame
-    ped->m_fHealth = 1000.0f;
-    ped->m_fMaxHealth = 1000.0f;
-    ped->Teleport(CVector(m.pos.x, m.pos.y, m.pos.z + 0.9f), false);
-    ped->SetHeading(m.yaw);
-    ped->m_vecMoveSpeed = CVector(0, 0, 0);
-    // He never shows - by layers, not by one flag. The entity flag alone was
-    // the first build's only lock, and the game re-decides it (the first boss
-    // eye test saw a separate skin standing on the boss, reaching up out of
-    // his body: this body, rendered - his feet ride 0.9 m above the boss's,
-    // so a shown proxy reads as a second man growing out of him). SetPedDrawn
-    // re-strips the render flag from every atomic of his clump each frame, so
-    // even a clump that streams in late has nothing drawable, whatever the
-    // flag says; the PedSkins exclusion registered at creation covers the
-    // villager overlay. And his skeleton is kept up to date by hand: a ped
-    // the renderer skips stops updating the hit spheres the street's bullets
-    // test against, and he must stay hittable.
-    SetPedDrawn(ped, false);
-    if (ped->m_pRwObject)
-        ped->UpdateRpHAnim();
     // the street's fear while he fights: nearby civilians cower with the
     // game's own duck, a few at a time, four times a second at most
     gBossProxy.cowerT -= dt;
@@ -424,6 +551,210 @@ void BossProxySync(float dt, CPlayerPed* player) {
         }
     }
 }
+
+// ------------------------------------------------------------------
+// The driver frame runs in two halves around the core's tick, because the
+// command flows one way: the body reports where the game's feet put him,
+// the brain reads it and answers with an objective, the objective is
+// applied to his feet. MobsUpdate calls the first half before MobsTick
+// and BossProxySync (below) runs the second after it.
+
+// First half: stand the body up, place it at his feet the first time,
+// run its standing duties, and report its transform to the core. True
+// means the frame is the driver's; false hands the frame to the legacy
+// sync (no body could be stood up, or the anchor would not build - the
+// glued sensor is the graceful degradation, never a frozen soldier).
+bool BossDriverPreTick(float dt, CPlayerPed* player) {
+    const int bi = BossFindSoldier();
+    if (bi < 0) {
+        BossProxyKill();
+        return true; // no soldier: the kill above is the whole duty
+    }
+    Mob& m = gMobs[bi];
+    if (!BossBodyEnsure(m))
+        return false;
+    CPed* ped = gBossProxy.ped;
+    if (!gBossDriver.anchored) {
+        // Mode entry: the body has ridden glued above his feet as a
+        // sensor; from this frame it IS his feet. It is placed at his
+        // feet once - invisibly, so no eye can see a set-down - and the
+        // anchor stands up with it. Every later frame the body is simply
+        // where the game's locomotion walked it.
+        if (!BossDriverAnchorEnsure())
+            return false;
+        ped->Teleport(CVector(m.pos.x, m.pos.y, m.pos.z + 0.9f), false);
+        gBossDriver.anchored = true;
+        gBossDriver.active = true;
+        Log("boss driver: his body is his feet now - the game's own locomotion walks him, this brain commands");
+    }
+    BossBodyDuties(dt, player, bi, ped);
+    if (m.death >= 0.0f) {
+        BossProxyKill();
+        return true;
+    }
+    // top the body back up (the relay already read what the street did)
+    // and keep him invisible and hittable, the same layers as the sensor
+    ped->m_fHealth = 1000.0f;
+    ped->m_fMaxHealth = 1000.0f;
+    SetPedDrawn(ped, false);
+    if (ped->m_pRwObject)
+        ped->UpdateRpHAnim();
+    // the report: his feet are the body's feet (a ped's position rides
+    // ~0.9 m above them, the codebase's own convention), his ground state
+    // is the body's own standing flag
+    const CVector pp = ped->GetPosition();
+    MobDriverReport(bi, Vec3(pp.x, pp.y, pp.z - 0.9f), ped->bIsStanding != 0, dt);
+    gBossDriver.didPre = true;
+    return true;
+}
+
+// The bridge's speed classes: the core orders in metres per second, the
+// game's feet walk in its own gaits. The classes are approximations by
+// design - a patrol is a walk, a strafe a jog, the chase a sprint - and
+// the exact pace is the game's own, which is the point of the exercise.
+eMoveState BossDriverMoveClass(float speed) {
+    if (speed <= 0.01f)
+        return PEDMOVE_STILL;
+    if (speed < 2.2f)
+        return PEDMOVE_WALK;
+    if (speed < 4.4f)
+        return PEDMOVE_JOG;
+    if (speed < 5.8f)
+        return PEDMOVE_RUN;
+    return PEDMOVE_SPRINT;
+}
+
+// Second half: hand the brain's objective to the feet. The anchor moves
+// only when the order truly changes (a new point, a new class), and the
+// seek task is issued once and then only watched: it re-reads the anchor
+// on its own scan interval, so a streaming intercept costs no task churn.
+// A speed-class change on the running task is a field write. A foreign
+// primary task (the game's own get-up, a physical response) is never
+// stomped: it is waited out, and the slot is reclaimed only when it
+// overstays while he has somewhere to be.
+void BossDriverApply(float dt) {
+    const int bi = BossFindSoldier();
+    if (bi < 0)
+        return;
+    Mob& m = gMobs[bi];
+    if (m.death >= 0.0f) {
+        BossProxyKill();
+        return;
+    }
+    CPed* ped = BossProxyResolve();
+    if (!ped || !ped->m_pIntelligence)
+        return; // the pre-tick's body is gone mid-frame: next frame rebuilds
+    if (!BossDriverAnchorEnsure())
+        return;
+    const Vec3 obj = m.drvObjValid ? m.drvObj : m.pos;
+    const float spd = m.drvObjValid ? m.drvObjSpeed : 0.0f;
+    const bool stand = spd <= 0.01f;
+    const eMoveState ms = BossDriverMoveClass(spd);
+    const bool classChanged = !gBossDriver.appliedValid || ms != gBossDriver.appliedMove;
+    Vec3 dObj = obj - gBossDriver.appliedObj;
+    dObj.z = 0.0f;
+    const bool moved = !gBossDriver.appliedValid || dObj.Length() > 0.75f;
+    if (classChanged || moved) {
+        gBossDriver.anchorObj->SetPosn(CVector(obj.x, obj.y, obj.z + 0.9f));
+        gBossDriver.anchorObj->UpdateRwMatrix();
+        gBossDriver.anchorObj->UpdateRwFrame();
+        gBossDriver.appliedObj = obj;
+        gBossDriver.appliedMove = ms;
+        gBossDriver.appliedValid = true;
+    }
+    CTaskManager& tm = ped->m_pIntelligence->m_TaskMgr;
+    CTask* cur = tm.m_aPrimaryTasks[TASK_PRIMARY_PRIMARY];
+    if (cur && cur == gBossDriver.seekTask) {
+        if (classChanged)
+            ((CTaskComplexSeekEntityMove*)cur)->m_moveState = ms;
+        gBossDriver.watchT = 0.0f;
+    } else if (!cur) {
+        // the slot is free - he arrived, or a seek ran its course. A stand
+        // he is already standing on needs no new task: the empty decision
+        // maker keeps him standing, and churning seek objects under a
+        // standing man would be pure waste.
+        const CVector pp = ped->GetPosition();
+        const CVector ap = gBossDriver.anchorObj->GetPosition();
+        const float dx = pp.x - ap.x, dy = pp.y - ap.y;
+        if (!stand || dx * dx + dy * dy > 1.2f * 1.2f) {
+            auto* seek = new CTaskComplexSeekEntityMove(gBossDriver.anchorObj,
+                600000, 250, 1.0f, 7.0f, 3.0f, false, false);
+            seek->m_moveState = ms;
+            tm.SetTask(seek, TASK_PRIMARY_PRIMARY, false);
+            gBossDriver.seekTask = seek;
+        }
+        gBossDriver.watchT = 0.0f;
+    } else {
+        gBossDriver.watchT += dt;
+        if (!stand && gBossDriver.watchT > 1.5f) {
+            auto* seek = new CTaskComplexSeekEntityMove(gBossDriver.anchorObj,
+                600000, 250, 1.0f, 7.0f, 3.0f, false, false);
+            seek->m_moveState = ms;
+            tm.SetTask(seek, TASK_PRIMARY_PRIMARY, false);
+            gBossDriver.seekTask = seek;
+            gBossDriver.watchT = 0.0f;
+            Log("boss driver: a foreign task held his feet past its welcome - the seek is re-issued");
+        }
+    }
+}
+
+void BossProxySync(float dt, CPlayerPed* player) {
+    if (gBossTest.proxyOff) {
+        // /bosstest proxy: the bisect removes his perception body entirely -
+        // the street has nothing of his to aim at and he takes no relayed
+        // fire, for as long as the toggle stays off this session
+        if (gBossProxy.ped) {
+            BossProxyKill();
+            Log("BOSS TEST: proxy removed - he has no perception body while the toggle is off");
+        }
+        return;
+    }
+    if (gBossDriver.didPre) {
+        // the driver carried this frame: only the objective is still owed
+        gBossDriver.didPre = false;
+        BossDriverApply(dt);
+        return;
+    }
+    if (gBossDriver.active)
+        BossDriverRetire(); // the mode was switched off mid-session (or a
+                            // frame the driver could not carry): the legacy
+                            // glue below takes the body back over, alive,
+                            // exactly where it stands
+    const int bi = BossFindSoldier();
+    if (bi < 0) {
+        BossProxyKill();
+        return;
+    }
+    Mob& m = gMobs[bi];
+    if (!BossBodyEnsure(m))
+        return;
+    CPed* ped = gBossProxy.ped;
+    BossBodyDuties(dt, player, bi, ped);
+    if (m.death >= 0.0f) {
+        BossProxyKill();
+        return;
+    }
+    // top the sensor back up and glue him to the boss, every frame
+    ped->m_fHealth = 1000.0f;
+    ped->m_fMaxHealth = 1000.0f;
+    ped->Teleport(CVector(m.pos.x, m.pos.y, m.pos.z + 0.9f), false);
+    ped->SetHeading(m.yaw);
+    ped->m_vecMoveSpeed = CVector(0, 0, 0);
+    // He never shows - by layers, not by one flag. The entity flag alone was
+    // the first build's only lock, and the game re-decides it (the first boss
+    // eye test saw a separate skin standing on the boss, reaching up out of
+    // his body: this body, rendered - his feet ride 0.9 m above the boss's,
+    // so a shown proxy reads as a second man growing out of him). SetPedDrawn
+    // re-strips the render flag from every atomic of his clump each frame, so
+    // even a clump that streams in late has nothing drawable, whatever the
+    // flag says; the PedSkins exclusion registered at creation covers the
+    // villager overlay. And his skeleton is kept up to date by hand: a ped
+    // the renderer skips stops updating the hit spheres the street's bullets
+    // test against, and he must stay hittable.
+    SetPedDrawn(ped, false);
+    if (ped->m_pRwObject)
+        ped->UpdateRpHAnim();
+}
 } // namespace
 
 void BossProxySessionReset() {
@@ -437,6 +768,19 @@ void BossProxySessionReset() {
     // session too: the new one gets its own attempt.
     BossProxyForget();
     gBossProxy.createFailed = false;
+    // the driver's state belongs to the torn-down world too: pointers off,
+    // nothing touched through them (the anchor object died with the world;
+    // its model registration is process-lifetime and stays, the way the
+    // collision system's does). The next session's first driver frame
+    // stands a fresh body and a fresh anchor up.
+    gBossDriver.anchorObj = nullptr;
+    gBossDriver.anchorRef = 0;
+    gBossDriver.seekTask = nullptr;
+    gBossDriver.active = false;
+    gBossDriver.anchored = false;
+    gBossDriver.appliedValid = false;
+    gBossDriver.didPre = false;
+    gBossDriver.watchT = 0.0f;
 }
 
 // Host::SpawnGround: grass, earth or sand of the GTA map (rarely anything else), not too steep, not under water
@@ -473,6 +817,13 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     std::vector<BeingInfo> beings; // the people around the player: the monsters may go for them too
     if (gGta.enabled)
         TheHost().NearbyBeings(playerPos, 20.0f, beings);
+    // the hybrid step: while the driver mode is wanted (the default; the
+    // /bosstest driver toggle is the A/B), his body reports BEFORE the
+    // brain ticks - the brain reads the feet the game gave him and answers
+    // with objectives, which BossProxySync applies after the tick
+    gBossDriver.didPre = false;
+    if (gGta.enabled && !gBossTest.proxyOff && !gBossTest.driverOff)
+        BossDriverPreTick(dt, player);
     MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle, &beings);
     if (gGta.enabled) {
         const auto proxyT0 = std::chrono::steady_clock::now();

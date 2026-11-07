@@ -390,7 +390,7 @@ void CmdSay(const Args& a) {
 // cross-fade, the two-layer compose - and watch what the eye still reports.
 void CmdBossTest(const Args& a) {
     if (a.size() < 2)
-        return Fail("/bosstest <proxy|fx|blend|layers>");
+        return Fail("/bosstest <proxy|fx|blend|layers|driver>");
     const std::string k = Lower(a[1]);
     bool* flag = nullptr;
     const char* name = "";
@@ -411,9 +411,13 @@ void CmdBossTest(const Args& a) {
         flag = &gBossTest.layersOff;
         name = "layers";
         what = "one layer: his whole body comes from the gait sequence";
+    } else if (k == "driver") {
+        flag = &gBossTest.driverOff;
+        name = "driver";
+        what = "his feet are ours again: the core steers him by probe and graph, his body a glued sensor";
     }
     if (!flag)
-        return Fail("/bosstest <proxy|fx|blend|layers>");
+        return Fail("/bosstest <proxy|fx|blend|layers|driver>");
     *flag = !*flag;
     Log("BOSS TEST: %s %s - %s", name, *flag ? "OFF" : "ON", what);
     Ok(Fmt("bosstest: %s %s", name, *flag ? "OFF" : "ON"));
@@ -435,7 +439,7 @@ struct Command {
     void (*run)(const Args&);
 };
 const Command kCommands[] = {
-    { "bosstest", "/bosstest <proxy|fx|blend|layers>", CmdBossTest },
+    { "bosstest", "/bosstest <proxy|fx|blend|layers|driver>", CmdBossTest },
     { "clear", "/clear [item]", CmdClear },
     { "effect", "/effect <give|clear> <effect> [seconds] [amplifier]", CmdEffect },
     { "fill", "/fill <x1> <y1> <z1> <x2> <y2> <z2> <block>", CmdFill },

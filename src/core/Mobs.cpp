@@ -1094,7 +1094,10 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
     const Vec3 fwd = Flat(t.feet - m.pos);
     const Vec3 from = eye + fwd * 0.6f;
-    const float dist = t.dist;
+    // (t.dist stays what it is - the GROUND range his tactics price by.
+    // The bullet's own range is the true line to the aim point, dist3,
+    // computed below: the two part company the moment the target leaves
+    // his level - a man on a roof, a man on a jetpack.)
     const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
     // Counter-Strike's stop-shoot rule: a man who has only just planted his
     // feet has not settled yet - his first fraction of a second shoots at the
@@ -1124,11 +1127,31 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
     m.sprayIndex += 1.0f;
     m.sprayIdle = 0.0f;
     const Vec3 aimPoint = aimOverride ? *aimOverride : (t.inVehicle ? t.vehSeat : t.mid);
-    const float err = std::tan(spread * kPi / 180.0f) * dist;
+    // THE JETPACK CONVICTION (the user's verdict, 2026-11-07: with the
+    // jetpack cheat on, his shots "have no effect"). The senses are honest
+    // 3D (BossVisibleFraction samples the body in space - roofs and
+    // jetpacks are in its cone), so he saw the flying man, aimed at his
+    // true chest and fired. But every range gate in this function read
+    // t.dist - the brain's HORIZONTAL range - while the bullet's geometry
+    // is the 3D line: the body samples' tt (the point's true distance
+    // along the line) was rejected past dist + 2, the world trace was
+    // asked for only dist + 3 of line, and the falloff was priced on the
+    // ground range too. On a flat street the two ranges agree to a
+    // hand's breadth and nobody ever knew; put the target ten metres up
+    // - a jetpack hover, a rooftop - and the true line outruns the
+    // ground range by metres, so no sample point could EVER register:
+    // he fired, the tracers flew at the man's chest, and no round could
+    // land. The fix is one honest range for the bullet: dist3, the true
+    // line from the muzzle to the aim point. Every gate below that
+    // speaks of the line now reads it (the body test keeps its own
+    // per-point distance besides); the ground range stays in charge of
+    // tactics - bursts, crouch, bands - where it belongs.
+    const float dist3 = (aimPoint - from).Length();
+    const float err = std::tan(spread * kPi / 180.0f) * dist3;
     const float a = Rand01() * 6.2831853f, rr = err * std::sqrt(Rand01());
     const Vec3 rightF(fwd.y, -fwd.x, 0.0f);
-    const Vec3 patOff = rightF * (std::tan(rec.yawDeg * 0.45f * kPi / 180.0f) * dist) +
-                        Vec3(0, 0, std::tan(rec.pitchDeg * 0.12f * kPi / 180.0f) * dist);
+    const Vec3 patOff = rightF * (std::tan(rec.yawDeg * 0.45f * kPi / 180.0f) * dist3) +
+                        Vec3(0, 0, std::tan(rec.pitchDeg * 0.12f * kPi / 180.0f) * dist3);
     const Vec3 aim = aimPoint + Vec3(std::cos(a) * rr, std::sin(a) * rr, (Rand01() - 0.5f) * err) + patOff;
     Vec3 dir = aim - from;
     const float len = dir.Length();
@@ -1144,7 +1167,8 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
             // width of it wounds him (the glass keeps a seventh of the bullet)
             const Vec3 rel = t.vehSeat - from;
             const float tt = rel.Dot(dir);
-            if (tt > 0.0f && tt < dist + 3.0f && (rel - dir * tt).Length() < 0.45f) {
+            const float pd = rel.Length(); // the seat's own true distance (the jetpack fix: never the ground range)
+            if (tt > 0.0f && tt < pd + 1.0f && (rel - dir * tt).Length() < 0.45f) {
                 hit = true;
                 tBody = tt;
             }
@@ -1153,7 +1177,8 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
                 const Vec3 p = t.feet + Vec3(0, 0, h);
                 const Vec3 rel = p - from;
                 const float tt = rel.Dot(dir);
-                if (tt < 0.0f || tt > dist + 2.0f)
+                const float pd = rel.Length(); // this sample's true distance along its own line
+                if (tt < 0.0f || tt > pd + 1.0f)
                     continue;
                 if ((rel - dir * tt).Length() < 0.42f) {
                     hit = true;
@@ -1164,7 +1189,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         ShotOwner by;
         by.hostile = true;
         by.shooter = -3; // his mark: the bridge skips nobody for it, the line is honest
-        tr = TheHost().ShotTrace(from, dir, dist + 3.0f, by);
+        tr = TheHost().ShotTrace(from, dir, dist3 + 3.0f, by);
         haveTrace = true;
         if (hit && !t.inVehicle)
             zone = CsZoneFromHeight(CsHitHeight(from, dir, t.feet, tBody));
@@ -1201,7 +1226,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
                 break;
             }
             const bool wallHere = seg.hit && seg.vehicle < 0 &&
-                segAbs < (hit ? tBody - 0.3f : dist + 2.0f) &&
+                segAbs < (hit ? tBody - 0.3f : dist3 + 2.0f) &&
                 !(seg.being >= 0 && std::fabs(seg.beingDist - seg.dist) < 0.5f);
             if (!wallHere)
                 break; // the line is clear to the body (or to nothing)
@@ -1221,7 +1246,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
             penMul *= pen.dmgMul;
             ++surfaces;
             const float step = pen.thicknessM + 0.06f;
-            const float remain = (dist + 3.0f) - (segAbs + step);
+            const float remain = (dist3 + 3.0f) - (segAbs + step);
             if (remain <= 0.05f) {
                 resWall = true;
                 wallPoint = seg.point;
@@ -1253,7 +1278,7 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         } else if (resVeh >= 0 || resWall) {
             end = resVeh >= 0 ? resPoint : wallPoint; // the tracer ends where the round ended
         } else {
-            end = muzzle + dir * (dist + 2.0f);
+            end = muzzle + dir * (dist3 + 2.0f);
         }
         if (!gBossTest.fxOff) { // bisect (/bosstest fx): the shot still happens, its flash and tracer do not
             gShotFx.push_back(ShotFx{ muzzle, end, 0.0f });
@@ -1275,12 +1300,12 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
         // the glass keeps its tax, as it always has on this host.
         float dmg;
         if (t.being >= 0) {
-            dmg = CsShotHh(weap, dist, zone, false, 0.0f, nullptr) * penMul;
+            dmg = CsShotHh(weap, dist3, zone, false, 0.0f, nullptr) * penMul;
             BossStrike(m, t, fwd, dmg);
         } else {
             const float armourPts = TheHost().PlayerArmor();
             float wear = 0.0f;
-            dmg = CsShotHh(weap, dist, zone, armourPts > 0.5f, armourPts * 0.2f, &wear);
+            dmg = CsShotHh(weap, dist3, zone, armourPts > 0.5f, armourPts * 0.2f, &wear);
             if (t.inVehicle) {
                 dmg *= 0.85f; // the windshield's tax
                 wear *= 0.85f;
@@ -1409,6 +1434,55 @@ float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& 
 }
 
 
+// ------------------------------------------------------------------ the driver
+// The hybrid step (2026-11-07): the game's own ped locomotion walks him,
+// this brain commands. A movement wish in driver mode is an OBJECTIVE - a
+// point and a speed - which the bridge hands to a native seek task on his
+// driver body; the street's own node flow does the walking, the cornering,
+// the not-getting-stuck. Our steering (probe, graph, MoveMob) never touches
+// his feet while drvOn: one writer. This is the one door every wish passes.
+//
+// An issue is MATERIAL only when the point truly moves (1.5 m) or the speed
+// class changes: a chase's intercept streams as the prey runs, and
+// re-issuing on every breath of it would churn the task under his feet and
+// flood the log this line exists to serve. The log line is the conviction
+// instrument for the next dumbness verdict - point, class, reason -
+// throttled to a line a second, with class changes always told.
+void BossDriveObjective(Mob& m, const Vec3& point, float speed, const char* why) {
+    m.drvMoved = true;
+    const bool stand = speed <= 0.01f;
+    const bool wasStand = m.drvObjSpeed <= 0.01f;
+    Vec3 d = point - m.drvObj;
+    d.z = 0.0f;
+    const bool classChange = stand != wasStand ||
+                             (!stand && !wasStand && ((speed > 2.6f) != (m.drvObjSpeed > 2.6f)));
+    if (m.drvObjValid && !classChange && d.Length() < 1.5f)
+        return; // the wish he already walks under
+    m.drvObj = point;
+    m.drvObjSpeed = speed;
+    m.drvObjValid = true;
+    m.drvWhy = why;
+    ++m.drvObjCount;
+    if (classChange || m.drvLogT <= 0.0f) {
+        m.drvLogT = 1.0f;
+        Log("boss driver: objective (%.0f, %.0f) %s - %s", point.x, point.y,
+            stand ? "stand" : speed > 2.6f ? "run" : "walk", why ? why : "-");
+    }
+}
+
+// A movement wish spoken as a direction (the dodge, the strafe band, the
+// point-blank back-off, the fallback's covering drift): legacy steering
+// takes the direction itself; driver mode turns it into an objective point
+// a few metres out at the wanted speed - the feet flow there natively.
+void BossDirectMove(Mob& m, const Vec3& dir, float speed, float reach, const char* why) {
+    if (m.drvOn)
+        BossDriveObjective(m, m.pos + dir * reach, speed, why);
+    else
+        m.goal = dir;
+    m.moving = true;
+    m.moveSpeed = speed;
+}
+
 // The last stretch of any directed walk: aim his feet at one point through
 // the probe (detours, side commitment), jumping what a man can jump. Shared
 // by the calm walker and the combat navigator - the probe's whole job in the
@@ -1445,7 +1519,8 @@ bool BossWalkToward(Mob& m, const Vec3& goal, float speedWanted, float dt) {
 // goal and speed through the usual fields and returns whether he is moving.
 // This is the CALM walker (patrol, return, the talk-first approach): its
 // repath policy is the loose one. Combat and the hunt use BossChaseTo below.
-bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist) {
+bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist,
+              const char* why = "go to") {
     if (m.staggerT > 0.0f)
         speedWanted *= 0.3f; // a staggered man stumbles, he does not travel
     Vec3 toDest = dest - m.pos;
@@ -1454,6 +1529,15 @@ bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriv
     if (distDest < arriveDist) {
         m.moving = false;
         return false;
+    }
+    if (m.drvOn) {
+        // driver mode: no route and no probe - the destination itself is
+        // the order, and the game's feet find the street to it. Arrival is
+        // read off the position the bridge reported at the tick's head.
+        BossDriveObjective(m, dest, speedWanted, why);
+        m.moving = true;
+        m.moveSpeed = speedWanted;
+        return true;
     }
     Vec3 goal = dest;
     if (NavReady() && distDest > 6.0f) {
@@ -1512,7 +1596,8 @@ bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriv
 //     dropped, a repath is forced at once, and if he stalls again at the
 //     same spot the pocket's nearest node is banned from that repath.
 // The probe keeps only micro-obstacles, through BossWalkToward.
-bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist) {
+bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist,
+                 const char* why = "chase") {
     if (m.staggerT > 0.0f)
         speedWanted *= 0.3f; // a staggered man stumbles, he does not travel
     else if (m.health < kBoss.health * 0.5f)
@@ -1527,6 +1612,18 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
         m.navProgT = 0.0f;
         m.navProgPos = m.pos;
         return false;
+    }
+    if (m.drvOn) {
+        // driver mode: the point IS the tactic - intercept, cover, fallback,
+        // search corner - and the native feet execute it. No A*, no probe,
+        // no stall watchdog: the street's own locomotion does not stall the
+        // way our steering did, and when it honestly cannot reach a point
+        // the brain sees it in his reported position and re-decides, the
+        // way it reads any other fact of the world.
+        BossDriveObjective(m, dest, speedWanted, why);
+        m.moving = true;
+        m.moveSpeed = speedWanted;
+        return true;
     }
     m.repathT = std::max(0.0f, m.repathT - dt);
     bool moving = false;
@@ -1689,6 +1786,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.spraySeed = 1 + (int)(Rand01() * 2000000000.0f);
     }
     m.reposT = std::max(0.0f, m.reposT - dt);
+    m.drvLogT = std::max(0.0f, m.drvLogT - dt);
+    m.drvMoved = false; // this tick has ordered no move yet (the driver's book)
     // the settle clock: how long his feet have honestly been still - fire
     // control prices his spread off it (Counter-Strike's stop-shoot recovery)
     {
@@ -2102,11 +2201,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
     }
     const bool dodging = m.dodgeT > 0.0f;
-    if (dodging) {
-        m.goal = m.dodgeDir;
-        m.moving = true;
-        m.moveSpeed = kBoss.chaseSpeed;
-    }
+    if (dodging)
+        BossDirectMove(m, m.dodgeDir, kBoss.chaseSpeed, 3.5f, "dodge");
 
     // ================================================================ COMBAT
     if (m.bossState == BS_COMBAT) {
@@ -2162,7 +2258,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             if (wantCover && m.hasCover) {
                 inCoverNow = (m.pos - m.coverPoint).LengthSq() < 1.2f;
                 if (m.peekPhase) {
-                    if (!BossChaseTo(m, m.peekPoint, kSoldier.strafeSpeed, dt, 0.45f))
+                    if (!BossChaseTo(m, m.peekPoint, kSoldier.strafeSpeed, dt, 0.45f, "peek out of cover"))
                         m.peekT -= dt;
                     peekFire = true;
                     if (m.peekT <= 0.0f) {
@@ -2170,7 +2266,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                         m.hideT = wounded ? 1.7f : 0.8f + Rand01() * 0.9f;
                     }
                 } else {
-                    BossChaseTo(m, m.coverPoint, kBoss.chaseSpeed * 0.8f, dt, 0.45f);
+                    BossChaseTo(m, m.coverPoint, kBoss.chaseSpeed * 0.8f, dt, 0.45f, "take cover");
                     m.hideT -= dt;
                     if (m.hideT <= 0.0f && inCoverNow) {
                         m.peekPhase = true;
@@ -2253,14 +2349,13 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     m.hasFallback = true;
                 }
                 if (!m.hasFallback ||
-                    !BossChaseTo(m, m.fallbackPoint, kBoss.chaseSpeed * 0.8f, dt, 1.2f)) {
+                    !BossChaseTo(m, m.fallbackPoint, kBoss.chaseSpeed * 0.8f, dt, 1.2f, "fallback: the wounded bound")) {
                     // arrived at the fallback (or it was abandoned): he holds
                     // the ground and drifts sideways like a man covering his
                     // own retreat, never a statue; the hunt gate opens here
                     m.hasFallback = false;
-                    m.goal = Vec3(dir.y, -dir.x, 0.0f) * m.strafeDir;
-                    m.moving = true;
-                    m.moveSpeed = kSoldier.strafeSpeed;
+                    BossDirectMove(m, Vec3(dir.y, -dir.x, 0.0f) * m.strafeDir, kSoldier.strafeSpeed, 3.0f,
+                                   "covering drift at the fallback");
                 }
             } else if (tgt.being < 0 && !tgtVisible &&
                        (m.lostT <= kBoss.lostGrace || m.heardT > 0.0f || tgt.dist <= kBoss.huntMinRange)) {
@@ -2275,7 +2370,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 // up to and looked around, not orbited at fighting distance
                 // from a position he cannot honestly know. The band play
                 // below is for a target he can see.
-                BossChaseTo(m, chasePoint, kBoss.chaseSpeed, dt, 1.2f);
+                BossChaseTo(m, chasePoint, kBoss.chaseSpeed, dt, 1.2f, "press the last-seen point");
             } else if (tgt.dist > 13.0f) {
                 if (((wounded && tgtVisible) ||
                      (tgt.dist >= kBoss.crouchRange && (m.firePlantT > 0.0f || m.burstShots > 0))) &&
@@ -2293,12 +2388,16 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     m.moving = false;
                     m.moveSpeed = 0.0f;
                 } else {
-                    BossChaseTo(m, chasePoint, kBoss.chaseSpeed, dt, 11.0f);
+                    BossChaseTo(m, chasePoint, kBoss.chaseSpeed, dt, 11.0f, "advance: the intercept");
                 }
             } else if (tgt.dist < 6.0f) {
-                m.goal = SoldierAdvance(m, dir * -1.0f, dt);
-                m.moving = true;
-                m.moveSpeed = kSoldier.strafeSpeed;
+                if (m.drvOn)
+                    BossDirectMove(m, dir * -1.0f, kSoldier.strafeSpeed, 4.0f, "back off: point blank");
+                else {
+                    m.goal = SoldierAdvance(m, dir * -1.0f, dt);
+                    m.moving = true;
+                    m.moveSpeed = kSoldier.strafeSpeed;
+                }
             } else {
                 m.strafeTime -= dt;
                 if (m.strafeTime <= 0.0f) {
@@ -2306,9 +2405,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     m.strafeDir = -m.strafeDir;
                 }
                 const Vec3 side(dir.y, -dir.x, 0.0f);
-                m.goal = side * m.strafeDir;
-                m.moving = true;
-                m.moveSpeed = kSoldier.strafeSpeed;
+                BossDirectMove(m, side * m.strafeDir, kSoldier.strafeSpeed, 3.0f, "strafe the band");
             }
         }
         // ---- fire control
@@ -2490,7 +2587,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 m.detect = 0.3f;
             }
         } else if (m.cmdPhase == 1) {
-            if (!BossGoTo(m, playerFeet, t.walk, dt, kBoss.commandRange)) {
+            if (!BossGoTo(m, playerFeet, t.walk, dt, kBoss.commandRange, "command: the approach")) {
                 m.cmdPhase = 2;
                 m.holdT = 2.0f;
             }
@@ -2643,7 +2740,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         } else if (m.huntPhase == 0) {
             m.aimGoal = m.huntDest + Vec3(0, 0, 1.2f);
             m.aimRate = 6.0f;
-            if (!BossChaseTo(m, m.huntDest, kBoss.chaseSpeed, dt, 1.8f)) {
+            if (!BossChaseTo(m, m.huntDest, kBoss.chaseSpeed, dt, 1.8f, "hunt: run the intercept")) {
                 // arrived: gather the search - and the search follows the
                 // EXIT, not the disc. A man who broke the line at speed is
                 // not within twelve metres of where he was seen; he is down
@@ -2755,7 +2852,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 }
             } else {
                 const Vec3 pt = m.searchPts[m.searchIdx];
-                if (!BossChaseTo(m, pt, kBoss.chaseSpeed * 0.85f, dt, 1.4f)) {
+                if (!BossChaseTo(m, pt, kBoss.chaseSpeed * 0.85f, dt, 1.4f, "hunt: work the search points")) {
                     // at a corner he slices it: the rifle sweeps the angle he
                     // could not see on the way in, before he trusts the spot
                     m.scanT += dt;
@@ -2827,7 +2924,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         Vec3 toAnchor = m.anchor - m.pos;
         toAnchor.z = 0.0f;
         if (!suspicious && toAnchor.Length() > kBoss.returnRange) {
-            BossGoTo(m, m.anchor, t.run, dt, 3.0f); // home is Grove; he routes back
+            BossGoTo(m, m.anchor, t.run, dt, 3.0f, "return to Grove"); // home is Grove; he routes back
             m.aimGoal = m.anchor + Vec3(0, 0, 1.2f);
             m.aimRate = 4.0f;
         } else if (m.patrolWait > 0.0f) {
@@ -2850,7 +2947,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         } else {
             const Vec3 post = m.patrolPts[m.patrolStep % (int)m.patrolPts.size()];
             m.patrolLeg += dt;
-            if (!BossGoTo(m, post, t.walk, dt, 1.2f) || m.patrolLeg > 12.0f) {
+            if (!BossGoTo(m, post, t.walk, dt, 1.2f, "patrol: the next post") || m.patrolLeg > 12.0f) {
                 m.patrolWait = 1.4f + Rand01() * 1.6f;
                 m.moving = false;
             }
@@ -2875,6 +2972,13 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // never cleared by anyone.
     if (m.bossState != BS_COMBAT)
         m.crouch = false;
+
+    // driver mode: a tick that ordered no move orders a stand where he
+    // stands. The feet must never keep walking an old objective into a new
+    // tactic - a planted burst, a reload in cover, a post being held: each
+    // reads to the feet as "stop here", spoken once through the same door.
+    if (m.drvOn && !m.drvMoved)
+        BossDriveObjective(m, m.pos, 0.0f, "hold position");
 
     // ================================================================ his body
     // The aim: in a fight his eyes are on the target at a professional's turn
@@ -3736,6 +3840,46 @@ void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool dr
     m.vel.y += side.y * 4.5f;
 }
 
+// ------------------------------------------------------------------
+// The driver body's reports (the hybrid step): the bridge calls the first
+// once a frame before the tick, while the body lives; the second when it
+// is gone. The soldier adopts the reported transform wholesale - he IS
+// where his body is - and his velocity is the reports' difference, so the
+// settle clock, the gait and the spread all price off his true motion.
+// A body's first report after a rebuild re-anchors him: the difference is
+// not a velocity (the clamp below keeps even that honest), and he never
+// teleports in the player's sight either way - the body was placed at his
+// feet when the mode took it, and it is where it walked since.
+void MobDriverReport(int index, const Vec3& feet, bool grounded, float dt) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f)
+        return;
+    m.drvOn = true;
+    m.drvPos = feet;
+    if (m.drvPrevInit && dt > 0.001f) {
+        Vec3 v = (feet - m.drvPrevPos) * (1.0f / dt);
+        if (v.Length() > 14.0f)
+            v = v * (14.0f / v.Length()); // a re-anchor's leap is not a speed
+        m.vel = v;
+    }
+    m.drvPrevPos = feet;
+    m.drvPrevInit = true;
+    m.pos = feet;
+    m.onGround = grounded;
+    if (grounded)
+        m.groundZ = feet.z; // his shadow stands where his feet stand
+}
+
+void MobDriverGone(int index) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    m.drvOn = false;
+    m.drvPrevInit = false;
+}
+
 void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer) {
     if (index < 0 || index >= (int)gMobs.size())
         return;
@@ -4038,13 +4182,20 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
         // (gMobs may have been reallocated by SpawnMob above)
         Mob& mm = gMobs[i];
 
-        // gravity; chickens flutter down
-        mm.vel.z -= 32.0f * dt;
-        if (mm.kind == MOB_CHICKEN && mm.vel.z < 0.0f && mm.death < 0.0f)
-            mm.vel.z *= std::pow(0.6f, dt * 20.0f);
-        if (mm.vel.z < -60.0f)
-            mm.vel.z = -60.0f;
-        MoveMob(mm, dt);
+        if (mm.kind == MOB_SOLDIER && mm.drvOn) {
+            // driver mode: his body is the game's ped - gravity, ground
+            // and collision are the game's own work, and the bridge's next
+            // report will place him where the body actually went. The core
+            // integrates nothing for him (single writer for his feet).
+        } else {
+            // gravity; chickens flutter down
+            mm.vel.z -= 32.0f * dt;
+            if (mm.kind == MOB_CHICKEN && mm.vel.z < 0.0f && mm.death < 0.0f)
+                mm.vel.z *= std::pow(0.6f, dt * 20.0f);
+            if (mm.vel.z < -60.0f)
+                mm.vel.z = -60.0f;
+            MoveMob(mm, dt);
+        }
 
         // animation
         float hs = std::sqrt(mm.vel.x * mm.vel.x + mm.vel.y * mm.vel.y);

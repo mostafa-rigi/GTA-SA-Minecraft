@@ -1,5 +1,5 @@
 #pragma once
-// Diagnostic support for the boss (the solo Counter-Strike soldier): four live
+// Diagnostic support for the boss (the solo Counter-Strike soldier): five live
 // bisect toggles the tester flips from the mod chat (/bosstest, Commands.cpp),
 // and two phase timings the bridge reports back per frame for the core's
 // long-frame logger (Mobs.cpp). Every flag defaults to the shipped behaviour
@@ -13,6 +13,9 @@ struct BossTestState {
     bool fxOff = false;     // no muzzle flash and no tracer is produced for his shots
     bool blendOff = false;  // pose changes cut hard: the cross-fade never blends
     bool layersOff = false; // one layer: the whole body composed from the gait sequence
+    bool driverOff = false; // legacy feet: the core steers him itself (probe and graph) and
+                            // his body is a glued sensor again, instead of the game's own
+                            // ped locomotion walking him under the brain's objectives
 };
 extern BossTestState gBossTest;
 

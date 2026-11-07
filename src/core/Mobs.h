@@ -213,6 +213,26 @@ struct Mob {
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
     float steerSide = 0.0f;    // soldier: the side (+1/-1) his current obstacle is being rounded on; 0 = none
+    // ---- the driver (the hybrid step, 2026-11-07): the game's own ped
+    // locomotion walks him while this brain stays the commander. The bridge
+    // reports his driver body's transform before the brain ticks
+    // (MobDriverReport) and the core adopts it wholesale - position,
+    // velocity, ground - and integrates NOTHING for him: one writer for his
+    // feet. The brain's movement wishes leave as an objective POINT plus a
+    // speed class (drvObj), which the bridge's seek task executes on the
+    // street's own node flow. Legacy steering (probe/graph) runs whenever
+    // drvOn is false - no body, the toggle off, or the mode not yet up.
+    bool drvOn = false;         // a live driver body reported for this frame
+    Vec3 drvPos{ 0, 0, 0 };     // his feet, as the body last reported them
+    Vec3 drvPrevPos{ 0, 0, 0 }; // the report before it (velocity is their difference)
+    bool drvPrevInit = false;
+    Vec3 drvObj{ 0, 0, 0 };     // the objective point his feet are walking to
+    float drvObjSpeed = 0.0f;   // the speed the objective carries (0: stand)
+    bool drvObjValid = false;   // an objective has been issued at least once
+    bool drvMoved = false;      // an objective was issued this tick (brain-local)
+    int drvObjCount = 0;        // material objective issues so far (tests read it)
+    float drvLogT = 0.0f;       // the objective log's throttle clock
+    const char* drvWhy = nullptr; // the reason the last material issue carried
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
@@ -274,6 +294,15 @@ void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool dr
 // A vehicle actually hit him: heavy, capped, never fatal by itself, and the
 // driver is detected completely and at once.
 void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer);
+// ---- the driver body's word in from the bridge (the hybrid step)
+// Once a frame, before MobsTick, while his driver body lives: the soldier
+// adopts the body's transform (feet, ground state; his velocity is derived
+// from consecutive reports) and the core stops integrating his position -
+// the game's feet own it. MobDriverGone is the word that the body is gone
+// (lost, retired, or the mode switched off): the core steers him itself
+// again, from exactly where he stands - he never teleports either way.
+void MobDriverReport(int index, const Vec3& feet, bool grounded, float dt);
+void MobDriverGone(int index);
 
 // ---- loud facts for his ears, reported by the parts of the core that make them
 void NotePlayerShot(const Vec3& at, float radius); // a weapon loosed (Combat)
