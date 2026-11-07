@@ -75,6 +75,10 @@ struct CopBodyState {
     // in Pre off the car's own travel) and his speed, for the render
     float wheelSpin = 0.0f;
     float speedMps = 0.0f;
+    // round 2's spawn instrumentation: the first report that answers
+    // for this body says so once in the log, so a summon's story reads
+    // end to end (spawn steps, seating in Pre, first report here)
+    bool reportedOnce = false;
 };
 CopBodyState sBodies[kMaxCopUnits];
 
@@ -366,16 +370,43 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
     if (!found)
         gz = at.z;
+    Log("cop spawn: step 1 - models in, creating car %d at (%.0f, %.0f)", kCopCarModel, at.x, at.y);
     int handle = 0;
     Command<Commands::CREATE_CAR>(kCopCarModel, at.x, at.y, gz + 0.6f, &handle);
     Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kCopCarModel);
+    Log("cop spawn: step 2 - CREATE_CAR returned handle %d", handle);
+    // the handle is a pool REF, not a slot index - the second-summon
+    // crash of 2026-11-07 was born here. CREATE_CAR is the game's own
+    // script opcode and hands back what CPool::GetRef builds:
+    // (slot << 8) + the slot's generation byte (CPool.h, in-tree).
+    // Round 1 fed that number to GetAt, which expects a raw index and
+    // checks NOTHING: it read the generation map out of bounds and
+    // returned the pool base plus handle car-sized strides - a wild
+    // pointer into unrelated memory. Whatever sat at +0x14 there was
+    // the crash lottery: a clean zero the first night (the guard read
+    // it as "no matrix yet"), junk the second (the guard passed and
+    // the basis write stored through junk). The validated translation
+    // is the pool's own GetAtRef - the same verb every stored body in
+    // this file is resolved by (LiveVeh above) - and the identity
+    // round-trips below prove the pointer is the car the opcode made:
+    // its slot holds it, the slot is not free, and its own GetRef
+    // reproduces the handle byte for byte. Anything less refuses.
     auto* vpool = CPools::ms_pVehiclePool;
-    CVehicle* veh = vpool ? vpool->GetAt(handle) : nullptr;
+    CVehicle* veh = (vpool && handle > 0) ? vpool->GetAtRef(handle) : nullptr;
     if (!veh) {
-        Log("cop body: CREATE_CAR made no vehicle - spawn refused");
+        Log("cop body: CREATE_CAR handle %d resolves to no vehicle - spawn refused", handle);
         s = CopBodyState();
         return -1;
     }
+    const int vidx = vpool->GetIndex(veh);
+    if (vidx < 0 || vidx >= vpool->m_nSize || vpool->IsFreeSlotAtIndex(vidx) ||
+        vpool->GetRef(veh) != handle) {
+        Log("cop body: handle %d resolved but the pool identity does not round-trip (slot %d) - spawn refused",
+            handle, vidx);
+        s = CopBodyState();
+        return -1;
+    }
+    Log("cop spawn: step 3 - handle %d is the car at pool slot %d, identity round-trips", handle, vidx);
     // turn his nose to the man
     Vec3 d = face - at;
     d.z = 0.0f;
@@ -388,11 +419,16 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     // m_placement for exactly that state. Writing the basis through the
     // pointer as it stood was the first-summon crash of 2026-11-07
     // (fault at the [veh+0x14] read, this very block - the first time
-    // this spawn ever ran in the game). Allocate it the game's own way;
-    // if even that leaves none, refuse the spawn like the pool-landing
-    // refusal further down: every later touch of this body (Pre's wheel
-    // spin, the Report, Post's sound position, CopRender) reads the
-    // same pointer, so a body without a matrix cannot enter service.
+    // this spawn ever ran in the game). Round 1's law stands - allocate
+    // it the game's own way, and if even that leaves none, refuse the
+    // spawn like the pool-landing refusal further down: every later
+    // touch of this body (Pre's wheel spin, the Report, Post's sound
+    // position, CopRender) reads the same pointer, so a body without a
+    // matrix cannot enter service. What round 2 added is that the law
+    // now runs on the car's OWN pointer, proven above - on the wild
+    // pointer the old GetAt produced, this very block was reading and
+    // writing somebody else's memory, and no guard here could see it.
+    Log("cop spawn: step 4 - matrix %s on the fresh car", veh->m_matrix ? "present" : "absent");
     if (!veh->m_matrix)
         veh->AllocateMatrix();
     if (!veh->m_matrix) {
@@ -400,14 +436,40 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
         s = CopBodyState();
         return -1;
     }
+    Log("cop spawn: step 4 - matrix ready");
     CMatrix& m = *veh->m_matrix;
     m.right = CVector(fwd.y, -fwd.x, 0.0f);
     m.up = CVector(fwd.x, fwd.y, 0.0f);
     m.at = CVector(0.0f, 0.0f, 1.0f);
     m.pos = CVector(at.x, at.y, gz + 0.6f);
     veh->UpdateRwMatrix();
+    // the write must prove itself before the body is anyone's: read the
+    // position back through the same pointer and compare - a spawn that
+    // cannot show its own nose on the ground it chose does not enter
+    // service (the retire path's own teardown verbs take the car back).
+    const CVector& back = veh->m_matrix->pos;
+    if (std::fabs(back.x - at.x) > 0.01f || std::fabs(back.y - at.y) > 0.01f ||
+        std::fabs(back.z - (gz + 0.6f)) > 0.01f) {
+        Log("cop body: the basis write does not read back (got %.2f, %.2f, %.2f) - spawn refused",
+            back.x, back.y, back.z);
+        CWorld::Remove(veh);
+        delete veh;
+        s = CopBodyState();
+        return -1;
+    }
+    Log("cop spawn: step 5 - nose written toward the man, position read back at (%.0f, %.0f)", back.x, back.y);
     s.veh = veh;
     s.vehRef = vpool->GetRef(veh);
+    // and the identity the whole force will steer by: the ref the core
+    // is about to be handed must resolve back to this very car through
+    // the pool discipline every later touch uses (LiveVeh)
+    if (LiveVeh(s) != veh) {
+        Log("cop body: the stored ref does not resolve back to the new car - spawn refused");
+        CWorld::Remove(veh);
+        delete veh;
+        s = CopBodyState();
+        return -1;
+    }
     s.book01 = 1.0f;
     s.lastSetHealth = veh->m_fHealth;
 
@@ -416,12 +478,16 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     // zeroed, mission-created so population never takes him)
     auto* ppool = CPools::ms_pPedPool;
     if (!ppool) {
+        CWorld::Remove(veh);
+        delete veh;
         s = CopBodyState();
         return -1;
     }
     CCopPed* cop = new CCopPed(COP_TYPE_CITYCOP);
     CPed* driver = cop;
     if (!driver) {
+        CWorld::Remove(veh);
+        delete veh;
         s = CopBodyState();
         return -1;
     }
@@ -434,10 +500,13 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     if (idx < 0 || idx >= ppool->m_nSize || ppool->GetAt(idx) != driver || ppool->IsFreeSlotAtIndex(idx)) {
         CWorld::Remove(driver);
         delete driver;
+        CWorld::Remove(veh);
+        delete veh;
         Log("cop body: the driver did not land in the ped pool (index %d) - spawn refused", idx);
         s = CopBodyState();
         return -1;
     }
+    Log("cop spawn: step 6 - driver built and pool-landed at slot %d", idx);
     if (driver->m_pIntelligence) {
         driver->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
         driver->m_pIntelligence->SetSeeingRange(0.0f);
@@ -462,11 +531,27 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     } else {
         driver->SetPosn(door);
     }
+    // the enter task is issued through the driver's intelligence -
+    // the block above only CONFIGURES it under a null check, this line
+    // used to deref it bare (the audit's one unchecked field deref on
+    // this path). A constructed cop ped always carries one, so this is
+    // a guard, not an expectation - but a spawn that cannot give its
+    // driver the door is refused whole, never half-built.
+    if (!driver->m_pIntelligence) {
+        Log("cop body: the driver has no intelligence to take the enter task - spawn refused");
+        CWorld::Remove(driver);
+        delete driver;
+        CWorld::Remove(veh);
+        delete veh;
+        s = CopBodyState();
+        return -1;
+    }
     driver->m_pIntelligence->m_TaskMgr.SetTask(new CTaskComplexEnterCarAsDriver(veh),
                                                TASK_PRIMARY_PRIMARY, false);
     s.driver = driver;
     s.driverRef = ppool->GetRef(driver);
     PedSkinsExcludePed(driver);
+    Log("cop spawn: step 7 - enter task issued; the seating itself is watched in Pre");
     Log("cop body: car %d and driver up at (%.0f, %.0f)", s.vehRef, at.x, at.y);
     return s.vehRef;
 }
@@ -535,6 +620,11 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     s.struckShot = 0.0f;
     s.struckWorld = 0.0f;
     s.driverHitAcc = 0.0f;
+    if (!s.reportedOnce) {
+        s.reportedOnce = true;
+        Log("cop spawn: first report for car %d read back gas %.2f brake %.2f steer %.2f - the body answers",
+            s.vehRef, out->gas, out->brake, out->steer);
+    }
     return true;
 }
 
