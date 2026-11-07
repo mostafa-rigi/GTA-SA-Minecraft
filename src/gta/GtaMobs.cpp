@@ -27,6 +27,8 @@
 
 #include "BossTest.h"
 #include "Config.h"
+#include "Cop.h"
+#include "GtaCop.h"
 #include "Draw3D.h"
 #include "Game.h"
 #include "GtaWorld.h"
@@ -137,6 +139,11 @@ struct BossProxyState {
     float cowerT = 0.0f;
 };
 BossProxyState gBossProxy;
+
+// seconds since the player's gun last fired - BossBodyDuties keeps it, the
+// cop's body reads it to price a shot against a ram (one clock, two users)
+float gPlayerShotAge = 99.0f;
+float BridgePlayerShotAge() { return gPlayerShotAge; }
 
 // CPed::m_nCreatedBy, the game's own ownership bookkeeping: a ped the
 // population system spawned for the street is RANDOM (1) and population may
@@ -503,7 +510,7 @@ void BossBodyDuties(float dt, CPlayerPed* player, int bi, CPed* ped) {
     // the relay below (his bullets meet the proxy; no task names them, at
     // ANY range - the old 40 m guess silently un-attributed his long shots,
     // so damage from a sniper landed with no enemy made)
-    static float sPlayerShotAge = 99.0f;
+    float& sPlayerShotAge = gPlayerShotAge;
     {
         CWeapon& w = player->m_aWeapons[player->m_nSelectedWepSlot];
         if (w.m_nState == WEAPONSTATE_FIRING)
@@ -925,6 +932,13 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     if (gGta.enabled && !gBossTest.proxyOff && !gBossTest.driverOff && !coreTravel)
         BossDriverPreTick(dt, player);
     MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle, &beings);
+    // the Driver 2 cop rides the same frame discipline as the boss's
+    // driver body: the bridge prices the frame (Pre), the brain ticks,
+    // the bridge re-asserts the pedal writes after the game's own
+    // processing had its turn (Post)
+    CopBodyPre(dt);
+    CopTick(dt, playerPos);
+    CopBodyPost();
     if (gGta.enabled) {
         const auto proxyT0 = std::chrono::steady_clock::now();
         BossProxySync(dt, player);

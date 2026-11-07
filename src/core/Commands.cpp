@@ -6,6 +6,7 @@
 
 #include "BossTest.h"
 #include "Chat.h"
+#include "Cop.h"
 #include "GameState.h"
 #include "Host.h"
 #include "Inventory.h"
@@ -297,7 +298,29 @@ void CmdXp(const Args& a) {
 
 void CmdSummon(const Args& a) {
     if (a.size() < 2)
-        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider|soldier> [x y z]");
+        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider|soldier|cop> [x y z]");
+    // the Driver 2 cop is not a Mob: his body is a car of the host's and
+    // his brain lives in Cop.cpp. He is a San Andreas resident, so CleanSA
+    // lets him through like the soldier.
+    if (Lower(a[1]) == "cop") {
+        Vec3 at;
+        if (a.size() >= 5) {
+            if (!ParsePos(a, 2, &at))
+                return Fail("/summon cop [x y z]");
+        } else {
+            Vec3 feet;
+            PlayerFeet(&feet);
+            Vec3 d(gGame.lookDir.x, gGame.lookDir.y, 0.0f);
+            const float l = d.Length();
+            at = feet + (l > 0.01f ? d * (6.0f / l) : Vec3(0, 6.0f, 0));
+            at.z = feet.z; // a car stands on the street, not at eye height
+        }
+        Vec3 feet;
+        PlayerFeet(&feet);
+        if (!CopSummon(at, feet))
+            return Fail(Tr("Unable to summon the cop", "Polis çağrılamadı"));
+        return Ok(Tr("Summoned the Driver 2 cop", "Driver 2 polisi çağrıldı"));
+    }
     const int kind = MobByName(a[1]);
     if (kind < 0)
         return Fail(Fmt(Tr("Unknown entity: %s", "Bilinmeyen varlık: %s"), a[1].c_str()));
@@ -566,8 +589,11 @@ std::vector<std::string> CompleteCommand(const std::string& line) {
         AddMatches(out, last, kXpSub, 1);
     else if ((cmd == "xp" || cmd == "experience") && argIndex == 3)
         AddMatches(out, last, kXpKind, 2);
-    else if (cmd == "summon" && argIndex == 1)
+    else if (cmd == "summon" && argIndex == 1) {
         AddMatches(out, last, kMobNames, MOB_KIND_COUNT);
+        static const char* const kCop[] = { "cop" };
+        AddMatches(out, last, kCop, 1);
+    }
     else if (cmd == "gamerule" && argIndex == 1) {
         for (const char* r : kGameRules)
             if (Lower(r).rfind(last, 0) == 0)

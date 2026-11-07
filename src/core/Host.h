@@ -149,6 +149,40 @@ struct Host {
     // Is the player aiming a weapon at this world point (within radius)? The
     // game's own peds react to being aimed at; the boss polls the same fact.
     virtual bool PlayerAimingAt(const Vec3& point, float radius) { return false; }
+    // ---- the Driver 2 cop's body (step 1): one real car of the host's, with
+    // a contained driver of the host's own kind sitting in it, driven by the
+    // core writing pedal and steering fields on it every tick. The report is
+    // the spike's evidence: the pedal/steer values are read BACK from the
+    // vehicle, never echoed from what the core last wrote - if the host's
+    // own processing overwrites them, the read-back is where it shows.
+    struct CopBody {
+        bool ok = false;          // the body still resolves and lives
+        Vec3 pos, fwd, vel;       // centre, forward (unit), velocity (m/s)
+        float health = 1.0f;      // 0..1 of the host's own vehicle health
+        float steer = 0.0f;       // read back: -1..1 of full lock
+        float gas = 0.0f;         // read back: 0..1
+        float brake = 0.0f;       // read back: 0..1
+        bool siren = false;       // read back: the vehicle's own siren flag
+        // damage since the last report that the host attributes to the
+        // player, split by how it arrived (the boss relay's discipline:
+        // a blow is priced once, by the channel that saw it)
+        float struckRam = 0.0f;   // host health points lost to his vehicle
+        float struckShot = 0.0f;  // host health points lost to his gunfire
+    };
+    // Stand the body up at `at` facing `headingDeg`, its nose turned toward
+    // `face` (the original's justPinged: a fresh cop starts facing his man).
+    // Returns the host's number for the car, or -1 when no body could be made.
+    virtual int SpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) { return -1; }
+    virtual bool CopBodyReport(int veh, CopBody* out) { return false; }
+    // gas/brake 0..1, steer -1..1 of full lock. Siren: the host's own siren
+    // flag follows `siren` while the body is driven.
+    virtual void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {}
+    virtual void CopBodyRetire(int veh) {}
+    // The strongest impact the player's own vehicle took since the last call
+    // (host health points it lost in one step), consumed by the call - the
+    // felony system's ears for "he hit something", read off his own car's
+    // damage the way the game's books would show it.
+    virtual float PlayerVehicleImpact() { return 0.0f; }
     // ---- the fishing hook
     virtual HostHit HookTrace(const Vec3& from, const Vec3& dir, float len) { return HostHit(); } // in the way of the flying hook
     virtual bool HookPoint(const HostHit& hooked, Vec3* at) { return false; } // where the hook on its thing is now (false: gone)

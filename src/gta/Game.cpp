@@ -29,6 +29,8 @@
 #include "Combat.h"
 #include "GtaCombat.h"
 #include "Config.h"
+#include "Cop.h"
+#include "GtaCop.h"
 #include "Effects.h"
 #include "Fishing.h"
 #include "GtaHost.h"
@@ -430,6 +432,8 @@ void GameOnNewSession() {
     GtaCombatClear();
     MobsClear();
     BossProxySessionReset();
+    CopReset();          // the Driver 2 cop's brain forgets his car
+    CopSessionReset();   // ...and his bridge forgets the body, hands off
     PedSkinsForget();
     FishingClear();
     BlocksClear();

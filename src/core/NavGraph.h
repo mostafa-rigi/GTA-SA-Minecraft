@@ -76,6 +76,20 @@ int VehicleNearestNode(const Vec3& at, float maxDist);
 // the route's length in metres. False when no road route exists.
 bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut);
 
+// The Driver 2 distance field (PATHFIND.C's shape): ONE Dijkstra flood over
+// the road graph toward a target, shared by every reader - no per-car A*.
+// VehicleFieldTo (re)builds the flood toward the node nearest `target`
+// (costly on 30k nodes: callers throttle it); afterwards VehicleFieldCost
+// reads the road distance from any point's nearest node to the target, and
+// VehicleFieldDescent hands back the world point a driver at `at` should
+// aim at: the descending neighbour's node, walked forward along the descent
+// until roughly `ahead` metres of road are covered (the WibbleDownTheRoad
+// look-ahead). False/-1 when the graph or the flood is not there, or the
+// point's node cannot reach the target at all.
+bool VehicleFieldTo(const Vec3& target);
+float VehicleFieldCost(const Vec3& at);
+bool VehicleFieldDescent(const Vec3& at, float ahead, Vec3* out);
+
 // Named places the boss checks while hunting. Since the atlas landed these
 // are no longer a hand-placed list: they are the atlas POI database itself
 // (Atlas.h - extracted from the game's own files), and `at` is the place's

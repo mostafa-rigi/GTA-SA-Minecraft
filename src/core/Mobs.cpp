@@ -9,6 +9,7 @@
 #include "BossTest.h"
 #include "BlockRules.h"
 #include "Combat.h"
+#include "Cop.h"
 #include "CsRules.h"
 #include "Doors.h"
 #include "Entities.h"
@@ -4944,6 +4945,21 @@ void MobsTick(float dt, const Vec3& playerPos, uint16_t playerHeld, bool playerO
         } else {
             ++i;
         }
+    }
+    // the shared threat record (Cop.h): the boss publishes his side every
+    // tick - his state, whether he is in combat, where he stands - so the
+    // Driver 2 cop reads the same fight he reads. One team, not two
+    // strangers: whoever sees the man, the other knows.
+    {
+        bool noted = false;
+        for (const Mob& m : gMobs)
+            if (m.kind == MOB_SOLDIER && m.death < 0.0f) {
+                ThreatNoteBoss(m.bossState, m.bossState == 2, m.pos, true);
+                noted = true;
+                break;
+            }
+        if (!noted)
+            ThreatNoteBoss(-1, false, Vec3(), false);
     }
     if (bossActive) {
         const float tickMs =

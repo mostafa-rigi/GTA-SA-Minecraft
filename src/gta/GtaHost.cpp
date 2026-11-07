@@ -23,6 +23,7 @@
 #include "Game.h"
 #include "GameState.h"
 #include "GtaCombat.h"
+#include "GtaCop.h"
 #include "GtaFishing.h"
 #include "GtaMining.h"
 #include "GtaMobs.h"
@@ -238,6 +239,16 @@ struct GtaHost : Host {
         GtaNearbyBeings(centre, radius, out);
     }
     void HurtVehicle(int vehicle, float halfHearts) override { GtaHurtVehicle(vehicle, halfHearts); }
+    // ---- the Driver 2 cop's body (thin forwards into GtaCop.cpp)
+    int SpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) override {
+        return GtaSpawnCopBody(at, headingDeg, face);
+    }
+    bool CopBodyReport(int veh, CopBody* out) override { return GtaCopBodyReport(veh, out); }
+    void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) override {
+        GtaCopBodyDrive(veh, gas, brake, steer, siren);
+    }
+    void CopBodyRetire(int veh) override { GtaCopBodyRetire(veh); }
+    float PlayerVehicleImpact() override { return GtaPlayerVehicleImpact(); }
     // ---- the boss's vehicle senses (workstream L)
     bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {
         CPlayerPed* ped = FindPlayerPed();

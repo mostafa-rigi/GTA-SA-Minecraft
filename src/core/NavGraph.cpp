@@ -301,11 +301,14 @@ bool LoadVehicleGraph(const unsigned char* data, size_t size) {
     return true;
 }
 
+void VehicleFieldInvalidate(); // defined with the field itself, below
+
 void UnloadVehicleGraph() {
     vNodes.clear();
     vFlood.clear();
     vRow.clear();
     vTargets.clear();
+    VehicleFieldInvalidate();
 }
 
 bool VehicleGraphReady() { return !vNodes.empty(); }
@@ -385,6 +388,113 @@ bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, floa
     out->assign(rev.rbegin(), rev.rend());
     if (distOut)
         *distOut = g[goal];
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// The distance field (Driver 2's PATHFIND.C, rebuilt on our road graph):
+// one Dijkstra flood from the target's node over REVERSED edges, so every
+// node's value is its road distance TO the target. The reverse CSR is built
+// once per graph load (the file's edges are directed; a flood toward the
+// target must walk them backwards). Descent then reads the forward edges:
+// the neighbour with the smallest field value is downhill.
+std::vector<uint32_t> vRevRow;
+std::vector<uint32_t> vRevTargets;
+std::vector<float> vField; // per-node road distance to the field's target
+int vFieldGoal = -1;
+
+void VehicleFieldInvalidate() {
+    vRevRow.clear();
+    vRevTargets.clear();
+    vField.clear();
+    vFieldGoal = -1;
+}
+
+bool VehicleFieldTo(const Vec3& target) {
+    if (vNodes.empty())
+        return false;
+    const int goal = VehicleNearestNode(target, 120.0f);
+    if (goal < 0)
+        return false;
+    if (vRevRow.empty()) {
+        const int n = (int)vNodes.size();
+        vRevRow.assign(n + 1, 0);
+        for (uint32_t e = 0; e < vTargets.size(); ++e)
+            ++vRevRow[vTargets[e] + 1];
+        for (int i = 0; i < n; ++i)
+            vRevRow[i + 1] += vRevRow[i];
+        vRevTargets.resize(vTargets.size());
+        std::vector<uint32_t> cursor = vRevRow;
+        for (int u = 0; u < n; ++u)
+            for (uint32_t e = vRow[u]; e < vRow[u + 1]; ++e)
+                vRevTargets[cursor[vTargets[e]]++] = (uint32_t)u;
+    }
+    const int n = (int)vNodes.size();
+    vField.assign(n, 1e18f);
+    vField[goal] = 0.0f;
+    typedef std::pair<float, int> QN;
+    std::priority_queue<QN, std::vector<QN>, std::greater<QN>> open;
+    open.push(QN(0.0f, goal));
+    while (!open.empty()) {
+        const QN cur = open.top();
+        open.pop();
+        const int u = cur.second;
+        if (cur.first > vField[u])
+            continue;
+        for (uint32_t e = vRevRow[u]; e < vRevRow[u + 1]; ++e) {
+            const int v = (int)vRevTargets[e];
+            const float w = (vNodes[v] - vNodes[u]).Length();
+            if (vField[u] + w < vField[v]) {
+                vField[v] = vField[u] + w;
+                open.push(QN(vField[v], v));
+            }
+        }
+    }
+    vFieldGoal = goal;
+    return true;
+}
+
+float VehicleFieldCost(const Vec3& at) {
+    if (vFieldGoal < 0 || vField.empty())
+        return -1.0f;
+    const int node = VehicleNearestNode(at, 120.0f);
+    if (node < 0 || vField[node] >= 1e17f)
+        return -1.0f;
+    return vField[node];
+}
+
+bool VehicleFieldDescent(const Vec3& at, float ahead, Vec3* out) {
+    if (!out || vFieldGoal < 0 || vField.empty())
+        return false;
+    int node = VehicleNearestNode(at, 120.0f);
+    if (node < 0 || vField[node] >= 1e17f)
+        return false;
+    // walk downhill: from each node take the forward edge whose far end has
+    // the smallest field value, until `ahead` metres of road are covered or
+    // the target's own node is reached (there the caller aims at the prey
+    // itself, not at the map)
+    float covered = 0.0f;
+    Vec3 point = vNodes[node];
+    for (int step = 0; step < 64 && node != vFieldGoal; ++step) {
+        int best = -1;
+        float bestCost = vField[node];
+        for (uint32_t e = vRow[node]; e < vRow[node + 1]; ++e) {
+            const int v = (int)vTargets[e];
+            if (vField[v] < bestCost) {
+                bestCost = vField[v];
+                best = v;
+            }
+        }
+        if (best < 0)
+            break; // a local pocket the flood priced but cannot leave: the
+                   // point we have is still the best road point known
+        covered += (vNodes[best] - point).Length();
+        point = vNodes[best];
+        node = best;
+        if (covered >= ahead)
+            break;
+    }
+    *out = point;
     return true;
 }
 
