@@ -209,7 +209,7 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
             const float dy = b.apTarget.y - b.apWritten.y;
             if (!b.apArmed || dx * dx + dy * dy > 4.0f ||
                 std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) {
-                ap.m_nCarMission = MISSION_GOTO_COORDS_STRAIGHT;
+                ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
                 ap.m_vecDestinationCoors =
                     CVector(b.apTarget.x, b.apTarget.y, b.apTarget.z);
                 // the cruise char and the traffic-speed cap are the
