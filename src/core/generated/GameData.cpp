@@ -2586,7 +2586,7 @@ const CookingRecipe kCooking[102] = {
 const int kNumShaped = 583, kNumShapeless = 214, kNumCooking = 102;
 const int kNumIngredientSets = 510;
 
-const SoundFile kSoundFiles[531] = {
+const SoundFile kSoundFiles[546] = {
     { "dig_stone1.ogg", 1.00f, 1.00f },
     { "dig_stone2.ogg", 1.00f, 1.00f },
     { "dig_stone3.ogg", 1.00f, 1.00f },
@@ -3118,6 +3118,21 @@ const SoundFile kSoundFiles[531] = {
     { "boss_hurt1.ogg", 1.00f, 1.00f },
     { "boss_hurt2.ogg", 1.00f, 1.00f },
     { "boss_usp.ogg", 1.00f, 1.00f },
+    { "cop_siren.ogg", 1.00f, 1.00f },
+    { "cop_engine_revs.ogg", 1.00f, 1.00f },
+    { "cop_engine_idle.ogg", 1.00f, 1.00f },
+    { "cop_engine_extra.ogg", 1.00f, 1.00f },
+    { "cop_radio_05.ogg", 1.00f, 1.00f },
+    { "cop_radio_06.ogg", 1.00f, 1.00f },
+    { "cop_radio_07.ogg", 1.00f, 1.00f },
+    { "cop_radio_08.ogg", 1.00f, 1.00f },
+    { "cop_radio_09.ogg", 1.00f, 1.00f },
+    { "cop_radio_10.ogg", 1.00f, 1.00f },
+    { "cop_radio_11.ogg", 1.00f, 1.00f },
+    { "cop_radio_12.ogg", 1.00f, 1.00f },
+    { "cop_radio_15.ogg", 1.00f, 1.00f },
+    { "cop_radio_16.ogg", 1.00f, 1.00f },
+    { "cop_radio_17.ogg", 1.00f, 1.00f },
 };
 const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 0, 4 }, // DIG_STONE
@@ -3297,6 +3312,21 @@ const SoundEventDef kSoundEvents[SND_COUNT] = {
     { 527, 1 }, // BOSS_IDLE2
     { 528, 2 }, // BOSS_HURT
     { 530, 1 }, // BOSS_USP
+    { 531, 1 }, // COP_SIREN
+    { 532, 1 }, // COP_ENGINE_REVS
+    { 533, 1 }, // COP_ENGINE_IDLE
+    { 534, 1 }, // COP_ENGINE_EXTRA
+    { 535, 1 }, // COP_RADIO_05
+    { 536, 1 }, // COP_RADIO_06
+    { 537, 1 }, // COP_RADIO_07
+    { 538, 1 }, // COP_RADIO_08
+    { 539, 1 }, // COP_RADIO_09
+    { 540, 1 }, // COP_RADIO_10
+    { 541, 1 }, // COP_RADIO_11
+    { 542, 1 }, // COP_RADIO_12
+    { 543, 1 }, // COP_RADIO_15
+    { 544, 1 }, // COP_RADIO_16
+    { 545, 1 }, // COP_RADIO_17
 };
 
 } // namespace mc

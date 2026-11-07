@@ -1,5 +1,7 @@
 #include "Sound.h"
 
+#include <map>
+
 #include "Config.h"
 
 #include "CCamera.h"
@@ -80,7 +82,9 @@ DWORD Sample(const char* file, bool loop) {
     if (it != gSamples.end())
         return it->second;
     std::string path = ModPath("sounds\\") + file;
-    DWORD s = B.SampleLoad(FALSE, path.c_str(), 0, 0, loop ? 1 : 4, (loop ? BASS_SAMPLE_LOOP : 0) | BASS_SAMPLE_OVER_POS);
+    // loop samples allow 8 channels, not 1: the cop force runs one siren
+    // and one engine loop per unit off the same two sample files
+    DWORD s = B.SampleLoad(FALSE, path.c_str(), 0, 0, loop ? 8 : 4, (loop ? BASS_SAMPLE_LOOP : 0) | BASS_SAMPLE_OVER_POS);
     if (!s)
         Log("Sound: cannot load %s (%u)", file, B.ErrorGetCode());
     gSamples[key] = s;
@@ -90,17 +94,43 @@ DWORD Sample(const char* file, bool loop) {
 float MasterVolume() {
     return Clamp((unsigned char)FrontEndMenuManager.m_nPrefsSfxVolume / 64.0f, 0.0f, 1.0f) * gConfig.soundVolume;
 }
+
+// PlaySfx's positional law, shared with the loops: how loud a sound at
+// `pos` is here, and where it sits in the stereo field.
+void PosVolPan(const Vec3& pos, float range, float* vol, float* pan) {
+    CVector cam = TheCamera.GetPosition();
+    CVector d = ToGta(pos) - cam;
+    float dist = d.Magnitude();
+    *vol *= Clamp(1.0f - dist / range, 0.0f, 1.0f);
+    *pan = 0.0f;
+    if (dist > 0.01f) {
+        // forward x up: the real right-hand direction (the matrix itself stores the left vector)
+        CVector right = CVector::Cross(TheCamera.m_mCameraMatrix.up, TheCamera.m_mCameraMatrix.at);
+        *pan = Clamp((d.x * right.x + d.y * right.y + d.z * right.z) / dist, -1.0f, 1.0f) * 0.7f;
+    }
+}
+
+// The cop force's positional loops (see Sound.h): one BASS channel per
+// caller id, its native frequency remembered so pitch never compounds.
+struct PosLoop {
+    DWORD chan = 0;
+    int ev = -1;
+    float baseFreq = 44100.0f;
+};
+std::map<int, PosLoop> gPosLoops;
 } // namespace
 
 void PlaySfx(SoundEvent ev, const Vec3* pos, float volume, float pitch) {
     if (ev >= SND_COUNT || !Ready())
         return;
-    // CleanSA: the Minecraft world's sounds stay silent. Only the soldier's own
-    // sounds play - the appended Counter-Strike block at the end of the event
-    // table (his rifle and pistol, steps, hurt, voice) - and an explosion,
-    // which in this mode can only be his grenade's: every Minecraft source of
-    // one (creepers, TNT) is gated off. The block is append-only by the table's
-    // own law, so "from SND_M4A1_SHOOT on" stays exactly the soldier's set.
+    // CleanSA: the Minecraft world's sounds stay silent. Only the appended
+    // visitors' blocks at the end of the event table play - the soldier's
+    // Counter-Strike block (his rifle and pistol, steps, hurt, voice) and,
+    // after it, the Driver 2 cop's block (his siren, engine, radio) - and an
+    // explosion, which in this mode can only be his grenade's: every
+    // Minecraft source of one (creepers, TNT) is gated off. The blocks are
+    // append-only by the table's own law, so "from SND_M4A1_SHOOT on" stays
+    // exactly the visitors' sets.
     if (gConfig.cleanSA && ev < SND_M4A1_SHOOT && ev != SND_EXPLODE)
         return;
     const SoundEventDef& e = kSoundEvents[ev];
@@ -110,16 +140,8 @@ void PlaySfx(SoundEvent ev, const Vec3* pos, float volume, float pitch) {
     float vol = volume * f.volume * MasterVolume();
     float pan = 0.0f;
     if (pos) {
-        CVector cam = TheCamera.GetPosition();
-        CVector d = ToGta(*pos) - cam;
-        float dist = d.Magnitude();
         float range = 16.0f * std::max(1.0f, volume);
-        vol *= Clamp(1.0f - dist / range, 0.0f, 1.0f);
-        if (dist > 0.01f) {
-            // forward x up: the real right-hand direction (the matrix itself stores the left vector)
-            CVector right = CVector::Cross(TheCamera.m_mCameraMatrix.up, TheCamera.m_mCameraMatrix.at);
-            pan = Clamp((d.x * right.x + d.y * right.y + d.z * right.z) / dist, -1.0f, 1.0f) * 0.7f;
-        }
+        PosVolPan(*pos, range, &vol, &pan);
     }
     if (vol <= 0.01f)
         return;
@@ -168,19 +190,78 @@ void SetLoopSfx(SoundEvent ev, bool on, float volume) {
         B.SetAttr(gLoopChan, BASS_ATTRIB_VOL, Clamp(volume * MasterVolume(), 0.0f, 1.0f));
 }
 
-void PauseAllSfx(bool pause) {
-    if (gState <= 0 || !gLoopChan)
+void SetPosLoop(int id, SoundEvent ev, bool on, const Vec3& pos, float volume, float pitch, float range) {
+    if (!Ready())
         return;
-    if (pause)
-        B.Pause(gLoopChan);
-    else
-        B.Play(gLoopChan, FALSE);
+    auto it = gPosLoops.find(id);
+    if (!on) {
+        if (it != gPosLoops.end()) {
+            if (it->second.chan)
+                B.Stop(it->second.chan);
+            gPosLoops.erase(it);
+        }
+        return;
+    }
+    if (ev < 0 || ev >= SND_COUNT)
+        return;
+    const SoundEventDef& e = kSoundEvents[ev];
+    if (e.count == 0)
+        return;
+    PosLoop& lp = gPosLoops[id];
+    if (lp.ev != (int)ev || !lp.chan) {
+        if (lp.chan)
+            B.Stop(lp.chan);
+        lp.chan = 0;
+        DWORD s = Sample(kSoundFiles[e.first].file, true);
+        if (!s)
+            return;
+        lp.chan = B.SampleGetChannel(s, 0);
+        lp.ev = ev;
+        if (!lp.chan)
+            return;
+        lp.baseFreq = 44100.0f;
+        B.GetAttr(lp.chan, BASS_ATTRIB_FREQ, &lp.baseFreq);
+        B.Play(lp.chan, TRUE);
+    }
+    float vol = volume * MasterVolume(), pan = 0.0f;
+    PosVolPan(pos, range, &vol, &pan);
+    B.SetAttr(lp.chan, BASS_ATTRIB_FREQ, lp.baseFreq * pitch);
+    B.SetAttr(lp.chan, BASS_ATTRIB_VOL, Clamp(vol, 0.0f, 1.0f));
+    B.SetAttr(lp.chan, BASS_ATTRIB_PAN, pan);
+}
+
+void StopPosLoops() {
+    if (gState > 0)
+        for (auto& kv : gPosLoops)
+            if (kv.second.chan)
+                B.Stop(kv.second.chan);
+    gPosLoops.clear();
+}
+
+void PauseAllSfx(bool pause) {
+    if (gState <= 0)
+        return;
+    if (gLoopChan) {
+        if (pause)
+            B.Pause(gLoopChan);
+        else
+            B.Play(gLoopChan, FALSE);
+    }
+    for (auto& kv : gPosLoops) {
+        if (!kv.second.chan)
+            continue;
+        if (pause)
+            B.Pause(kv.second.chan);
+        else
+            B.Play(kv.second.chan, FALSE);
+    }
 }
 
 void ShutdownSfx() {
     if (gState > 0 && gLoopChan)
         B.Stop(gLoopChan);
     gLoopChan = 0;
+    StopPosLoops();
 }
 
 } // namespace mc

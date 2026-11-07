@@ -1599,6 +1599,35 @@ for enum, files in CS_SOUND_FILES.items():
         sound_files_flat.append((name, 1.0, 1.0))
     sound_rows.append((enum, first, len(files)))
 
+# Driver 2 cop sounds: the Chicago cop's own voice and noises from the user's
+# disc (VOICES2.BLK), decoded by tools/extract_driver2_sounds.py - his siren
+# (lump 69 sample 0), his engine layers (lump 4 samples 0/1, +2 carried), and
+# his radio phrases as separate events, bank 2 sample numbers kept in the
+# names (lumps 29/30 resolved there; see driver2-assets/sounds/manifest.json).
+# Appended after the Counter-Strike block - nothing already numbered moves.
+D2_SOUND_FILES = OrderedDict([
+    ("COP_SIREN", ["cop_siren.ogg"]),
+    ("COP_ENGINE_REVS", ["cop_engine_revs.ogg"]),
+    ("COP_ENGINE_IDLE", ["cop_engine_idle.ogg"]),
+    ("COP_ENGINE_EXTRA", ["cop_engine_extra.ogg"]),
+    ("COP_RADIO_05", ["cop_radio_05.ogg"]),
+    ("COP_RADIO_06", ["cop_radio_06.ogg"]),
+    ("COP_RADIO_07", ["cop_radio_07.ogg"]),
+    ("COP_RADIO_08", ["cop_radio_08.ogg"]),
+    ("COP_RADIO_09", ["cop_radio_09.ogg"]),
+    ("COP_RADIO_10", ["cop_radio_10.ogg"]),
+    ("COP_RADIO_11", ["cop_radio_11.ogg"]),
+    ("COP_RADIO_12", ["cop_radio_12.ogg"]),
+    ("COP_RADIO_15", ["cop_radio_15.ogg"]),
+    ("COP_RADIO_16", ["cop_radio_16.ogg"]),
+    ("COP_RADIO_17", ["cop_radio_17.ogg"]),
+])
+for enum, files in D2_SOUND_FILES.items():
+    first = len(sound_files_flat)
+    for name in files:
+        sound_files_flat.append((name, 1.0, 1.0))
+    sound_rows.append((enum, first, len(files)))
+
 # ======================================================================= C++ output
 def cname(k):
     return "ID_" + k.upper()

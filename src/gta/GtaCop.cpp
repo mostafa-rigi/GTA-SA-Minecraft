@@ -1,6 +1,7 @@
 #include "GtaCop.h"
 
 #include <cmath>
+#include <cstdlib>
 
 #include "CCopPed.h"
 #include "CDecisionMakerTypes.h"
@@ -16,6 +17,7 @@
 #include "Core.h"
 #include "GtaMobs.h"   // BridgePlayerShotAge
 #include "PedSkins.h"  // PedSkinsExcludePed
+#include "Sound.h"     // SetPosLoop / PlaySfx: his own siren, engine and radio (piece 3)
 
 using namespace plugin;
 
@@ -61,6 +63,10 @@ struct CopBodyState {
     float gas = 0.0f, brake = 1.0f, steer = 0.0f;
     bool siren = false;
     bool haveCmd = false;
+    // piece 3's sound state: the pursuit edge (for his radio) and the
+    // engine layer currently sounding (his idle/revs swap rides it)
+    bool sirenPrev = false;
+    int engineEv = -1;
 };
 CopBodyState sBodies[kMaxCopUnits];
 
@@ -96,6 +102,14 @@ CPed* LiveDriver(const CopBodyState& b) {
 
 float DisplayHealth(float book01) { return book01 > 0.0f ? 380.0f + 620.0f * book01 : 90.0f; }
 
+// piece 3: silence one body's two loops (siren = slot*2, engine =
+// slot*2+1, the ids CopBodyPost drives)
+void StopBodyLoops(int slot) {
+    static const Vec3 kNowhere;
+    SetPosLoop(slot * 2, SND_COP_SIREN, false, kNowhere, 0.0f, 1.0f, 1.0f);
+    SetPosLoop(slot * 2 + 1, SND_COP_ENGINE_IDLE, false, kNowhere, 0.0f, 1.0f, 1.0f);
+}
+
 void ApplyCommand(CVehicle* veh, const CopBodyState& b) {
     // The control surface, verified against the SDK headers in-tree:
     // m_fGasPedal 0x49C, m_fBreakPedal right behind it, m_fSteerAngle
@@ -119,6 +133,7 @@ void ApplyCommand(CVehicle* veh, const CopBodyState& b) {
 
 void CopSessionReset() {
     // the world is gone (or going): forget every body and the ledger
+    StopPosLoops();
     for (int i = 0; i < kMaxCopUnits; ++i)
         sBodies[i] = CopBodyState();
     sPlayerVeh = nullptr;
@@ -147,6 +162,17 @@ void CopBodyPre(float dt) {
             if (driver->m_pVehicle == veh && veh->m_pDriver == driver) {
                 b.seated = true;
                 Log("cop body: a driver is seated - the pedals are the core's from here");
+                // a unit seating while another already pursues is a
+                // reinforcement joining a live chase - COP_AI.C's own
+                // join callouts are phrases 10/11 (rnd % 2 + 10), spoken
+                // from the joining car
+                for (int j = 0; j < kMaxCopUnits; ++j) {
+                    if (j != i && sBodies[j].used && sBodies[j].siren) {
+                        const Vec3 at(veh->m_matrix->pos.x, veh->m_matrix->pos.y, veh->m_matrix->pos.z);
+                        PlaySfx((rand() % 2) ? SND_COP_RADIO_10 : SND_COP_RADIO_11, &at, 1.0f, 1.0f);
+                        break;
+                    }
+                }
             } else if (b.seatT > 8.0f && !b.seatRetried) {
                 b.seatRetried = true;
                 driver->m_pIntelligence->m_TaskMgr.SetTask(new CTaskComplexEnterCarAsDriver(veh),
@@ -180,10 +206,44 @@ void CopBodyPre(float dt) {
 void CopBodyPost() {
     for (int i = 0; i < kMaxCopUnits; ++i) {
         CopBodyState& b = sBodies[i];
-        if (!b.used || !b.haveCmd)
+        if (!b.used)
             continue;
-        if (CVehicle* veh = LiveVeh(b))
+        CVehicle* veh = LiveVeh(b);
+        if (b.haveCmd && veh)
             ApplyCommand(veh, b);
+        if (!veh) {
+            StopBodyLoops(i); // the world took the body: no frozen siren
+            continue;
+        }
+        // ---- piece 3: his own voice, driven off the same state the
+        // pedals are. The siren is his pursuit flag (the core sets it
+        // exactly while CopControl1 drives), looped positionally from
+        // his car; the engine is his two layers from lump 4 - idle
+        // under 1.2 m/s, revs over 2.5 m/s (a hysteresis band between,
+        // so the swap cannot flap), the pitch riding speed and the
+        // core's own throttle command. The original crossfades its
+        // layers by revs; a threshold swap with a continuous pitch is
+        // what this surface honestly holds, and it is named as such.
+        const Vec3 pos(veh->m_matrix->pos.x, veh->m_matrix->pos.y, veh->m_matrix->pos.z);
+        SetPosLoop(i * 2, SND_COP_SIREN, b.siren, pos, 0.9f, 1.0f, 60.0f);
+        const float speed = Vec3(veh->m_vecMoveSpeed.x, veh->m_vecMoveSpeed.y,
+                                 veh->m_vecMoveSpeed.z).Length() * 50.0f;
+        if (b.engineEv != (int)SND_COP_ENGINE_REVS && speed > 2.5f)
+            b.engineEv = (int)SND_COP_ENGINE_REVS;
+        else if (b.engineEv != (int)SND_COP_ENGINE_IDLE && speed < 1.2f)
+            b.engineEv = (int)SND_COP_ENGINE_IDLE;
+        if (b.engineEv < 0)
+            b.engineEv = (int)SND_COP_ENGINE_IDLE;
+        const bool revs = b.engineEv == (int)SND_COP_ENGINE_REVS;
+        const float pitch = revs ? 0.75f + (speed < 40.0f ? speed : 40.0f) / 40.0f * 0.8f + b.gas * 0.10f
+                                 : 0.90f + b.gas * 0.25f;
+        SetPosLoop(i * 2 + 1, (SoundEvent)b.engineEv, b.seated && b.book01 > 0.0f,
+                   pos, 0.55f, pitch, 40.0f);
+        // his radio on the pursuit's first moment: FELONY.C speaks
+        // phrases 7/8 ((rnd & 1) + 7) as a chase opens
+        if (b.siren && !b.sirenPrev)
+            PlaySfx((rand() % 2) ? SND_COP_RADIO_07 : SND_COP_RADIO_08, &pos, 1.0f, 1.0f);
+        b.sirenPrev = b.siren;
     }
 }
 
@@ -388,6 +448,7 @@ void GtaCopBodyRetire(int veh, bool burnOut) {
     CopBodyState* bp = FindBody(veh);
     if (!bp)
         return;
+    StopBodyLoops((int)(bp - sBodies)); // his voice goes with the body
     CopBodyState& s = *bp;
     CVehicle* v = LiveVeh(s);
     CPed* driver = LiveDriver(s);

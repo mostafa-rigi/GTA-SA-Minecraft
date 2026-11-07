@@ -10934,6 +10934,26 @@ static void TestCopCarModel() {
     DrawCopCar(pose, 0.0f, centers, 0.0f, 0.0f, false, 1.0f, 1.0f, 1.0f, 1.0f);
     CHECK(sink.quads[0] == 0, "without cop_car.bin nothing of him is drawn (%d)", sink.quads[0]);
     CHECK(LoadCopCarModel(bytes.data(), bytes.size()), "the body loads back for the bridge");
+
+    // piece 3, stage 3: his voice in the sound table - appended after
+    // the boss's block, every earlier row untouched (the table's own
+    // append-only law, pinned at both seams)
+    CHECK(SND_COP_SIREN == SND_BOSS_USP + 1 && SND_COP_RADIO_17 == SND_COUNT - 1,
+          "his sound events append after the boss's, nothing renumbered");
+    CHECK(kSoundEvents[SND_BOSS_USP].first == 530 && kSoundEvents[SND_BOSS_USP].count == 1 &&
+              std::strcmp(kSoundFiles[530].file, "boss_usp.ogg") == 0,
+          "the boss's last row is untouched");
+    CHECK(kSoundEvents[SND_COP_SIREN].first == 531 && kSoundEvents[SND_COP_SIREN].count == 1 &&
+              std::strcmp(kSoundFiles[531].file, "cop_siren.ogg") == 0,
+          "his siren is file row 531");
+    CHECK(kSoundEvents[SND_COP_ENGINE_REVS].first == 532 &&
+              std::strcmp(kSoundFiles[532].file, "cop_engine_revs.ogg") == 0 &&
+              kSoundEvents[SND_COP_ENGINE_IDLE].first == 533 &&
+              std::strcmp(kSoundFiles[533].file, "cop_engine_idle.ogg") == 0,
+          "his engine layers are file rows 532/533");
+    CHECK(kSoundEvents[SND_COP_RADIO_17].first == 545 &&
+              std::strcmp(kSoundFiles[545].file, "cop_radio_17.ogg") == 0,
+          "his last radio phrase is file row 545");
 }
 
 int main(int argc, char** argv) {

@@ -26,4 +26,16 @@ inline void PlaySfx(SoundEvent ev, std::nullptr_t, float volume = 1.0f, float pi
 void PauseAllSfx(bool pause);
 void ShutdownSfx();
 
+// A positional loop with its own channel per id, for the cop force
+// (piece 3): SetLoopSfx has exactly one channel and refuses to start
+// under CleanSA, but the force lives in CleanSA and every unit needs
+// its own siren and engine. Call every frame while it should sound -
+// the channel follows `pos` with PlaySfx's own distance/pan law over
+// `range` metres - and call with on=false to silence it. Switching
+// `ev` restarts that id's loop on the new sample (the engine's two
+// layers ride this). Ids are the caller's: GtaCop uses slot*2 for the
+// siren and slot*2+1 for the engine.
+void SetPosLoop(int id, SoundEvent ev, bool on, const Vec3& pos, float volume, float pitch, float range);
+void StopPosLoops();
+
 } // namespace mc
