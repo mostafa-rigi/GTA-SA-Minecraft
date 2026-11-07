@@ -171,6 +171,9 @@ struct Mob {
     Vec3 navProgPos{ 0, 0, 0 }; // boss: where that last progress was made
     int navStuckCount = 0;     // boss: consecutive stall breaks near navStuckPos (the second one bans the pocket's node)
     Vec3 navStuckPos{ 0, 0, 0 }; // boss: where the last stall broke
+    float navFailT = 0.0f;     // boss: seconds before a FAILED combat route may be re-asked -
+                               // the probe walks the no-route stretch meanwhile (the tracker
+                               // law's cross-map legs made the retry cadence matter)
     float settleT = 0.0f;      // boss: seconds his speed has stayed under the settled line (Counter-Strike's stop-shoot recovery)
     float firePlantT = 0.0f;   // boss: seconds he stays planted to finish a burst at range (set by fire control)
     Vec3 reposAt{ 0, 0, 0 };   // boss: where the target last broke his line at a NEW hiding place
@@ -263,6 +266,14 @@ struct Mob {
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
+
+// The tracker law's switch (defined in Mobs.cpp, with the law's full text):
+// true is the shipped law the user ordered on 2026-11-07 - the boss always
+// knows where the player is and comes for him from the summon, no
+// provocation needed. False restores the provocation-gated engagement law
+// of the same morning whole. A variable, not a constant, so the test suite
+// can pin BOTH laws; the game only ever ships it true.
+extern bool gTrackerAlways;
 
 // One visible shot of the soldier's rifle: the core decides it (SoldierShoot), the
 // host draws it (a muzzle flash at `from`, a tracer line to `to`) and it is gone in

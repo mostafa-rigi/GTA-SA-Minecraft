@@ -2143,9 +2143,12 @@ static void RunMobsB(float seconds, const Vec3& player, const std::vector<BeingI
 }
 
 // The engagement law's own ignition (the user's order, 2026-11-07), used by
-// every fight sim: the player holds his gun on the boss for a breath, the
-// way the real provocation works (0.45 s of aim; 0.7 s here leaves margin).
-// Since that order, seeing the player - or hearing him - starts nothing.
+// the fight sims written under that law: the player holds his gun on the
+// boss for a breath, the way the real provocation works (0.45 s of aim;
+// 0.7 s here leaves margin). Under the TRACKER LAW (later the same day)
+// fights also open by sight alone - the sims keep using this helper where
+// the fight must be a PROVOKED one (its aggro bookkeeping is what they
+// price), and it remains the provocations' own ignition either way.
 static void ProvokeByAim(TestHost& host, const Vec3& player, const std::vector<BeingInfo>* beings) {
     host.aimingAtHim = true;
     RunMobsB(0.7f, player, beings);
@@ -2376,20 +2379,33 @@ static void TestSoldier() {
         const std::vector<BeingInfo> beings = { BeingInfo{ 0, p.centre } };
         const int s = SpawnMob(MOB_SOLDIER, Vec3(10.5f, 0.5f, 10.0f), true);
         FaceMob(s, kPi / 2.0f); // facing the man in the street
-        RunMobsB(4.0f, Vec3(90.5f, 0.5f, 11.0f), &beings); // the player is 80 m off: nobody's fight
+        RunMobsB(3.0f, Vec3(90.5f, 0.5f, 11.0f), &beings); // the player is 80 m off
         CHECK(host.people[0].hurt == 0.0f, "a soldier never shoots the people of the street");
         CHECK(host.playerHurt == 0.0f && !gMobs[s].alerted, "and a far-off player is not engaged either");
-        CHECK(std::fabs(gMobs[s].pos.x - 10.5f) < 16.0f, "he stays on his patrol, around his post");
+        // LAW UPDATE (the tracker law, 2026-11-07): the patrol pin is gone -
+        // a live player 80 m off is not scenery any more, he is a destination.
+        // In 3 s the boss has left his post and marched most of 20 m toward
+        // the man (chase pace, minus his start-up), still far outside any
+        // fight: nobody hurt, nobody alerted, no shot - he is simply COMING.
+        CHECK(gMobs[s].pos.x > 10.5f + 8.0f, "under the tracker law he leaves his post and comes for the far-off player (x %.1f)", gMobs[s].pos.x);
         host.people.clear();
     }
     // his eyes are a cone, not a sphere: a man behind him is not seen (he stands at a patrol stop)
+    // LAW NOTE (the tracker law): this block prices the cone's pure geometry
+    // on a POSTED man. A tracking boss turns toward the feed and walks at
+    // the man, so the fixed bearing this geometry needs exists only under
+    // the provocation law - the block runs with the tracker flipped off and
+    // restores it after. The cone itself is priced under the tracker too,
+    // by TestBoss's peek/open detection ratios.
     {
+        gTrackerAlways = false;
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(20.5f, 0.5f, 10.0f), true);
         FaceMob(s, -kPi / 2.0f); // facing +x; the player stands 15 m behind him, at -x
         gMobs[s].patrolWait = 5.0f;
         RunMobsB(0.3f, Vec3(5.5f, 0.5f, 11.0f), nullptr);
         CHECK(gMobs[s].detect == 0.0f && !gMobs[s].alerted && host.playerHurt == 0.0f, "a man at his back, 15 m off, is not seen - the point-blank bypass is 4 m, not a sphere of eyes");
+        gTrackerAlways = true;
     }
     // in front of him, once the player has provoked him, it takes only a
     // moment: he reacts, and his bursts land. (Under the engagement law of
@@ -6394,13 +6410,18 @@ static void TestBossDeathReset() {
     CHECK(b >= 0 && gMobs[b].bossState == 0, "death stands him down to calm at once (state %d)", b >= 0 ? gMobs[b].bossState : -1);
     CHECK(b >= 0 && gMobs[b].route.empty() && !gMobs[b].fightStarted && !gMobs[b].aggro && gMobs[b].primedT > 30.0f,
           "the hunt is wiped and the slate is clean: no route, no fight, no enemy - "
-          "under the engagement law the respawned man is a stranger until he provokes him anew");
+          "the death law itself did not change under the tracker law");
     gGame.deathTime = -1.0f; // respawned in a hospital some 600 m away
+    const float xAtRespawn = gMobs[b].pos.x;
     RunMobsB(3.0f, Vec3(600.5f, 0.5f, 11.0f), nullptr);
     const int b2 = findBoss();
     CHECK(b2 >= 0, "600 m and a respawn later he is still posted - the distance sweep does not erase him");
-    CHECK(b2 >= 0 && gMobs[b2].bossState != 2 && gMobs[b2].bossState != 3,
-          "and he is not hunting the respawned player across the city (state %d)", b2 >= 0 ? gMobs[b2].bossState : -1);
+    // LAW UPDATE (the tracker law): the respawned man is not hunted - he is
+    // TRACKED. The state is the pursuit (5), and in 3 s the boss has
+    // already marched a chase-pace distance toward the hospital door.
+    CHECK(b2 >= 0 && gMobs[b2].bossState == 5 && gMobs[b2].pos.x > xAtRespawn + 10.0f,
+          "and the tracker re-acquired across the city: he is coming for the respawned player (state %d, x %.1f)",
+          b2 >= 0 ? gMobs[b2].bossState : -1, b2 >= 0 ? gMobs[b2].pos.x : 0.0f);
     gGame.deathTime = -1.0f;
 }
 
@@ -6462,7 +6483,15 @@ static void TestBoss() {
 
     // ---- C: the meter fills by what he can actually see of you
     {
+        // LAW NOTE (the tracker law): the meter is priced here on fixed
+        // geometry - a man standing his ground while his eyes are measured.
+        // A tracking boss walks at the player and would stroll through the
+        // sight-prop wall to point-blank range, which prices his legs, not
+        // his eyes; the helper runs with the tracker flipped off and
+        // restores it. The wall's veto under the tracker itself is pinned
+        // by TestBossTracker (zero damage while fully walled).
         auto ticksToDetect = [&](bool wall, float wallZ) {
+            gTrackerAlways = false;
             WideStage();
             host.wall = wall;
             host.wallC = Vec3(0.5f, 6.5f, wallZ);
@@ -6486,6 +6515,7 @@ static void TestBoss() {
                 }
             }
             host.wall = false;
+            gTrackerAlways = true;
             return ticks;
         };
         // the test wall's z band gives three honest fractions: nothing (its band
@@ -6506,7 +6536,11 @@ static void TestBoss() {
         FaceMob(s, 0.0f);
         gMobs[s].aggro = true; // an enemy at night: the range itself is priced
         gMobs[s].fightStarted = true;
-        RunMobsB(1.5f, Vec3(0.5f, 50.5f, 11.0f), nullptr); // 50 m: beyond the night range of 45
+        // LAW NOTE (the tracker law): the run is 0.3 s, not 1.5 - under the
+        // tracker he CLOSES while he is being measured (about 1.9 m in
+        // 0.3 s), and the pin prices the RANGE: at 48 m he is still outside
+        // the night reach of 45, so the meter stays empty either way.
+        RunMobsB(0.3f, Vec3(0.5f, 50.5f, 11.0f), nullptr); // 50 m: beyond the night range of 45
         CHECK(gMobs[s].detect == 0.0f, "at night his reach is 45 m, not 60 (detect %.2f)", gMobs[s].detect);
         NotePlayerShot(Vec3(0.5f, -19.5f, 11.0f), 70.0f); // a shot 20 m behind him
         RunMobsB(0.3f, Vec3(0.5f, 50.5f, 11.0f), nullptr);
@@ -6546,34 +6580,37 @@ static void TestBoss() {
         CHECK(passive > 0 && aimed > 0 && aimed < passive,
               "being aimed at fills his meter faster than being seen does (%d vs %d ticks at 55 m)", aimed, passive);
     }
-    // ---- G, SUPERSEDED by the engagement law (the user's order,
-    // 2026-11-07): the free-roam boss does not talk first, does not command,
-    // and has nothing to do with a peaceful player at all. Commands belong
-    // to the future guard step and are gated off (kGuardTalkEnabled).
+    // ---- G, SUPERSEDED TWICE. First by the engagement law (2026-11-07,
+    // morning): no talk-first, nothing to do with a peaceful player. Then
+    // by the TRACKER LAW (the user's order, 2026-11-07, later): reaching
+    // the player and genuinely seeing him IS the engagement - a peaceful
+    // man in the open is fought on sight, with no provocation asked and
+    // none recorded (aggro stays false: the bookkeeping still belongs to
+    // the provocations alone). Commands stay gated off (kGuardTalkEnabled).
     {
         WideStage();
         gPlayed.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // a peaceful man walks up
-        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro,
-              "a peaceful first sighting is NOTHING now: no command, no interest (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].bossState == 2 && !gMobs[s].aggro,
+              "under the tracker law a peaceful first sighting is a FIGHT: contact by sight alone, no provocation recorded (state %d)", gMobs[s].bossState);
         CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0, "and no order is spoken");
         RunMobsB(11.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // the man just stands there
-        CHECK(gMobs[s].bossState == 0 && host.playerHurt == 0.0f && gMobs[s].detect == 0.0f,
-              "eleven seconds at arm's length change nothing: still calm, never fired, meter empty (state %d)",
+        CHECK(gMobs[s].bossState == 2 && host.playerHurt > 0.0f && gMobs[s].detect >= 1.0f,
+              "eleven seconds at arm's length: the fight is his whole world - he fires, and the meter stands full (state %d)",
               gMobs[s].bossState);
         CHECK(gMobs[s].primedT == 0.0f, "and a stranger's face is not remembered (primed %.0f s)", gMobs[s].primedT);
         CHECK(Heard(SND_BOSS_DOWN1) == 0, "and there is no stand-down, because nothing ever stood up");
     }
     {
-        WideStage(); // a sprint past him is not a provocation either
+        WideStage(); // a sprint past him: no provocation - and no need of one
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
         host.velocity = Vec3(6.0f, 0.0f, 0.0f); // he breaks into a sprint
         RunMobsB(0.3f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro, "a sprint in front of him is still nothing (state %d)",
+        CHECK(gMobs[s].bossState == 2 && !gMobs[s].aggro, "a sprint in front of him is a fight by sight alone (state %d)",
               gMobs[s].bossState);
         host.velocity = Vec3();
     }
@@ -6592,14 +6629,15 @@ static void TestBoss() {
         CHECK(gMobs[s].bossState != 1, "and this encounter never becomes a negotiation (state %d)", gMobs[s].bossState);
     }
     {
-        WideStage(); // gunfire in the air is weather, not a provocation
+        WideStage(); // gunfire in the air is weather, not a provocation - the
+                     // FIGHT here opens on his eyes, not on the shots
         gPlayed.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         NotePlayerShot(Vec3(0.5f, 12.5f, 11.0f), 70.0f); // shots, moments before he lays eyes on the man
         RunMobsB(0.6f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro,
-              "shots heard and a man seen are still nothing without a provocation (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].bossState == 2 && !gMobs[s].aggro,
+              "under the tracker law the seen man is fought - and the shots are still not the reason: no provocation is recorded (state %d)", gMobs[s].bossState);
         CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0, "and no order is given");
     }
     // ---- B: the body - head is body, and the magazine arithmetic holds
@@ -6850,6 +6888,11 @@ static void TestBoss() {
         gPlayed.clear();
         const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s2, 0.0f);
+        // LAW NOTE (the tracker law): the idle check-in lives on his POST -
+        // the patrol wait. A tracking boss has no post: the gate takes him
+        // off it the first tick. The voice is priced with the tracker
+        // flipped off (the patrol's own law), and the switch restored.
+        gTrackerAlways = false;
         for (int i = 0; i < 12; ++i) {
             // each pass is its own idle moment, cooldown and all: without the
             // reset, the first attempt's silence roll (one in five) sets a 5 s
@@ -6861,6 +6904,7 @@ static void TestBoss() {
             MobsTick(0.05f, Vec3(90.5f, 0.5f, 11.0f), 0, true, &none);
         }
         CHECK(Heard(SND_BOSS_IDLE1) + Heard(SND_BOSS_IDLE2) >= 1, "on his post he checks in by radio now and then");
+        gTrackerAlways = true;
     }
     // ---- M: legs walk the movement, the rifle holds the aim
     {
@@ -7218,7 +7262,14 @@ static void TestCsRules() {
         }
     }
     {
-        // CS's footstep law: a creeping man is silent; a jogging man is news
+        // CS's footstep law: a creeping man is silent; a jogging man is news.
+        // LAW NOTE (the tracker law): the law of footsteps is priced here on
+        // a POSTED man, ears only. A tracking boss walks around to the
+        // creeping man's ground and sees him point-blank - true, and not
+        // this block's question. The block runs with the tracker flipped
+        // off and restores it; the tracker's own arrival at a silent hidden
+        // man is pinned by TestBossTracker.
+        gTrackerAlways = false;
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f); // facing +y; the man is behind him, ear-work only
@@ -7229,6 +7280,7 @@ static void TestCsRules() {
         RunMobsB(0.5f, Vec3(0.5f, -7.5f, 11.0f), none);
         CHECK(gMobs[s].alerted, "but a jogging man at his back is heard at once");
         host.velocity = Vec3();
+        gTrackerAlways = true;
     }
 }
 
@@ -7625,15 +7677,29 @@ static void TestSmartPack() {
         }
         CHECK(stateAt50 == 2 || stateAt50 == 3,
               "past the hunt's own 45 s he is still on the man while the shots keep coming (state %d)", stateAt50);
-        // the trail goes cold: the man is simply gone, and stays gone. The
-        // window is long on purpose: the last real gunshot is a fresh clue
-        // when the cold starts, so one more hunt cycle may legitimately run
-        // before the trail honestly dies - what matters is that it DOES die.
-        for (int i = 0; i < 4000; ++i)
+        // LAW UPDATE (the tracker law): the second half of this block used
+        // to pin the cold trail's death - stand-down to suspicion, then
+        // calm, and a boss who never marches off. That death is exactly
+        // what the tracker law abolished: the man is not "gone", he is 200 m
+        // north, alive, and the feed knows it. The floor is extended under
+        // his road first (the march needs ground, like any street), then:
+        // no stand-down state ever appears once the hunt's own clues age
+        // out, and he ends the window ON the man's ground - he marched off
+        // after him because he IS there.
+        for (int x = -40; x < 40; ++x)
+            for (int y = 130; y < 230; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+        bool stoodDown = false;
+        for (int i = 0; i < 4000; ++i) {
             MobsTick(0.05f, Vec3(0.5f, 220.5f, 11.0f), 0, true, none);
-        CHECK(gMobs[s].bossState == 4 || gMobs[s].bossState == 0,
-              "on a cold trail he stands down - primed suspicion, then calm as even that fades (state %d)", gMobs[s].bossState);
-        CHECK(gMobs[s].pos.y < 60.0f, "and he never marched off after a man who was not there (y %.0f)", gMobs[s].pos.y);
+            if (i > 200 && (gMobs[s].bossState == 0 || gMobs[s].bossState == 4))
+                stoodDown = true; // past the clues' age there is no calm left in him
+        }
+        CHECK(!stoodDown, "under the tracker law the trail cannot die while the player lives: no stand-down, ever");
+        const float dMan = (gMobs[s].pos - Vec3(0.5f, 220.5f, 10.0f)).Length();
+        CHECK((gMobs[s].bossState == 2 || gMobs[s].bossState == 3 || gMobs[s].bossState == 5) && dMan < 60.0f && gMobs[s].pos.y > 150.0f,
+              "and he marched the 200 m and arrived on the man's ground (state %d, %.0f m short, y %.0f)",
+              gMobs[s].bossState, dMan, gMobs[s].pos.y);
         host.wall = false;
     }
 }
@@ -7801,6 +7867,9 @@ static void TestBossFixRound() {
         const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s2, 0.0f);
         RunMobsB(0.2f, Vec3(90.5f, 0.5f, 11.0f), none); // settle: a dodge needs his feet on the ground
+        // (under the tracker law he is already marching on the far player
+        // when the threat lands - state TRACK - and the threat's promotion
+        // covers TRACK too: the attempt makes the enemy, from any peace)
         MobVehicleThreat(s2, Vec3(0.5f, -8.5f, 10.0f), Vec3(0, 12.0f, 0), true);
         CHECK(gMobs[s2].aggro && gMobs[s2].bossState == 2 && gMobs[s2].dodgeT > 0.0f,
               "a car driven straight at him: he dodges - and the driver is his enemy anyway. A missed ram is still a ram");
@@ -7900,9 +7969,16 @@ static void TestBossFixRound() {
     }
 }
 
-// The engagement law itself (the user's order, 2026-11-07): by default the
-// boss has NOTHING to do with the player - no warnings, no commands, no
-// interest. Three provocations, and only those, make the player his enemy.
+// The engagement law, twice over. The morning's law (the user's order,
+// 2026-11-07): by default the boss has NOTHING to do with the player -
+// three provocations, and only those, make the player his enemy. The
+// TRACKER LAW (the user's order, later the same day, picked from the
+// options menu) superseded it FOR THE BOSS: he always knows where the
+// player is and comes for him from the summon; combat opens on genuine
+// sight; the provocations keep their bookkeeping (aggro, the warm slate)
+// but no longer gate anything. This test pins the shipped law first,
+// then - with the switch flipped off - pins that the morning's law
+// returns whole, because the switch is the team step's per-role choice.
 static void TestBossAggroLaw() {
     TestHost host;
     SetHost(&host);
@@ -7919,19 +7995,23 @@ static void TestBossAggroLaw() {
         RunMobsB(3.0f, Vec3(0.5f, 3.5f, 11.0f), none);    // stands at 3 m
         NotePlayerShot(Vec3(0.5f, -30.5f, 11.0f), 70.0f); // shots, away from him
         RunMobsB(2.0f, Vec3(0.5f, 3.5f, 11.0f), none);
-        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0 && host.playerHurt == 0.0f,
-              "a calm player is scenery: no enemy made, no engagement, not a shot fired at him");
+        // LAW UPDATE (the tracker law): no provocation was offered and none
+        // is recorded - aggro stays false the whole time - yet the fight is
+        // on, because he came to the man and his eyes filled the meter.
+        // Contact is by sight now; the provocations are bookkeeping.
+        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 2 && host.playerHurt > 0.0f,
+              "no provocation at all: he fights the calm man on sight alone - and the bookkeeping stays clean (state %d)", gMobs[s].bossState);
         CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0,
               "and no order is ever shouted at a calm man");
-        host.aimingAtHim = true; // a passing sweep of the crosshair: not a provocation
+        host.aimingAtHim = true; // a passing sweep of the crosshair
         RunMobsB(0.3f, Vec3(0.5f, 3.5f, 11.0f), none);
         host.aimingAtHim = false;
         RunMobsB(0.5f, Vec3(0.5f, 3.5f, 11.0f), none);
-        CHECK(!gMobs[s].aggro, "a 0.3 s sweep across him does not trip the law - the line is 0.45 s");
+        CHECK(!gMobs[s].aggro, "a 0.3 s sweep across him still does not trip the provocation line of 0.45 s");
         host.aimingAtHim = true; // held aim: the provocation itself
         RunMobsB(0.6f, Vec3(0.5f, 3.5f, 11.0f), none);
         host.aimingAtHim = false;
-        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2, "but a weapon held on him makes the player his enemy");
+        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2, "and a weapon held on him still lands in the bookkeeping: the player is his enemy");
     }
     {
         WideStage();
@@ -7948,11 +8028,34 @@ static void TestBossAggroLaw() {
         CHECK(gMobs[s].aggro, "provoked, he is an enemy");
         gGame.deathTime = 0.5f; // the player dies
         RunMobsB(0.2f, Vec3(0.5f, 12.5f, 11.0f), none);
+        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0,
+              "the death itself still zeroes everything: slate clean, chase over, he stands down");
         gGame.deathTime = -1.0f; // and respawns
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), none);
-        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0,
-              "dead and respawned, he is a stranger again - death wipes the slate clean");
+        // LAW UPDATE (the tracker law): the slate stays clean - but he is
+        // NOT a stranger. The tracker re-acquired the moment the man
+        // breathed again; at 12 m in the open the pursuit completes inside
+        // the window, so he is tracking (5) or already fighting (2).
+        CHECK(!gMobs[s].aggro && (gMobs[s].bossState == 5 || gMobs[s].bossState == 2),
+              "respawned, the slate is still clean - but the tracker has him again: he is already coming (state %d)", gMobs[s].bossState);
         gGame.deathTime = -1.0f;
+    }
+    {
+        // THE FLIP-OFF PIN: with the tracker switch off, the morning's
+        // provocation law returns whole - a calm man at arm's length is
+        // scenery again: no enemy, no engagement, no shot, empty meter.
+        gTrackerAlways = false;
+        WideStage();
+        gPlayed.clear();
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        RunMobsB(2.0f, Vec3(0.5f, 8.5f, 11.0f), none);
+        RunMobsB(3.0f, Vec3(0.5f, 3.5f, 11.0f), none);
+        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0 && host.playerHurt == 0.0f && gMobs[s].detect == 0.0f,
+              "tracker off: the provocation law returns whole - a calm player is scenery again");
+        gTrackerAlways = true;
+        CHECK(gTrackerAlways, "and the switch is restored for everything after");
     }
 }
 
@@ -8140,7 +8243,9 @@ static void TestBossStateChurn() {
 // straight at the issued objective at the objective's speed - the honest
 // miniature of feet that pathfind on the street's own nodes. What the sims
 // pin is the CONTRACT, not the walking: the entity tracks the reported
-// body; no objective engages before the aggro law opens; the objective
+// body; under the tracker law an objective engages the player from the
+// summon (before it, the aggro law's peacetime contract stood here - the
+// flip-off pin in TestBossAggroLaw keeps that law priced); the objective
 // refreshes when the tactic changes; and when the body stops, the soldier
 // stops - the core never walks him itself underneath the commander.
 struct FakeDriverBody {
@@ -8220,9 +8325,12 @@ static void TestBossDriver() {
     const std::vector<BeingInfo> noBeings;
     const std::vector<BeingInfo>* none = &noBeings;
 
-    // (b) before the aggro law opens, no objective engages the player: his
-    // feet walk his patrol posts and stands only, at patrol pace, and none
-    // of it is aimed at the man standing in the open watching him.
+    // (b) LAW UPDATE (the tracker law, 2026-11-07): this block used to pin
+    // the aggro law's peacetime - no objective engages an unprovoking man.
+    // The tracker law inverted it: from the summon the driven body is
+    // ordered at the man, at chase pace, and the fight opens by sight
+    // alone inside the window. (The peacetime contract survives behind the
+    // switch - TestBossAggroLaw's flip-off pin prices it.)
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
@@ -8232,25 +8340,30 @@ static void TestBossDriver() {
         std::vector<Vec3> objs;
         std::vector<float> speeds;
         int seenCount = 0;
-        for (int i = 0; i < 80; ++i) { // 4 s of driven calm
+        bool sawCombat = false;
+        for (int i = 0; i < 80; ++i) { // 4 s of driven approach
             drv.Report(s, 0.05f);
             MobsTick(0.05f, man, 0, true, none);
             drv.Walk(s, 0.05f);
             const Mob& m = gMobs[s];
-            CHECK(m.bossState != 2, "an unprovoking man in the open never starts a fight");
+            if (m.bossState == 2)
+                sawCombat = true;
             if (m.drvObjCount != seenCount) {
                 seenCount = m.drvObjCount;
                 objs.push_back(m.drvObj);
                 speeds.push_back(m.drvObjSpeed);
             }
         }
-        CHECK(!objs.empty(), "his feet were given orders even at peace (patrol lives)");
+        CHECK(sawCombat, "a driven man in the open is fought on sight alone - no provocation asked");
+        CHECK(!objs.empty(), "his feet were given orders from the first ticks");
+        bool ranAtHim = false;
         for (size_t i = 0; i < objs.size(); ++i) {
-            CHECK(speeds[i] <= 2.6f, "a peacetime objective never runs: patrol pace or a stand");
             Vec3 d = objs[i] - man;
             d.z = 0.0f;
-            CHECK(d.Length() > 6.0f, "no peacetime objective is aimed at the watching man");
+            if (speeds[i] > 2.6f && d.Length() < 6.0f)
+                ranAtHim = true;
         }
+        CHECK(ranAtHim, "and the orders run AT the watching man: chase pace, aimed at his ground");
     }
 
     // (a) the entity tracks the driver body's transform exactly: a jump of
@@ -8643,6 +8756,13 @@ static void TestBossDriverStartup() {
     // probe's strip. The old clock ordered a hop inside that window;
     // the new law must not - and the leg must still complete.
     {
+        // LAW NOTE (the tracker law): the patrol this block walks exists
+        // only under the provocation law - a tracking boss leaves his post
+        // for the bystander at once. The start-up law priced here is
+        // state-agnostic (it guards EVERY seek birth), so the block runs
+        // with the tracker flipped off and restores it; block (b) prices
+        // the same law in combat, under the tracker itself.
+        gTrackerAlways = false;
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
@@ -8694,6 +8814,7 @@ static void TestBossDriverStartup() {
               "a patrol start-up (about-face, then the walk ramp) is never read as a stall - no hop is ordered while his feet are still spinning up");
         CHECK(post2Dist < 2.0f,
               "and the fenced leg completes: he reaches the second post on his own feet");
+        gTrackerAlways = true;
     }
 
     // (b) the same law under fire: the fight opens, he advances in his
@@ -8738,6 +8859,213 @@ static void TestBossDriverStartup() {
         // road on his own feet
         CHECK(closest < 30.0f && drv.pos.y > 4.0f,
               "and the start-ups end in real approach: he leaves the spawn strip and closes a solid share of the road to the man");
+    }
+}
+
+// =====================================================================
+// THE TRACKER LAW (the user's explicit order, 2026-11-07 - picked from
+// the options menu over the gentler variant): the boss always knows
+// where the player is and comes for him from the summon - no provocation,
+// no cold trail, no stand-down while the player lives. Combat still
+// opens only on genuine sensory contact, his rounds still die on walls,
+// and he travels on his own feet at his own speeds. These sims pin the
+// law end to end; the stage is one long north street so the road itself
+// is what is measured.
+static void TrackerStage() {
+    BlockStage();
+    for (int x = -20; x <= 20; ++x)
+        for (int y = -20; y <= 850; ++y)
+            gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+    MobsClear();
+    ResetSurvival();
+}
+
+static void TestBossTracker() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    CHECK(LoadSoldierBinFromRepo(), "the tracker proofs meet his real model");
+
+    // (a) 800 m of road, zero provocations, a man standing still: he
+    // leaves, closes real distance in every window, never stands down,
+    // and arrives fighting. Priced on the FALLBACK road (no graph at
+    // all - the probe walks the whole way): the cross-map case the design
+    // names, where the graph cannot reach. The graph road is the same
+    // BossChaseTo mover, proven by the atlas and smart-pack sims.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 800.5f, 11.0f);
+        auto distTo = [&]() {
+            Vec3 d = gMobs[s].pos - Vec3(0.5f, 800.5f, 10.0f);
+            d.z = 0.0f;
+            return d.Length();
+        };
+        float prev = distTo();
+        CHECK(prev > 790.0f, "the tracker sim opens 800 m apart (%.0f)", prev);
+        bool stoodDown = false;
+        for (int seg = 0; seg < 4; ++seg) { // 4 x 30 s of road
+            for (int i = 0; i < 600; ++i) {
+                MobsTick(0.05f, man, 0, true, none);
+                if (seg > 0 || i > 20) {
+                    const int st = gMobs[s].bossState;
+                    if (st == 0 || st == 4)
+                        stoodDown = true;
+                }
+            }
+            const float d = distTo();
+            CHECK(d < prev - 50.0f, "every 30 s of road closes real distance (%.0f -> %.0f)", prev, d);
+            prev = d;
+        }
+        for (int i = 0; i < 600; ++i) // the arrival window
+            MobsTick(0.05f, man, 0, true, none);
+        CHECK(!stoodDown, "and he never stood down on the way: no patrol, no suspicion, only the road");
+        CHECK(gMobs[s].bossState == 2 && distTo() < 30.0f && host.playerHurt > 0.0f,
+              "he arrives on foot and the fight opens on sight (state %d, %.0f m out, hurt %.1f)",
+              gMobs[s].bossState, distTo(), host.playerHurt);
+        CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+    }
+
+    // (b) a silent man ducking behind a wall with no reachable end: the
+    // pursuit comes to his ground and works it - and while every sample
+    // line dies on the wall he deals ZERO damage and opens no fight. The
+    // tracker is knowledge of where to go, never a firing solution. When
+    // the wall comes down, the fight opens at once.
+    {
+        TrackerStage();
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 10.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 60.0f; // no end he can reach inside the window
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 20.5f, 10.2f); // ducking: every sample line dies on the wall
+        host.playerHurt = 0.0f; // (a)'s fight is not this block's evidence
+        bool fought = false, stoodDown = false;
+        for (int i = 0; i < 240; ++i) { // 12 s of silence behind the wall
+            MobsTick(0.05f, man, 0, true, none);
+            const int st = gMobs[s].bossState;
+            if (st == 2)
+                fought = true;
+            if (st == 0 || st == 4)
+                stoodDown = true;
+        }
+        CHECK(host.playerHurt == 0.0f && !fought,
+              "fully walled, he deals no damage and opens no fight: the tracker is not a firing solution");
+        CHECK(!stoodDown, "and the pursuit never stood down while the man hid in silence");
+        // he came as far as the world lets him: pressed to the wall's face,
+        // working along it for a way through (the wall has no end in this
+        // window; a finite building in the game is routed around by road)
+        CHECK(gMobs[s].pos.y > 8.0f, "he came to the barrier itself and works it (y %.1f)", gMobs[s].pos.y);
+        host.wall = false; // the wall comes down: NOW his eyes may work
+        bool opened = false;
+        for (int i = 0; i < 400 && !opened; ++i) {
+            MobsTick(0.05f, man, 0, true, none);
+            if (gMobs[s].bossState == 2 && host.playerHurt > 0.0f)
+                opened = true;
+        }
+        CHECK(opened, "the fight opens only when a real line of sight exists - and then at once");
+    }
+
+    // (c) death on the road: the chase zeroes where he stands, he holds
+    // there while the player is down, and the respawn re-acquires from
+    // his own ground - priced on the fallback road, like (a).
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 300.5f, 11.0f);
+        RunMobsB(10.0f, man, none);
+        CHECK(gMobs[s].bossState == 5, "mid-pursuit at 300 m: he is on the road (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].pos.y > 40.0f, "and he has real road behind him (y %.0f)", gMobs[s].pos.y);
+        gGame.deathTime = 0.5f; // the player dies on the road
+        RunMobsB(1.0f, man, none);
+        CHECK(gMobs[s].bossState == 0, "the death zeroes the chase where it stands (state %d)", gMobs[s].bossState);
+        const Vec3 held = gMobs[s].pos;
+        RunMobsB(3.0f, man, none); // still dead
+        CHECK((gMobs[s].pos - held).Length() < 3.0f, "and he holds there - no walk home, no patrol");
+        gGame.deathTime = -1.0f; // respawned, 400 m further on
+        const Vec3 man2(0.5f, 700.5f, 11.0f);
+        auto dist2 = [&]() {
+            Vec3 d = gMobs[s].pos - Vec3(0.5f, 700.5f, 10.0f);
+            d.z = 0.0f;
+            return d.Length();
+        };
+        const float d0 = dist2();
+        RunMobsB(3.0f, man2, none);
+        CHECK(gMobs[s].bossState == 5 && dist2() < d0 - 10.0f,
+              "respawned, the tracker re-acquires from where he stands and he is coming again (state %d, %.0f -> %.0f)",
+              gMobs[s].bossState, d0, dist2());
+        gGame.deathTime = -1.0f;
+        CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+    }
+
+    // (d) a fast car: it outruns him honestly (12 m/s against his 6.4)
+    // and he never gives up - no stand-down in 25 s of flight, real road
+    // covered - and when the car stops, he arrives and engages.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        host.playerHurt = 0.0f;
+        host.vehicle = 77; // the test car's number, the host's own convention
+        host.vehPoseOn = true;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        Vec3 seat(0.5f, 65.5f, 10.6f); // the seat starts 65 m ahead of him
+        host.vehCentre = seat;
+        host.vehSeat = seat;
+        host.velocity = Vec3(0.0f, 12.0f, 0.0f); // and pulls away at 12 m/s
+        bool gaveUp = false;
+        for (int i = 0; i < 500; ++i) { // 25 s of flight
+            seat = seat + Vec3(0.0f, 12.0f * 0.05f, 0.0f);
+            host.vehCentre = seat;
+            host.vehSeat = seat;
+            MobsTick(0.05f, seat + Vec3(0, 0, 0.4f), 0, true, none);
+            if (i > 20) {
+                const int st = gMobs[s].bossState;
+                if (st == 0 || st == 4)
+                    gaveUp = true;
+            }
+        }
+        CHECK(!gaveUp, "a fast car does not shake him off: no stand-down in 25 s of flight");
+        CHECK(gMobs[s].pos.y > 80.0f, "he kept coming the whole way (y %.0f)", gMobs[s].pos.y);
+        host.velocity = Vec3(); // the car stops
+        bool arrived = false;
+        for (int i = 0; i < 1800 && !arrived; ++i) { // up to 90 s
+            MobsTick(0.05f, seat + Vec3(0, 0, 0.4f), 0, true, none);
+            Vec3 d = gMobs[s].pos - (seat - Vec3(0, 0, 0.6f));
+            d.z = 0.0f;
+            if (d.Length() < 30.0f && (gMobs[s].bossState == 2 || host.playerHurt > 0.0f))
+                arrived = true;
+        }
+        CHECK(arrived, "and when the car stops he arrives and engages (state %d, hurt %.1f)",
+              gMobs[s].bossState, host.playerHurt);
+        host.vehicle = -1;
+        host.vehPoseOn = false;
+        CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+    }
+
+    // (e) the driver contract under the law: a driven body 400 m from a
+    // standing man is ordered at his ground, at chase pace, in the
+    // tracker state - no provocation involved anywhere.
+    {
+        TrackerStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 400.5f, 11.0f);
+        RunDriven(drv, s, 3.0f, man, none);
+        const Mob& m = gMobs[s];
+        CHECK(m.bossState == 5, "driven, the tracker state owns the road (state %d)", m.bossState);
+        CHECK(m.drvObjValid && m.drvObjSpeed > 2.6f, "the objective runs: chase pace on the driver body (%.1f m/s)", m.drvObjSpeed);
+        Vec3 d = m.drvObj - Vec3(0.5f, 400.5f, 10.0f);
+        d.z = 0.0f;
+        CHECK(d.Length() < 6.0f, "and it is aimed at the far man's ground (%.1f m off)", d.Length());
     }
 }
 
@@ -9102,6 +9430,7 @@ int main(int argc, char** argv) {
     TestBossReanchor();
     TestBossDriverHop();
     TestBossDriverStartup();
+    TestBossTracker();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

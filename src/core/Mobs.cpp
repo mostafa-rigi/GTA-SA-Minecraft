@@ -67,6 +67,41 @@ std::vector<Vec3> gReinforceCalls; // where hurt zombies have called for help (a
 std::vector<Mob> gMobs;
 std::vector<ShotFx> gShotFx;
 
+// ------------------------------------------------------------------ THE TRACKER LAW
+// The user's explicit order of 2026-11-07, picked from the options menu
+// over the gentler variant: «ردیاب همیشه، حتی بدون درگیری» - the tracker,
+// always, even with no fight. While the boss lives and the player lives,
+// the brain knows the player's true position as a tracker target that
+// NEVER goes cold: from the summon he comes for the player across the
+// whole map, no provocation needed, and every stand-down that used to
+// walk him back to his Grove patrol (a hunt trail honestly exhausted,
+// a street fight's end) hands the chase back to the feed instead. This
+// SUPERSEDES the engagement law of the same morning FOR THE BOSS: the
+// three provocations (damage dealt, a weapon held on him, a ram) stay
+// in the tree and still set aggro and open fights the instant they
+// land, but they no longer GATE him - reaching the player and genuinely
+// seeing him is enough.
+//
+// What the tracker is NOT: it hands him knowledge of WHERE TO GO, never
+// a firing solution. Combat opens only on genuine sensory contact - the
+// detection meter, filled by sight and hearing exactly as before - and
+// his rounds still die on the first surface the trace meets, so a man
+// fully walled takes no damage until a real line of sight exists. He
+// travels on his own feet at his own speeds - no teleport, no speed
+// cheat - and the parked catch-up flight is a separate step, not this
+// one: a man kilometres away is reached by road and by patience.
+//
+// The death law stands inside it: the player's death zeroes the current
+// chase - he stands down where he stands - and the tracker re-acquires
+// on the respawn, from wherever he is standing then.
+//
+// This switch ships TRUE. Flipping it restores the provocation-gated
+// behaviour whole - the patrol, the calm watch, the slate a stranger
+// keeps - which the team step may yet choose per role. It is a variable
+// rather than a constant so the suite can pin both laws; nothing in the
+// game ever flips it.
+bool gTrackerAlways = true;
+
 // ---- boss diagnostics (the diagnostic build): the phase timings of the tick
 // in flight, read by the long-frame logger at the bottom of MobsTick. The
 // soldier brain's own share is timed around its call in Think; the voice
@@ -1685,6 +1720,7 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
         return true;
     }
     m.repathT = std::max(0.0f, m.repathT - dt);
+    m.navFailT = std::max(0.0f, m.navFailT - dt);
     bool moving = false;
     if (!NavReady() || distDest < 7.0f) {
         // off-graph ground or the last metres: the probe walks it alone
@@ -1703,7 +1739,16 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
             m.navProgT += dt;
             stalled = m.navProgT > kBoss.stuckSeconds;
         }
-        if ((routeDone || goalMoved || stalled) && (m.repathT <= 0.0f || routeDone || stalled)) {
+        // the ask's cadence: a route that ran out or a goal that moved is
+        // re-asked at once, as always - but a route ask that FAILED backs
+        // off on navFailT. The shipped gate re-asked every tick while the
+        // route stood empty, which the old ranges never made expensive:
+        // a fail costs a full budget of expansions, and the tracker law
+        // makes the no-route leg a standing case (a prey on the airport's
+        // island, an off-graph shore) - the probe walks the stretch, and
+        // the ask returns on the backoff's clock as he closes in.
+        const bool mayRepath = m.repathT <= 0.0f || stalled || (routeDone && m.navFailT <= 0.0f);
+        if ((routeDone || goalMoved || stalled) && mayRepath) {
             if (stalled) {
                 // the stall break: count it against this spot, drop the route
                 // that led into it, and let the probe carry him this tick
@@ -1718,6 +1763,7 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
             const int avoid = m.navStuckCount >= 2 ? NavNearest(m.navStuckPos, 30.0f) : -1;
             std::vector<Vec3> fresh;
             if (NavRouteBudget(m.pos, dest, &fresh, kBoss.repathBudget, avoid)) {
+                m.navFailT = 0.0f; // a route exists: the backoff is spent
                 m.route = std::move(fresh);
                 m.routeGoal = dest;
                 m.routeIdx = 0;
@@ -1737,6 +1783,7 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
             } else {
                 m.route.clear(); // no route inside the budget: probe this stretch
                 m.routeIdx = 0;
+                m.navFailT = 4.0f; // ...and do not pay the budget again for a few seconds
             }
             m.repathT = kBoss.repathMinT;
         }
@@ -1765,9 +1812,11 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
 
 // ------------------------------------------------------------------ the brain
 // States: 0 calm (patrol/return), 1 command (talk first), 2 combat, 3 hunt,
-// 4 suspicious (primed). The senses run in every state; the states decide what
-// he does about them.
-enum BossState { BS_CALM = 0, BS_COMMAND = 1, BS_COMBAT = 2, BS_HUNT = 3, BS_SUSPICIOUS = 4 };
+// 4 suspicious (primed), 5 track (the tracker pursuit: he knows where the
+// player is and is coming for him - the shipped law's default state while
+// a live player exists). The senses run in every state; the states decide
+// what he does about them.
+enum BossState { BS_CALM = 0, BS_COMMAND = 1, BS_COMBAT = 2, BS_HUNT = 3, BS_SUSPICIOUS = 4, BS_TRACK = 5 };
 
 static const char* BossStateName(int s) {
     switch (s) {
@@ -1775,6 +1824,7 @@ static const char* BossStateName(int s) {
     case BS_COMBAT: return "combat";
     case BS_HUNT: return "hunt";
     case BS_SUSPICIOUS: return "suspicious";
+    case BS_TRACK: return "track";
     default: return "calm";
     }
 }
@@ -1961,7 +2011,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.fightWarmT = kBoss.warmSeconds;
             m.lastSeen = playerFeet;
             m.exitDir = Flat(playerVel);
-            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_TRACK) {
                 m.bossState = BS_COMBAT;
                 m.stateWhy = "a weapon held on him: the player is an enemy now";
                 m.seenTime = 0.0f;
@@ -1984,9 +2034,12 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     }
     if (aimedAt) // a gun pointed at him is fast news on top of everything else
         m.detect = std::min(1.5f, m.detect + kBoss.fillAimMul * primed * dt);
-    if (!m.aggro)
+    if (!m.aggro && !gTrackerAlways)
         m.detect = 0.0f; // the engagement law: an unprovoked player is scenery -
-                         // his eyes may track the man, his meter never fills
+                         // his eyes may track the man, his meter never fills.
+                         // The tracker law lifts this pin: his meter runs on
+                         // his senses alone, because reaching the player and
+                         // genuinely seeing him is the whole contact rule now
     const bool detected = m.detect >= 1.0f;
     // tracking while visible: last seen, his velocity, the hiding-spot memory
     if (seeNow) {
@@ -2109,7 +2162,10 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.attackerBeing = -1;
     }
     // ---------------- state entries from the senses
-    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+    // (TRACK stands in this door too: a tracker who arrives and genuinely
+    // sees the player - or is attacked on the road - enters combat by the
+    // same senses as a posted man, no provocation asked.)
+    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_TRACK) {
         if (m.attackerFresh > 0.0f && m.attackerBeing >= 0) {
             m.bossState = BS_COMBAT;
             m.stateWhy = "the street attacked him";
@@ -2689,7 +2745,10 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         const bool wasIn = m.prevPlayerPos.z >= 500.0f;
         const bool isIn = playerPos.z >= 500.0f;
         const float jump = (playerPos - m.prevPlayerPos).Length();
-        const bool engaged = m.bossState == BS_COMBAT || m.bossState == BS_HUNT;
+        const bool engaged = m.bossState == BS_COMBAT || m.bossState == BS_HUNT ||
+                             m.bossState == BS_TRACK; // the tracker camps too: a prey who
+                                                      // ducks inside while he is still
+                                                      // coming is camped, not forgotten
         if (engaged && m.campFamFirst < 0 && playerAlive) {
             const char* fam = nullptr;
             if (isIn && !wasIn) {
@@ -2790,6 +2849,14 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         } else if (m.huntT > kBoss.huntSeconds) {
             if (freshClue || warmTrail) {
                 renewHunt();
+            } else if (gTrackerAlways && playerAlive) {
+                // the tracker law: a trail cannot die while the player
+                // lives. The hunt's clock ran out, so the hunt hands the
+                // chase back to the feed - which knows his true ground
+                // and comes again from here.
+                m.bossState = BS_TRACK;
+                m.stateWhy = "tracker: the hunt's clock ran out, but the feed never does - he knows where the player is";
+                m.lastSeen = playerFeet;
             } else {
                 m.bossState = BS_SUSPICIOUS;
                 m.stateWhy = "the trail is honestly cold";
@@ -2903,6 +2970,14 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     // patrol, and it does not re-search the same disc.
                     m.lastSeen = m.lastSeen + m.exitDir * (kBoss.searchRadius * 2.0f);
                     renewHunt();
+                } else if (gTrackerAlways && playerAlive) {
+                    // the tracker law again, at the search's end: the
+                    // points are worked and the senses are empty, but the
+                    // feed is not - he comes back to the man's true ground
+                    // and the cycle begins again (track, arrive, search)
+                    m.bossState = BS_TRACK;
+                    m.stateWhy = "tracker: the search is worked out, but the feed never is - he knows where the player is";
+                    m.lastSeen = playerFeet;
                 } else {
                     m.bossState = BS_SUSPICIOUS;
                     m.stateWhy = "the trail is honestly cold";
@@ -2960,6 +3035,96 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
     }
 
+    // ================================================================ THE TRACKER GATE
+    // The tracker law's standing door: while the player lives, a boss at
+    // rest is a boss on his way. Calm and suspicion are the provocation
+    // law's peacetime states - under the tracker they exist only in the
+    // death window (the gate asks for a living player) and in the first
+    // ticks of a spawn, and this gate closes them: he tracks. A street
+    // fight or a detection this same tick has already promoted him past
+    // this door (combat and hunt are not gated states), and the player's
+    // death has set calm with the slate wiped - the gate leaves that
+    // stand-down exactly as the death law wrote it.
+    if (gTrackerAlways && playerAlive &&
+        (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS)) {
+        m.bossState = BS_TRACK;
+        m.stateWhy = "tracker: he knows where the player is - he is coming for him";
+        m.route.clear();
+        m.routeIdx = 0;
+    }
+
+    // ================================================================ TRACKER PURSUIT
+    // The feed, spent as movement. The destination is priced by what the
+    // prey is doing - all of it knowledge of WHERE TO GO, none of it a
+    // firing solution:
+    //   - ducked into a known interior: the family's nearest street door
+    //     (the atlas camp) - he comes to an exit and holds it;
+    //   - fleeing, on foot or in a vehicle: the intercept - his true
+    //     position led by his tracked velocity over the road's length,
+    //     the combat advance's own lead arithmetic, so a fast car keeps
+    //     its lead honestly and a stopped one is arrived at;
+    //   - otherwise: his true position, refreshed every tick.
+    // The mover is the one mover (BossChaseTo): by graph where the graph
+    // reaches - under the driver, his body's native street flow - and by
+    // probe where it does not (the airport's island: the route ask fails,
+    // the probe walks the stretch straight at the man, and the ask is
+    // retried on the failure backoff as he closes in). His speed is the
+    // chase sprint, the same 6.4 the fight uses: cross-map is a matter of
+    // minutes, and that is the law's own price - no teleport, no cheat.
+    if (m.bossState == BS_TRACK) {
+        Vec3 dest = playerFeet;
+        bool camping = false;
+        if (m.campFamFirst >= 0) {
+            camping = true;
+            float bd = 1e18f;
+            for (int i = 0; i < m.campFamCount; ++i) {
+                const char* f = nullptr;
+                Vec3 en, ex;
+                if (AtlasDoorGet(m.campFamFirst + i, f, en, ex)) {
+                    const float d = (en - m.pos).LengthSq();
+                    if (d < bd) {
+                        bd = d;
+                        dest = en;
+                    }
+                }
+            }
+        } else {
+            const float lead = Clamp(distPlayer / 6.0f, 0.0f, 2.0f);
+            dest = playerFeet + playerVel * lead;
+        }
+        m.aimGoal = dest + Vec3(0, 0, 1.2f);
+        m.aimRate = 6.0f;
+        if (!BossChaseTo(m, dest, kBoss.chaseSpeed, dt, 1.8f,
+                         camping ? "tracker: camp the interior's door"
+                                 : "tracker: close on the player")) {
+            if (camping) {
+                // on the door: he holds it, eyes on it. The prey can only
+                // leave by a door, and the atlas block ends the camp at
+                // his true exit the moment he uses one - the senses take
+                // the fight from there.
+                m.aimGoal = dest + Vec3(0, 0, 1.2f);
+            } else {
+                // arrived on the man's true ground and his eyes have not
+                // caught him: he is HERE somewhere - behind something,
+                // around something, above something. The hunt's search
+                // takes over, based on his true position: the feed may
+                // say where to search; his eyes still have to find the
+                // man before a single shot exists.
+                m.lastSeen = playerFeet;
+                if (playerSpeed > 1.0f)
+                    m.exitDir = Flat(playerVel);
+                m.bossState = BS_HUNT;
+                m.stateWhy = "tracker: on his ground unseen - the search takes over";
+                m.huntPhase = 0;
+                m.huntT = 0.0f;
+                m.huntDest = playerFeet;
+                m.route.clear();
+                m.routeIdx = 0;
+                BossSay(m, SAY_SEARCH, 3.0f);
+            }
+        }
+    }
+
     // ================================================================ CALM / SUSPICIOUS
     if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
         const bool suspicious = m.bossState == BS_SUSPICIOUS;
@@ -2982,7 +3147,20 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
         Vec3 toAnchor = m.anchor - m.pos;
         toAnchor.z = 0.0f;
-        if (!suspicious && toAnchor.Length() > kBoss.returnRange) {
+        if (gTrackerAlways && !playerAlive) {
+            // the tracker law's stand-down: the player is down, the gate
+            // above cannot fire for a corpse, and this is the calm that
+            // remains to him - he holds WHERE HE STANDS and watches. No
+            // walk back to Grove, no patrol: the death law zeroes the
+            // chase where it died, and the tracker re-acquires from this
+            // ground when the man respawns. (The patrol below is the
+            // provocation law's peacetime, kept whole behind the switch.)
+            m.moving = false;
+            m.scanClock += dt;
+            const float sweep = m.legYaw + std::sin(m.scanClock * 0.8f) * 0.85f;
+            m.aimGoal = m.pos + Vec3(-std::sin(sweep), std::cos(sweep), 0.0f) * 10.0f + Vec3(0, 0, 1.4f);
+            m.aimRate = 3.0f;
+        } else if (!suspicious && toAnchor.Length() > kBoss.returnRange) {
             BossGoTo(m, m.anchor, t.run, dt, 3.0f, "return to Grove"); // home is Grove; he routes back
             m.aimGoal = m.anchor + Vec3(0, 0, 1.2f);
             m.aimRate = 4.0f;
@@ -3887,7 +4065,8 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
                 m.playerHostileT = 5.0f;
                 m.fightWarmT = kBoss.warmSeconds; // a firefight with the player: the trail is warm
                 m.negotiated = true;
-                if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND) {
+                if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND ||
+                    m.bossState == BS_TRACK) { // the tracker law: hurt mid-pursuit is a fight NOW
                     m.bossState = BS_COMBAT;
                     m.stateWhy = "shot through his perception body: the fight is on";
                 }
@@ -3901,7 +4080,8 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
             m.playerHostileT = 5.0f;
             m.fightWarmT = kBoss.warmSeconds; // a firefight with the player: the trail is warm
             m.negotiated = true;
-            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND) {
+            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND ||
+                m.bossState == BS_TRACK) { // the tracker law: hurt mid-pursuit is a fight NOW
                 m.bossState = BS_COMBAT;
                 m.stateWhy = "hurt by the player: the fight is on";
             }
@@ -3968,7 +4148,7 @@ void MobProvoked(int index, int being, const Vec3& from) {
     m.alerted = true;
     m.alertFade = 0.0f;
     m.lastSeen = from;
-    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+    if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_TRACK) {
         m.bossState = BS_COMBAT;
         m.negotiated = true;
         m.seenTime = 0.0f;
@@ -4014,7 +4194,7 @@ void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool dr
         m.playerHostileT = std::max(m.playerHostileT, 6.0f);
         m.fightWarmT = kBoss.warmSeconds;
         m.lastSeen = vehPos;
-        if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+        if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_TRACK) {
             m.bossState = BS_COMBAT;
             m.stateWhy = "the player drove straight at him: an attempted ram";
             m.seenTime = 0.0f;
