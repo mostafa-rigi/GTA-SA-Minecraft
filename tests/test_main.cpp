@@ -10528,6 +10528,121 @@ static void TestCop() {
               gasWeak, gasHis * 2666.0f / 4096.0f);
         CopProfileOverrideForTest(-1);
     }
+
+    // ---- (k) fix round 5: the victim-knows law reads EVERY damage
+    // channel, the stuck witness waits out a fresh drive order, and the
+    // autopilot feed is a driving point, never an arrival
+    {
+        // (k1) the driver channel: the man shoots the DRIVER out of the
+        // car while standing where the cop's eyes cannot hold him -
+        // before this round that damage billed the book in silence and
+        // the page printed "position lost" over the dying car
+        CopReset();
+        float copS = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        host.vehicle = -1; // on foot
+        host.velocity = Vec3();
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the round-5 cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        // the staging starts from a clean page: an earlier block's
+        // shared-knowledge state can leave a summon informed, and an
+        // informed anchor at felony 659 would pursue through the whole
+        // control window and wander off the staged ground
+        gCop.felony = 0.0f;
+        gCop.known = false;
+        gCop.unseenT = 0.0f;
+        const Vec3 nearMan = road.PosAt(copS + 8.0f, nullptr);
+        const Vec3 farMan = road.PosAt(copS + 300.0f, nullptr);
+        CopTick(dt, nearMan); // one close look: the position is known
+        host.StepCar(dt);
+        CHECK(gCop.known, "seen up close, the position is known");
+        for (float t = 0.0f; t < 6.0f; t += dt) { // the control: silence
+            CopTick(dt, farMan);                  // loses the position
+            host.StepCar(dt);
+        }
+        CHECK(!gCop.known, "six unseen seconds at 300 m: position lost (the control)");
+        CopTick(dt, nearMan);
+        host.StepCar(dt);
+        CHECK(gCop.known, "one close look re-knows the position");
+        for (float t = 0.0f; t < 3.0f; t += dt) {
+            host.struckDriverQ = 5.0f; // his bullets are in the driver
+            CopTick(dt, farMan);       // while he stands 300 m off
+            host.StepCar(dt);
+        }
+        CHECK(gCop.known, "while the driver is being shot, position-lost is impossible");
+        CHECK(gCop.felony >= 659.0f, "hitting the driver is offence 5, noted whole (felony %.0f)",
+              gCop.felony);
+        CHECK(gCop.mode == COP_PURSUE, "the pursuit opens on the victim's own word");
+        // (k2) the fair start: the pursuit cycles down and back up with
+        // the body frozen - inside the window a frozen car is not yet
+        // stuck evidence; past it, the original's witness fires
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        const Vec3 chaseMan = road.PosAt(copS + 40.0f, nullptr);
+        host.vehicle = 42;
+        gCop.felony = 0.0f;
+        CopTick(dt, chaseMan); // the case collapses: he stands down
+        host.StepCar(dt);
+        CHECK(gCop.mode == COP_IDLE, "the staged stand-down lands before the re-entry");
+        host.freeze = true; // the wall: the body answers nothing
+        gCop.felony = 2000.0f;
+        const int stratBefore = gCop.recoverStrategy;
+        for (float t = 0.0f; t < 1.0f; t += dt) {
+            CopTick(dt, chaseMan);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE, "the pursuit re-opened on the frozen body");
+        CHECK(gCop.recoveryT == 0.0f && gCop.recoverStrategy == stratBefore,
+              "inside the fair start, stillness is not stuck evidence yet");
+        bool fired = false;
+        for (float t = 0.0f; t < 1.5f && !fired; t += dt) {
+            CopTick(dt, chaseMan);
+            host.StepCar(dt);
+            fired = gCop.recoveryT > 0.0f || gCop.recoverStrategy != stratBefore;
+        }
+        CHECK(fired, "past the fair start, a truly wedged car still reverses out");
+        host.freeze = false;
+        // (k3) the feed: far, the autopilot's point is tens of metres
+        // down the road; close, it is projected through the prey while
+        // the brain's own target stays the true aim
+        CopReset();
+        gThreat.bossEngaged = true; // the informed summon: known at once
+        float copS3 = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dir3;
+        const Vec3 copAt3 = road.PosAt(copS3, &dir3);
+        host.PlaceCar(copAt3, std::atan2(dir3.x, dir3.y) * 57.29578f);
+        CHECK(CopSummon(copAt3, road.PosAt(copS3 + 25.0f, nullptr)), "the feed cop stands up");
+        gThreat.bossEngaged = false; // the boss's field, handed back
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        gCop.felony = 2000.0f;
+        host.vehicle = 42;
+        host.velocity = Vec3();
+        const Vec3 farMan3 = road.PosAt(copS3 + 150.0f, nullptr);
+        for (float t = 0.0f; t < 0.3f; t += dt) {
+            CopTick(dt, farMan3);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE, "the feed pursuit is live");
+        CHECK(gCop.feedLive && (gCop.feedPoint - gCop.pos).Length() >= 20.0f,
+              "far: the feed is a driving point tens of metres out (%.0f m)",
+              (gCop.feedPoint - gCop.pos).Length());
+        const float manS3 = road.NearestDist(host.carPos) + 12.0f;
+        const Vec3 closeMan = road.PosAt(manS3, nullptr);
+        CopTick(dt, closeMan);
+        host.StepCar(dt);
+        const Vec3 toTarget = gCop.target - gCop.pos;
+        const Vec3 pastTarget = gCop.feedPoint - gCop.target;
+        CHECK(gCop.feedLive && pastTarget.Dot(toTarget) > 0.0f &&
+                  (gCop.feedPoint - gCop.pos).Length() > toTarget.Length(),
+              "close: the feed is projected through the prey, past the brain's aim");
+    }
     CopReset();
     SetHost(nullptr);
 }

@@ -132,6 +132,33 @@ struct CopState {
     float stuckT = 0.0f;
     float recoveryT = 0.0f;
     int recoverStrategy = 0;   // the original's rotating 8-pattern index
+    float fairStartT = 0.0f;   // fix round 5: the stuck witness's fair
+                               // start - seconds after a fresh drive
+                               // order (a spawn, a pursuit entry, a
+                               // recovery just spent) during which the
+                               // witness does not accumulate. The boss's
+                               // statue round taught the same lesson for
+                               // legs: a native drive channel has a
+                               // start-up ramp, and a witness that reads
+                               // raw stillness inside it convicts a car
+                               // that has barely been told to move.
+    // fix round 5: the autopilot feed - the point and pace Drive()
+    // hands the host's drive channel beside the pedals. NOT the brain's
+    // target: the host's ProcessAI brakes to ARRIVE at its destination,
+    // so the feed is a driving point (a route look-ahead, a far descent
+    // point, an overshoot through the prey in close pursuit), while
+    // `target` above stays the brain's own aim for its geometry/tests.
+    Vec3 feedPoint;
+    float feedCruise = 0.0f;
+    bool feedLive = false;
+    // the last report's drive-state read-backs (the autopilot's mission
+    // and cruise as the body itself answered, the siren flag on the
+    // body) - stashed so the per-second unit line can print the body's
+    // own words next to the brain's intent
+    int repMission = -1;
+    int repCruise = 0;
+    bool repSiren = false;
+    float unitLogT = 0.0f;     // the per-second unit line's clock
     bool frontLClear = true, frontRClear = true; // bumper-corner probes
     float probeT = 0.0f;
     // step 2: the ladder's leaving (stood down, driving off to ping out)
