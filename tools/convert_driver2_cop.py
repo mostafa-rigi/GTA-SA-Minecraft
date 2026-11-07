@@ -26,9 +26,28 @@ lettering is never mirrored): the PS1 car frame is x = side, y = DOWN
 (the light-bar vertex cluster sits at y = -88, the frame's top), z =
 toward the rear (headlights at z = -354 in the LCF). The core frame is
 x = right, y = forward, z = up, so:
-  core = (-x, -z, -y) / 256   (256 PS1 units = 1 m)
-The offline preview renders in this frame and is the gate: lettering
-readable, light bar on top, nose forward.
+  core = (-x, -z, -y) / UNITS_PER_METRE
+
+UNITS_PER_METRE = 153.6 - convicted in fix round 3 (2026-11-07), NOT
+the 256 the brain's speed rescale once suggested. The original draws
+model vertices 1:1 in world units (CARS.C buildNewCarFromModel keeps
+model->vertices verbatim; DrawCarObject/RenderModel apply rotation and
+translation only - no scale anywhere in the car path), so one factor
+must serve the whole world, and the geometry anchors convict ~154:
+  - his own length: 754 units (bbox) / 764 (LCF colBox) -> 4.9 m at 153.9
+  - his own wheelbase: 429 units (post-FixCarCos wheelDisp) -> 2.8 m at 153.2
+  - CONE1_TASTIC in the same MDS pack: 123 units tall -> 0.80 m at 153.6
+    (a standard 31-inch road cone)
+  - ROAD1 tile in the same pack: 1034 units wide -> 6.7 m at 153.6
+    (two 3.35 m lanes; at 256 it would be a 4.0 m one-lane "road")
+At 256 the car came out 2.95 m long next to San Andreas cars - the eye
+test's "much smaller than the other cars". His proportions are stylised
+(the 69-unit wheel ring is a 0.90 m tyre at this factor, big for a
+sedan; the roofline is low) - no single factor makes every part real,
+so the body's own two hard dimensions rule. The preview renders in
+this frame at ABSOLUTE scale against a 4.9 m reference outline and is
+the gate: lettering readable, light bar on top, nose forward, SIZE
+true.
 
 Outputs (driver2-assets/):
   cop_car.bin            the runtime mesh (body clean + dam, wheel
@@ -53,6 +72,12 @@ SLICES = os.path.join(ASSETS, "slices")
 
 POLY_SIZES = [8, 12, 16, 24, 20, 20, 28, 32, 8, 12, 16, 16, 0, 0, 0, 0,
               12, 12, 12, 16, 20, 20, 24, 24]
+
+# Driver 2 world units per metre for GEOMETRY - convicted in fix round
+# 3 from the car's own length (754 u -> 4.9 m) and wheelbase
+# (429 u -> 2.8 m), cross-checked on the MDS pack's cone (123 u ->
+# 0.80 m) and road tile (1034 u -> 6.7 m). See the module docstring.
+UNITS_PER_METRE = 153.6
 
 
 def load(name):
@@ -200,7 +225,7 @@ def poly_tris(t, rec):
 
 def ps1_to_core(v):
     x, y, z = v
-    return (-x / 256.0, -z / 256.0, -y / 256.0)
+    return (-x / UNITS_PER_METRE, -z / UNITS_PER_METRE, -y / UNITS_PER_METRE)
 
 
 class MeshBuilder:
@@ -273,7 +298,16 @@ def render_preview(meshes, pages, path, view):
     """A tiny software rasteriser: textured triangles, orthographic.
     view: (right axis, up axis, depth axis) as core-frame unit vectors
     with axis indices + signs, plus a label. This is the gate the
-    soldier passed: the body is SEEN before anything is installed."""
+    soldier passed: the body is SEEN before anything is installed.
+
+    ABSOLUTE scale (fix round 3): the frame is a fixed 6.6 m window for
+    every view - the old version auto-fitted the geometry to the frame,
+    which made a 2.95 m car and a 4.9 m car render identically and hid
+    the scale defect through two installs. A red reference outline of
+    a real sedan (4.9 m long, 1.72 m wide, roof 1.44 m over the contact
+    patch) is drawn behind the car, and a white ground line marks the
+    contact patch (core z = -0.866 m at the convicted factor), so size
+    and ride height are judged, never fitted."""
     W = H = 512
     img = np.zeros((H, W, 3), dtype=np.uint8)
     img[:] = (24, 24, 28)
@@ -288,10 +322,33 @@ def render_preview(meshes, pages, path, view):
                 p = verts[vi]
                 pts.append((p[ai] * asg, p[bi] * bsg, p[ci] * csg, u, v, ti, (r, g, b)))
             allp.append(pts)
-    xs = [p[0] for t in allp for p in t]
-    ys = [p[1] for t in allp for p in t]
-    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
-    sc = 0.92 * min(W, H) / max(max(xs) - min(xs), max(ys) - min(ys))
+    # the reference sedan in core metres: x half-width 0.86, y
+    # half-length 2.45, z from the contact patch to the roof
+    ref = ((-0.86, 0.86), (-2.45, 2.45), (-0.866, 0.574))
+    rh = ref[ai][0] * asg, ref[ai][1] * asg
+    rv = ref[bi][0] * bsg, ref[bi][1] * bsg
+    cx, cy = (min(rh) + max(rh)) / 2, (min(rv) + max(rv)) / 2
+    sc = W / 6.6  # pixels per metre, fixed - the absolute scale
+
+    def to_px(x, y):
+        return W / 2 + (x - cx) * sc, H / 2 - (y - cy) * sc
+
+    # ground line: the view's horizontal axis at contact-patch height,
+    # only for views whose vertical axis is the core z
+    if bi == 2:
+        gy = int(to_px(0.0, -0.866 * bsg)[1])
+        if 0 <= gy < H:
+            img[gy, :] = (220, 220, 220)
+    # reference outline (drawn first; triangles overdraw it)
+    x0, y0 = to_px(min(rh), max(rv))
+    x1, y1 = to_px(max(rh), min(rv))
+    x0, x1 = max(0, int(x0)), min(W - 1, int(x1))
+    y0, y1 = max(0, int(y0)), min(H - 1, int(y1))
+    if x1 > x0 and y1 > y0:
+        img[y0, x0:x1] = (200, 60, 60)
+        img[y1, x0:x1] = (200, 60, 60)
+        img[y0:y1, x0] = (200, 60, 60)
+        img[y0:y1, x1] = (200, 60, 60)
     texcache = {}
     for pts in allp:
         (x0, y0, d0, u0, v0, t0, c0), (x1, y1, d1, u1, v1, t1, c1), (x2, y2, d2, u2, v2, t2, c2) = pts
@@ -476,24 +533,45 @@ def main():
                    "verts": len(wheel_clean["verts"]), "polys": len(wheel_clean["polys"]),
                    "wheelSize": wheel_size,
                    "spin_verts": "8..23 (CARS.C rewrite group)"},
-        # Axle positions from the LCF: DrawCarWheels places a wheel at
-        # sWheelPos.z = -wheelDisp.vz (negated), with the stored vz
-        # already shifted by FixCarCos's -13 (HANDLING.C), so core y =
-        # vz_post / 256 - wheels 0,2 (+222) are the FRONT axle, which
-        # DrawCarWheels also steers (even wheelnum = front model).
-        # HEIGHT is measured, not taken from the vy byte: the drawn
-        # centre must put the tyre (swept radius = sizeScale 69/256 =
-        # 0.27 m) into the body's own arch - arch lip at core z -0.01,
-        # floor pan at -0.344 - which fixes the centre at z = -0.25
-        # (clearance 0.18 m) for both axles. The sWheelPos.vy formula
-        # ((-wheelSize - vy) - sus + 14 = -5) does not reproduce this
-        # under the frame map that the body render proves; the arch
-        # measurement is the arbiter and the gap is named in the report.
-        "wheelDisp_core_m": [[-cop_cos["wheelDisp"][k][0] / 256.0,
-                              (cop_cos["wheelDisp"][k][2] - 13) / 256.0,
-                              -0.25] for k in range(4)],
-        "wheel_height_note": "centre z = -0.25 m, measured from the body arch "
-                             "(see convert_driver2_cop.py); x/y from the LCF",
+        # Wheel centres, re-derived in fix round 3 from the game's own
+        # placement law (CARS.C DrawCarWheels), in the body model's own
+        # frame (the runtime draws body and wheels in one frame, and
+        # the original draws the body at physics + R*cog while the
+        # wheels ride the physics origin - so the centres below are
+        # relative to the MODEL origin, cog subtracted):
+        #   drawn x (file frame) = (wheelnum & 2) == 0 ? 17 - vx
+        #                        : -17 - vx
+        #     - the +-17 is the wheel's own half-width: the LCF vx is
+        #     the placement of the wheel's INNER edge reference, not
+        #     its centre. Piece 3 placed the centres at -vx outright,
+        #     which put the tyre's outer face ~0.07 m OUTSIDE the
+        #     body's side slab (centre 122-126 + half-width 17 = up to
+        #     143 vs the slab at 132) - the eye test's "glued on".
+        #     Corrected centres: |x| = 105..109, outer face at 122.5,
+        #     just inside the slab, exactly as the original sits.
+        #   drawn z (file frame) = -vz_post, vz already shifted by
+        #     FixCarCos's -13 (HANDLING.C); cog z is 0 in the data and
+        #     FixCarCos never touches it, so core y = vz_post.
+        #     Wheels 0,2 (+222) are the FRONT axle; even wheelnums
+        #     steer (DrawCarWheels' front model + steer matrix).
+        #   height: the sWheelPos.vy formula gives the centre at
+        #     (-wheelSize - vy) - sus + 14 = -5 - sus relative to the
+        #     physics origin; the model origin rides cog y = -95 over
+        #     it, so in the model frame the centre is 90 - sus. The
+        #     measured rest compression (sus = 26) lands it at 64
+        #     units under the model origin - the same 64 the piece-3
+        #     arch measurement fixed independently (arch lip at core
+        #     z -0.017, floor pan at -0.573 at this factor), so the
+        #     formula and the measurement now agree and 64 rules.
+        "wheelDisp_core_m": [[-((17 - cop_cos["wheelDisp"][k][0]) if k < 2
+                                else (-17 - cop_cos["wheelDisp"][k][0])) / UNITS_PER_METRE,
+                              (cop_cos["wheelDisp"][k][2] - 13) / UNITS_PER_METRE,
+                              -64.0 / UNITS_PER_METRE] for k in range(4)],
+        "wheel_height_note": "centre z = -64 units = -0.417 m at the convicted "
+                             "factor (DrawCarWheels vy law + cog, rest "
+                             "compression 26; matches the arch measurement)",
+        "wheel_diameter_m": 2 * 69 / UNITS_PER_METRE,
+        "units_per_metre": UNITS_PER_METRE,
         "textures": [{"file": f"cop_tex{n}.png",
                       "page": p if p >= 0 else "flat-white-card", "clut": c}
                      for n, (p, c) in enumerate(mb.tex_list)],
