@@ -493,7 +493,17 @@ struct TestHost : Host {
     Vec3 wallC;         // its centre
     Vec3 wallDir;       // unit vector along it
     float wallHalf = 0; // half its length
+    bool ownCarBlocks = false; // the player's own car body stands on lines to his seat
     bool LineBlocked(const Vec3& a, const Vec3& b) override {
+        if (ownCarBlocks && vehPoseOn) {
+            // the player's own car body stands on any line with exactly one
+            // end at his seat: its shell is between an outside eye and the
+            // driver (the real game's answer - and the one that made a
+            // seated man invisible to the boss's senses on 2026-11-07)
+            const bool aSeat = (a - vehSeat).Length() < 1.3f, bSeat = (b - vehSeat).Length() < 1.3f;
+            if (aSeat != bSeat)
+                return true;
+        }
         if (!wall)
             return false;
         const Vec3 w0 = wallC - wallDir * wallHalf, w1 = wallC + wallDir * wallHalf;
@@ -503,6 +513,16 @@ struct TestHost : Host {
         const float d1 = cross(w0, w1, a), d2 = cross(w0, w1, b), d3 = cross(a, b, w0), d4 = cross(a, b, w1);
         const bool seg = ((d1 > 0.0f) != (d2 > 0.0f)) && ((d3 > 0.0f) != (d4 > 0.0f));
         return seg && std::min(a.z, b.z) < wallC.z + 3.0f && std::max(a.z, b.z) > wallC.z;
+    }
+    bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int veh) override {
+        if (veh >= 0 && veh == vehicle) {
+            const bool keep = ownCarBlocks;
+            ownCarBlocks = false; // his own car is simply not on this line
+            const bool r = LineBlocked(a, b);
+            ownCarBlocks = keep;
+            return r;
+        }
+        return LineBlocked(a, b);
     }
     bool thing = false;    // something of its own is in front of the player, two metres away
     bool Raining() override { return rain; }
@@ -2120,6 +2140,16 @@ static void RunMobsB(float seconds, const Vec3& player, const std::vector<BeingI
         MobsTick(dt, player, 0, true, beings);
 }
 
+// The engagement law's own ignition (the user's order, 2026-11-07), used by
+// every fight sim: the player holds his gun on the boss for a breath, the
+// way the real provocation works (0.45 s of aim; 0.7 s here leaves margin).
+// Since that order, seeing the player - or hearing him - starts nothing.
+static void ProvokeByAim(TestHost& host, const Vec3& player, const std::vector<BeingInfo>* beings) {
+    host.aimingAtHim = true;
+    RunMobsB(0.7f, player, beings);
+    host.aimingAtHim = false;
+}
+
 // a long open floor with no pen walls, for the tests of how far the new monsters see and how long they remember
 static void WideStage() {
     BlockStage();
@@ -2359,17 +2389,20 @@ static void TestSoldier() {
         RunMobsB(0.3f, Vec3(5.5f, 0.5f, 11.0f), nullptr);
         CHECK(gMobs[s].detect == 0.0f && !gMobs[s].alerted && host.playerHurt == 0.0f, "a man at his back, 15 m off, is not seen - the point-blank bypass is 4 m, not a sphere of eyes");
     }
-    // in front of him it takes only a moment: he sees, reacts, and his bursts land.
-    // (This encounter already had its talk - negotiated - so a sighting is a fight;
-    // the talk itself is proven in TestBoss.)
+    // in front of him, once the player has provoked him, it takes only a
+    // moment: he reacts, and his bursts land. (Under the engagement law of
+    // 2026-11-07 a bare sighting starts nothing - that is proven in
+    // TestBossAggroLaw; every fight in these older sims now opens with the
+    // law's own ignition, ProvokeByAim.)
     {
         WideStage();
         host.playerHurt = 0.0f;
         const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
         FaceMob(s, kPi / 2.0f); // facing the player, 14 m off
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, player, nullptr); // the law's ignition (2026-11-07):
+                                             // a sighting alone starts nothing now
         RunMobsB(0.3f, player, nullptr);
-        CHECK(gMobs[s].bossState == 2 && gMobs[s].alerted, "a man in front of him is seen at once");
+        CHECK(gMobs[s].bossState == 2 && gMobs[s].alerted, "a provoked fight is on at once");
         RunMobsB(2.5f, player, nullptr);
         CHECK(host.playerHurt > 0.0f, "and his rifle lands hits (%.1f half hearts)", host.playerHurt);
         const int used = 30 - gMobs[s].mag;
@@ -2381,7 +2414,7 @@ static void TestSoldier() {
         host.playerHurt = 0.0f;
         const int s = SpawnMob(MOB_SOLDIER, Vec3(12.5f, 0.5f, 10.0f), true);
         FaceMob(s, kPi / 2.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, player, nullptr);
         RunMobsB(1.0f, player, nullptr); // he is engaged by now
         gMobs[s].mag = 1;
         gMobs[s].burstShots = 0;
@@ -2399,9 +2432,9 @@ static void TestSoldier() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(30.5f, 0.5f, 10.0f), true);
         FaceMob(s, kPi / 2.0f); // facing the player, 12 m west of him
-        gMobs[s].negotiated = true;
         gMobs[s].health = 500.0f; // a fifth of his pool: under the retreat line
         const Vec3 pl(18.5f, 0.5f, 11.0f);
+        ProvokeByAim(host, pl, nullptr);
         const float d0 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
         RunMobsB(2.5f, pl, nullptr);
         const float d1 = (Vec3(18.5f, 0.5f, 10.0f) - gMobs[s].pos).Length();
@@ -5929,7 +5962,7 @@ static void TestSoldierAimFix() {
         gShotFx.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(14.5f, 0.5f, 10.0f), true);
         FaceMob(s, kPi * 0.5f); // facing the man in the street
-        gMobs[s].negotiated = true; // the talk is over: this is the fight itself
+        ProvokeByAim(host, Vec3(0.5f, 0.5f, 11.0f), &none); // the law's ignition
         int shootTicks = 0, holdRun = 0, bestHold = 0;
         bool fxSeen = false;
         for (int i = 0; i < 60; ++i) {
@@ -5993,7 +6026,8 @@ static void TestSoldierAimFix() {
         host.stripFound = mode == 0; // mode 0: the sample lands 40 m down; mode 1: it finds nothing
         const int s = SpawnMob(MOB_SOLDIER, Vec3(3.5f, 0.5f, 10.0f), true);
         FaceMob(s, -kPi * 0.5f);
-        gMobs[s].negotiated = true;
+        gMobs[s].aggro = true; // white-box: the fight is staged, not sighted into being
+        gMobs[s].fightStarted = true;
         gMobs[s].bossState = 2; // running at the man: the strip is crossed at combat speed
         gMobs[s].detect = 1.0f;
         float minZ = 1e9f;
@@ -6355,9 +6389,10 @@ static void TestBossDeathReset() {
     gGame.deathTime = 0.5f; // the player dies, by his hand, across the street
     RunMobsB(0.1f, Vec3(30.5f, 0.5f, 11.0f), nullptr);
     const int b = findBoss();
-    CHECK(b >= 0 && gMobs[b].bossState == 4, "death stands him down to primed suspicion at once (state %d)", b >= 0 ? gMobs[b].bossState : -1);
-    CHECK(b >= 0 && gMobs[b].route.empty() && !gMobs[b].fightStarted && gMobs[b].primedT > 30.0f,
-          "the hunt is wiped: no route, no fight, a primed watch instead");
+    CHECK(b >= 0 && gMobs[b].bossState == 0, "death stands him down to calm at once (state %d)", b >= 0 ? gMobs[b].bossState : -1);
+    CHECK(b >= 0 && gMobs[b].route.empty() && !gMobs[b].fightStarted && !gMobs[b].aggro && gMobs[b].primedT > 30.0f,
+          "the hunt is wiped and the slate is clean: no route, no fight, no enemy - "
+          "under the engagement law the respawned man is a stranger until he provokes him anew");
     gGame.deathTime = -1.0f; // respawned in a hospital some 600 m away
     RunMobsB(3.0f, Vec3(600.5f, 0.5f, 11.0f), nullptr);
     const int b2 = findBoss();
@@ -6434,6 +6469,12 @@ static void TestBoss() {
             const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
             FaceMob(s, 0.0f);
+            // the senses are priced on a man already his enemy (the latch is
+            // set directly here: the LAW's triggers are proven in
+            // TestBossAggroLaw - this block prices the eyes, not the law)
+            gMobs[s].aggro = true;
+            gMobs[s].fightStarted = true;
+            gMobs[s].detect = 0.0f;
             int ticks = -1;
             for (int i = 0; i < 40; ++i) {
                 MobsTick(0.05f, Vec3(0.5f, 12.5f, 11.0f), 0, true, &none);
@@ -6461,6 +6502,8 @@ static void TestBoss() {
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         FaceMob(s, 0.0f);
+        gMobs[s].aggro = true; // an enemy at night: the range itself is priced
+        gMobs[s].fightStarted = true;
         RunMobsB(1.5f, Vec3(0.5f, 50.5f, 11.0f), nullptr); // 50 m: beyond the night range of 45
         CHECK(gMobs[s].detect == 0.0f, "at night his reach is 45 m, not 60 (detect %.2f)", gMobs[s].detect);
         NotePlayerShot(Vec3(0.5f, -19.5f, 11.0f), 70.0f); // a shot 20 m behind him
@@ -6482,6 +6525,9 @@ static void TestBoss() {
             const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
             FaceMob(s, 0.0f);
+            gMobs[s].aggro = true; // already his enemy: this prices the meter,
+            gMobs[s].fightStarted = true; // not the law that made him one
+            gMobs[s].detect = 0.0f;
             int ticks = -1;
             for (int i = 0; i < 30; ++i) {
                 MobsTick(0.05f, Vec3(0.5f, 55.5f, 11.0f), 0, true, &none);
@@ -6498,54 +6544,60 @@ static void TestBoss() {
         CHECK(passive > 0 && aimed > 0 && aimed < passive,
               "being aimed at fills his meter faster than being seen does (%d vs %d ticks at 55 m)", aimed, passive);
     }
-    // ---- G: he talks first - and only in the guard's calm
+    // ---- G, SUPERSEDED by the engagement law (the user's order,
+    // 2026-11-07): the free-roam boss does not talk first, does not command,
+    // and has nothing to do with a peaceful player at all. Commands belong
+    // to the future guard step and are gated off (kGuardTalkEnabled).
     {
         WideStage();
         gPlayed.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // a peaceful man walks up
-        CHECK(gMobs[s].bossState == 1, "a peaceful first sighting is a command, not a fight (state %d)", gMobs[s].bossState);
-        CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) >= 1, "and the order is spoken");
-        RunMobsB(11.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // the man stands still and obeys
-        CHECK(gMobs[s].bossState == 4 && host.playerHurt == 0.0f,
-              "obeyed, he stands down to watchful - and never fired (state %d)", gMobs[s].bossState);
-        CHECK(gMobs[s].primedT > 10.0f, "but he remembers the face: primed detection for a minute (%.0f s left)", gMobs[s].primedT);
-        CHECK(Heard(SND_BOSS_DOWN1) >= 1, "the stand-down is spoken too");
+        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro,
+              "a peaceful first sighting is NOTHING now: no command, no interest (state %d)", gMobs[s].bossState);
+        CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0, "and no order is spoken");
+        RunMobsB(11.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr); // the man just stands there
+        CHECK(gMobs[s].bossState == 0 && host.playerHurt == 0.0f && gMobs[s].detect == 0.0f,
+              "eleven seconds at arm's length change nothing: still calm, never fired, meter empty (state %d)",
+              gMobs[s].bossState);
+        CHECK(gMobs[s].primedT == 0.0f, "and a stranger's face is not remembered (primed %.0f s)", gMobs[s].primedT);
+        CHECK(Heard(SND_BOSS_DOWN1) == 0, "and there is no stand-down, because nothing ever stood up");
     }
     {
-        WideStage(); // run during the window: war
+        WideStage(); // a sprint past him is not a provocation either
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 1, "the window opens");
         host.velocity = Vec3(6.0f, 0.0f, 0.0f); // he breaks into a sprint
         RunMobsB(0.3f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 2, "a sprint inside the window is war");
+        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro, "a sprint in front of him is still nothing (state %d)",
+              gMobs[s].bossState);
         host.velocity = Vec3();
     }
     {
-        WideStage(); // aim at him during the window: war - and no second talk after
+        WideStage(); // aim at him: THAT is a provocation - war, and no talk after
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
         host.aimingAtHim = true;
         RunMobsB(0.8f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 2, "a gun raised at him inside the window is war");
+        CHECK(gMobs[s].bossState == 2 && gMobs[s].aggro, "a gun held on him is war - by the law, not by a window");
         host.aimingAtHim = false;
         RunMobsB(3.0f, Vec3(0.5f, -160.5f, 11.0f), nullptr); // the man breaks away, far off
         const Vec3 front = gMobs[s].pos + Vec3(-std::sin(gMobs[s].aimYaw), std::cos(gMobs[s].aimYaw), 0.0f) * 10.0f + Vec3(0, 0, 1.0f);
         RunMobsB(0.6f, front, nullptr); // and shows himself again, peaceful as you like
-        CHECK(gMobs[s].bossState != 1, "but this encounter gets no second negotiation (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].bossState != 1, "and this encounter never becomes a negotiation (state %d)", gMobs[s].bossState);
     }
     {
-        WideStage(); // summoned into a fight already loud: no commands at all
+        WideStage(); // gunfire in the air is weather, not a provocation
         gPlayed.clear();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         NotePlayerShot(Vec3(0.5f, 12.5f, 11.0f), 70.0f); // shots, moments before he lays eyes on the man
         RunMobsB(0.6f, Vec3(0.5f, 12.5f, 11.0f), nullptr);
-        CHECK(gMobs[s].bossState == 2, "with a fight already in the air he fights at once (state %d)", gMobs[s].bossState);
+        CHECK(gMobs[s].bossState == 0 && !gMobs[s].aggro,
+              "shots heard and a man seen are still nothing without a provocation (state %d)", gMobs[s].bossState);
         CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0, "and no order is given");
     }
     // ---- B: the body - head is body, and the magazine arithmetic holds
@@ -6579,7 +6631,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 6.5f, 11.0f), nullptr); // the law's ignition
         RunMobsB(0.8f, Vec3(0.5f, 6.5f, 11.0f), nullptr); // the fight is on, 6 m out
         CHECK(gMobs[s].bossState == 2, "engaged");
         gMobs[s].mag = 0;
@@ -6592,7 +6644,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 30.5f, 11.0f), nullptr);
         RunMobsB(0.8f, Vec3(0.5f, 30.5f, 11.0f), nullptr);
         gMobs[s].mag = 0;
         gMobs[s].burstPause = 0.0f;
@@ -6604,7 +6656,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 30.5f, 11.0f), nullptr);
         bool crouchedAiming = false;
         for (int i = 0; i < 40; ++i) {
             MobsTick(0.05f, Vec3(0.5f, 30.5f, 11.0f), 0, true, &none);
@@ -6618,8 +6670,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), nullptr); // seen, fighting
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), nullptr); // seen, fighting
         MobHurt(s, 2700.0f, Vec3(0.5f, 20.5f, 10.0f), 0.0f); // badly wounded (under the 35% line of the bigger pool): he fights from cover now
         gMobs[s].hurt = 0.0f;
         host.wall = true;
@@ -6653,8 +6704,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 14.5f, 11.0f), nullptr); // seen, fighting
+        ProvokeByAim(host, Vec3(0.5f, 14.5f, 11.0f), nullptr); // seen, fighting
         host.wall = true;
         host.wallC = Vec3(0.5f, 6.5f, 8.0f); // its band tops out at 11: a fence
         host.wallDir = Vec3(1, 0, 0);
@@ -6683,8 +6733,7 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), nullptr); // he has the man's measure
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), nullptr); // he has the man's measure
         host.wall = true;
         host.wallC = Vec3(0.5f, 6.5f, 10.0f); // band to 13: a 3 m wall, and blind
         host.wallDir = Vec3(1, 0, 0);
@@ -6766,8 +6815,8 @@ static void TestBoss() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
         host.vehicle = host.vehBoxNum;
+        ProvokeByAim(host, Vec3(0.5f, 13.6f, 10.95f), nullptr); // the driver provoked him
         host.vehPoseOn = true;
         host.vehBoxOn = true;
         host.vehBoxCentre = Vec3(0.5f, 14.5f, 10.5f);
@@ -7083,7 +7132,7 @@ static void TestCsRules() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 12.5f, 11.0f), none);
         host.armorPoints = 100.0f;
         RunMobsB(3.0f, Vec3(0.5f, 12.5f, 11.0f), none);
         CHECK(host.playerHurt > 0.0f && host.armorWorn > 0.0f && host.armorPoints < 100.0f,
@@ -7098,7 +7147,7 @@ static void TestCsRules() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 12.5f, 11.0f), none);
         RunMobsB(0.6f, Vec3(0.5f, 12.5f, 11.0f), none);
         const float hurt0 = host.playerHurt;
         host.traceScriptOn = true;
@@ -7113,16 +7162,36 @@ static void TestCsRules() {
     }
     {
         // one fence in one shot's line: paired runs, same seed, same
-        // everything - the fenced run must pay exactly one shot's 40% wood
-        // tax less than the open run, summed over three pairs
+        // everything, ONE measured shot each - the fenced run must pay
+        // exactly that shot's 40% wood tax less than the open run
         auto runPair = [&](bool fence, int seed) {
             WideStage();
             McsaSrand(seed);
             const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
             FaceMob(s, 0.0f);
-            gMobs[s].negotiated = true;
+            ProvokeByAim(host, Vec3(0.5f, 5.5f, 11.0f), none);
             RunMobsB(1.0f, Vec3(0.5f, 5.5f, 11.0f), none); // engaged at 5 m
             host.playerHurt = 0.0f;
+            // the measured window starts from an identical stance in both
+            // runs - same spot, same trigger state: the law's ignition is
+            // 0.7 s of live combat in which he closes and strafes, and where
+            // he stands when the window opens otherwise decides whether the
+            // scripted fence even sits in the first shot's line (one pair
+            // measured a 0.00 discount that way, another lost whole hits to
+            // spray-roll divergence). The pair may differ ONLY by the fence.
+            gMobs[s].pos = Vec3(0.5f, 0.5f, 10.0f);
+            gMobs[s].vel = Vec3();
+            // and the window holds exactly ONE rifle round (pistol empty
+            // too, so the empty rifle means a reload, not a second weapon):
+            // the pair prices a single shot's tax, no more - a summed window
+            // let whole extra hits and a lucky head-zone first shot (4x)
+            // masquerade as the fence's price
+            gMobs[s].mag = 1;
+            gMobs[s].pistolMag = 0;
+            gMobs[s].burstShots = 0;
+            gMobs[s].burstPause = 0.05f;
+            gMobs[s].sprayIndex = 0.0f;
+            gMobs[s].shotTimer = 0.0f;
             if (fence) {
                 host.traceFirst = HostHit();
                 host.traceFirst.hit = true;
@@ -7136,15 +7205,15 @@ static void TestCsRules() {
             host.traceFirstOn = false;
             return host.playerHurt;
         };
-        float diffSum = 0.0f;
         for (int seed = 777; seed <= 779; ++seed) {
             const float open = runPair(false, seed);
             const float fenced = runPair(true, seed);
-            CHECK(open > 0.0f, "the open-line pair run lands its fire (%.1f)", open);
-            diffSum += open - fenced;
+            CHECK(open > 4.0f, "the open-line pair run lands its one shot (%.1f)", open);
+            const float share = open > 0.0f ? (open - fenced) / open : 0.0f;
+            CHECK(share > 0.30f && share < 0.55f,
+                  "one fence in the shot's line costs that shot 40%% of itself, no more, no less (pair %d: %.2f of %.1f)",
+                  seed, share, open);
         }
-        CHECK(diffSum >= 2.0f && diffSum <= 9.2f,
-              "one fence in one shot's line costs that shot 40%% of itself, no more, no less (summed discount %.2f)", diffSum);
     }
     {
         // CS's footstep law: a creeping man is silent; a jogging man is news
@@ -7191,8 +7260,8 @@ static void TestSmartPack() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none); // the fight is on
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none); // the fight is on
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none);
         const float hurt0 = host.playerHurt;
         host.vehBoxOn = true;
         host.vehBoxCentre = Vec3(0.5f, 8.5f, 10.4f);
@@ -7220,7 +7289,7 @@ static void TestSmartPack() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
         RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none);
         host.vehBoxOn = true;
         host.vehBoxCentre = Vec3(0.5f, 8.5f, 10.4f);
@@ -7246,7 +7315,7 @@ static void TestSmartPack() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
         RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none);
         const float hurt0 = host.playerHurt;
         host.traceScriptOn = true;
@@ -7281,7 +7350,7 @@ static void TestSmartPack() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 30.5f, 11.0f), none);
         float idleRun = 0.0f, idleWorst = 0.0f;
         for (int i = 0; i < 240; ++i) { // 12 s against a man standing his ground at 30 m
             MobsTick(0.05f, Vec3(0.5f, 30.5f, 11.0f), 0, true, none);
@@ -7298,7 +7367,7 @@ static void TestSmartPack() {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 30.5f, 11.0f), none);
         RunMobsB(0.6f, Vec3(0.5f, 30.5f, 11.0f), none); // engaged at 30 m
         gMobs[s].mag = 0;
         gMobs[s].burstShots = 0;
@@ -7376,8 +7445,8 @@ static void TestSmartPack() {
         host.wallHalf = 10.0f; // the wall spans x 5..25: its ends are NOT the columns
         const int s = SpawnMob(MOB_SOLDIER, Vec3(15.0f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(20.0f, 4.5f, 11.0f), none); // seen south of the wall: the fight is on
+        ProvokeByAim(host, Vec3(20.0f, 4.5f, 11.0f), none);
+        RunMobsB(0.6f, Vec3(20.0f, 4.5f, 11.0f), none); // south of the wall: the fight is on
         CHECK(gMobs[s].bossState == 2, "the chase starts as a fight (state %d)", gMobs[s].bossState);
         // the man breaks away to the north street and runs west, shooting as he goes
         float px = 25.0f;
@@ -7444,9 +7513,9 @@ static void TestSmartPack() {
         extendFloor();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(20.0f, 4.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
         float px = 15.0f;
         host.velocity = Vec3(3.5f, 0, 0);
+        ProvokeByAim(host, Vec3(px, 20.0f, 11.0f), none);
         RunMobsB(0.6f, Vec3(px, 20.0f, 11.0f), none);
         NotePlayerShot(Vec3(px, 20.0f, 11.0f), 70.0f);
         const int attempts0 = NavRouteAttempts();
@@ -7486,7 +7555,7 @@ static void TestSmartPack() {
         CHECK(NavReady(), "the graph is still loaded for the retreat");
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
+        ProvokeByAim(host, Vec3(0.5f, 24.5f, 11.0f), none);
         RunMobsB(0.4f, Vec3(0.5f, 24.5f, 11.0f), none); // seen far north: lastSeen is the north street
         gMobs[s].health = 1200.0f; // under the wounded line of the deeper pool
         gMobs[s].hurt = 0.0f;
@@ -7496,6 +7565,10 @@ static void TestSmartPack() {
         host.wallHalf = 7.0f; // the man is behind it now, unreachable
         bool snapped = false;
         float bestD = 1e9f, maxY = -1e9f;
+        // the retreat is measured from where it begins: the law's ignition
+        // is 1.1 s of live combat first, and a fighting man closes distance
+        // in it - he starts this fall-back already north of his post
+        const float retreatStartY = gMobs[s].pos.y;
         for (int i = 0; i < 140; ++i) {
             MobsTick(0.05f, Vec3(0.5f, 24.5f, 11.0f), 0, true, none);
             if ((gMobs[s].chaseDest - Vec3(0, -14, 10)).Length() < 0.6f)
@@ -7507,8 +7580,9 @@ static void TestSmartPack() {
         CHECK(bestD < 2.0f, "and he arrives on it (closest %.1f m)", bestD);
         // his prime momentum may slide him a couple of metres north on the
         // first second; what must never happen is a deliberate walk back
-        // toward the threat (the old hunt flip carried him to y=13.6)
-        CHECK(maxY < 6.5f, "he never walks back toward the threat while falling back (max y %.1f)", maxY);
+        // toward the threat (the old hunt flip carried him 13 m north)
+        CHECK(maxY < retreatStartY + 2.0f,
+              "he never walks back toward the threat while falling back (max y %.1f from %.1f)", maxY, retreatStartY);
         host.wall = false;
         UnloadNavGraph();
     }
@@ -7518,14 +7592,18 @@ static void TestSmartPack() {
         WideStage();
         extendFloor(); // the hunt walks the north street too: it needs its floor
         // ...and its search legs reach a full block past the street in every
-        // direction - they need theirs too, or the hunter walks off the world
+        // direction - they need theirs too, or the hunter walks off the world.
+        // (The fix round's exit-line search reaches ~55 m past the last seen
+        // point, so the floor now runs to y=130: in the real city there is
+        // ground under every street he sweeps - a test floor that ends at 48
+        // dropped him through the world mid-sweep, a fixture's lie, not his.)
         for (int x = -40; x < 40; ++x)
-            for (int y = 15; y < 48; ++y)
+            for (int y = 15; y < 130; ++y)
                 gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
-        gMobs[s].negotiated = true;
-        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none); // seen: the fight is on
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none); // the law's ignition
+        RunMobsB(0.6f, Vec3(0.5f, 20.5f, 11.0f), none); // the fight is on
         host.wall = true;
         host.wallC = Vec3(0.5f, 10.5f, 10);
         host.wallDir = Vec3(1, 0, 0);
@@ -7574,6 +7652,306 @@ static int InspectWorldFile(const char* path) {
            ours ? "a world file" : "NOT a world file", info.version, info.blocksOk ? "ok" : "INCOMPLETE",
            info.hostPart ? "follows" : "none", (unsigned)gWorld.chunks.size(), items, gSurvival.food, gSurvival.xpLevel);
     return ours && info.blocksOk ? 0 : 1;
+}
+
+// ================================================================ the fix round of 2026-11-07
+// The eye verdict on the installed smart pack + rulebook build, two counts:
+// (1) "he still has dumb in him - he saw me, he fired, and then he walked
+// away from me": a live fight broke at range, the prey ran quiet past
+// gunshot-hearing, the hunt's senses-only stand-down called the trail cold
+// seconds later, and a primed patrol walked him off at walk speed - wearing
+// combat's last crouch in his torso the whole way, because crouch was
+// written in combat and cleared by nobody.
+// (2) "when I get into a car he loses me, as if I turned invisible": the
+// senses priced the target's own car as a wall on the line to his seat.
+// These sims reproduce both shapes and pin the fixes.
+static void LongStage() {
+    BlockStage();
+    for (int x = -15; x <= 15; ++x)
+        for (int y = -15; y <= 175; ++y)
+            gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+    MobsClear();
+    ResetSurvival();
+    gGame = GameState();
+    gRules = GameRules();
+    gPlayed.clear();
+}
+
+static void TestBossFixRound() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // ---- the warm trail: a fight breaks at range, the prey runs silent
+    // past hearing, and the hunt must follow his exit line - never decay
+    // into a patrol, and never travel crouched
+    {
+        LongStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 35.5f, 11.0f), none); // the law's ignition
+        bool sawCrouchInCombat = false;
+        for (int i = 0; i < 80; ++i) { // 4 s of open fight at 35 m
+            MobsTick(0.05f, Vec3(0.5f, 35.5f, 11.0f), 0, true, none);
+            if (gMobs[s].crouch && gMobs[s].bossState == 2)
+                sawCrouchInCombat = true;
+        }
+        CHECK(gMobs[s].bossState == 2 && host.playerHurt > 0.0f,
+              "the warm-trail sim opens with a real fight (state %d, hurt %.1f)", gMobs[s].bossState, host.playerHurt);
+        CHECK(gMobs[s].fightWarmT > 30.0f, "and the exchange has stamped the trail warm (%.0f s left)",
+              gMobs[s].fightWarmT);
+        CHECK(sawCrouchInCombat, "and he really crouched in that fight (the travel ban below has teeth)");
+        // the break: north, behind a wall at y=44, on to y=120 - hidden,
+        // silent, and well past the 70 m his ears give a gunshot
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 44.0f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        float py = 35.5f;
+        host.velocity = Vec3(0, 5.5f, 0);
+        bool stoodDownWarm = false, crouchTravel = false;
+        float maxY = gMobs[s].pos.y;
+        for (int i = 0; i < 3000; ++i) { // 150 s: the sweep has streets to walk
+            const float dt = 0.05f;
+            if (py < 120.0f)
+                py = std::min(120.0f, py + 5.5f * dt);
+            else
+                host.velocity = Vec3();
+            MobsTick(dt, Vec3(0.5f, py, 11.0f), 0, true, none);
+            const Mob& b = gMobs[s];
+            if (b.fightWarmT > 0.0f && (b.bossState == 4 || b.bossState == 0))
+                stoodDownWarm = true;
+            if (b.crouch && b.bossState != 2)
+                crouchTravel = true;
+            maxY = std::max(maxY, b.pos.y);
+        }
+        CHECK(!stoodDownWarm, "while the trail is warm he never decays into patrol or calm");
+        CHECK(!crouchTravel, "and he never travels crouched - crouch is a shooting stance, not a gait");
+        CHECK(maxY > 90.0f, "the hunt sweeps the prey's exit line, not a disc around the stale spot (reached y %.0f)",
+              maxY);
+        CHECK(gMobs[s].bossState == 2 || gMobs[s].bossState == 3,
+              "and at the end he is still on the man - fighting or hunting (state %d)", gMobs[s].bossState);
+        host.wall = false;
+        host.velocity = Vec3();
+    }
+    // ---- the driver: getting into a car must not break the lock, and
+    // getting out must not either - his senses read the driver through his
+    // own glass, not against his own bodywork
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none); // the law's ignition
+        RunMobsB(2.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        CHECK(gMobs[s].bossState == 2 && host.playerHurt > 0.0f,
+              "the driver sim opens with a fight on foot (state %d)", gMobs[s].bossState);
+        host.vehicle = TestHost::kCarNumber;
+        host.vehPoseOn = true;
+        host.vehCentre = Vec3(0.5f, 20.5f, 10.6f);
+        host.vehSeat = Vec3(0.5f, 20.5f, 11.35f);
+        host.vehFwd = Vec3(0, 1, 0);
+        host.vehVel = Vec3();
+        host.player = Vec3(0.5f, 20.5f, 11.35f);
+        host.ownCarBlocks = true; // his own bodywork now stands on every plain line to his seat
+        const float hurtIn = host.playerHurt;
+        bool lockHeld = true;
+        float worstLost = 0.0f;
+        for (int i = 0; i < 120; ++i) { // 6 s seated
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.35f), 0, true, none);
+            if (gMobs[s].bossState != 2)
+                lockHeld = false;
+            worstLost = std::max(worstLost, gMobs[s].lostT);
+        }
+        CHECK(lockHeld && worstLost < 0.6f,
+              "seated, he is still seen: the lock never breaks (worst lost %.2f s)", worstLost);
+        CHECK(host.playerHurt > hurtIn + 1.0f,
+              "and the fire continues at the driver through his glass (hurt %.1f -> %.1f)", hurtIn, host.playerHurt);
+        host.vehicle = -1;
+        host.vehPoseOn = false;
+        host.ownCarBlocks = false;
+        host.player = Vec3(0.5f, 20.5f, 11.0f);
+        const float hurtOut = host.playerHurt;
+        bool lockHeld2 = true;
+        for (int i = 0; i < 60; ++i) { // 3 s back on foot
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.0f), 0, true, none);
+            if (gMobs[s].bossState != 2)
+                lockHeld2 = false;
+        }
+        CHECK(lockHeld2 && host.playerHurt > hurtOut,
+              "and stepping out changes nothing: still locked, still firing (hurt %.1f -> %.1f)",
+              hurtOut, host.playerHurt);
+    }
+    // ---- the ram: priced in the core, answered at once - and a DODGED
+    // attempt by the player's car still makes the driver his enemy, while
+    // the street's own traffic earns only the dodge
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        MobVehicleHit(s, 25.0f, Vec3(0.5f, -3.5f, 10.0f), true);
+        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2 && gMobs[s].ramT > 0.5f && gMobs[s].detect >= 1.0f,
+              "rammed by the player: full detection, a visible knockdown, war at once");
+        CHECK(Near(gMobs[s].health, 3300.0f, 2.0f), "and the ram's health price is the capped share (%.0f)",
+              gMobs[s].health);
+        WideStage();
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s2, 0.0f);
+        RunMobsB(0.2f, Vec3(90.5f, 0.5f, 11.0f), none); // settle: a dodge needs his feet on the ground
+        MobVehicleThreat(s2, Vec3(0.5f, -8.5f, 10.0f), Vec3(0, 12.0f, 0), true);
+        CHECK(gMobs[s2].aggro && gMobs[s2].bossState == 2 && gMobs[s2].dodgeT > 0.0f,
+              "a car driven straight at him: he dodges - and the driver is his enemy anyway. A missed ram is still a ram");
+        WideStage();
+        const int s3 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s3, 0.0f);
+        RunMobsB(0.2f, Vec3(90.5f, 0.5f, 11.0f), none); // settle, as above
+        MobVehicleThreat(s3, Vec3(0.5f, -8.5f, 10.0f), Vec3(0, 12.0f, 0), false);
+        CHECK(!gMobs[s3].aggro && gMobs[s3].dodgeT > 0.0f,
+              "the street's own traffic earns the dodge and nothing more");
+    }
+    // ---- damage he can feel: the channels the bridge drives, the feedback
+    // scaled by the blow, and the kill cost in the player's own terms
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        int bullets = 0; // a rifle-class hit on his perception body, relayed
+        while (gMobs[s].death < 0.0f && bullets < 400) {
+            MobProxyDamage(s, 60.0f, Vec3(0.5f, 5.5f, 11.0f), -2);
+            ++bullets;
+        }
+        CHECK(gMobs[s].death >= 0.0f && bullets >= 100 && bullets <= 115,
+              "he dies - to %d relayed rifle hits, about three and a half magazines of them", bullets);
+        WideStage();
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        int punches = 0; // a fist's own weight, through the same door
+        while (gMobs[s2].death < 0.0f && punches < 900) {
+            MobProxyDamage(s2, 12.0f, Vec3(0.5f, 2.5f, 11.0f), -2);
+            ++punches;
+        }
+        CHECK(gMobs[s2].death >= 0.0f && punches >= 500 && punches <= 570,
+              "and he dies to fists too - %d punches of patient work", punches);
+        WideStage();
+        const int s3 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s3, 0.0f);
+        gPlayed.clear();
+        MobHurt(s3, 400.0f, Vec3(0.5f, 5.5f, 11.0f), 0.0f);
+        CHECK(gMobs[s3].staggerT > 0.2f && gMobs[s3].flinchT >= 0.4f,
+              "a heavy hit staggers him: no fire, barely a step, while it runs (stagger %.2f s)", gMobs[s3].staggerT);
+        CHECK(Heard(SND_BOSS_HURT) >= 1, "and a hit that size is always heard - no throttle swallows it");
+        WideStage();
+        const int s4 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        MobHurt(s4, 20.0f, Vec3(0.5f, 5.5f, 11.0f), 0.0f);
+        CHECK(gMobs[s4].staggerT == 0.0f, "a light hit earns a flinch, not a stagger");
+    }
+    // ---- the grenade under CleanSA: a visible arc (as data), a surface
+    // detonation through the host, and the CS curve on the core channel
+    {
+        LongStage();
+        gRules.cleanSA = true;
+        host.groundMode = 1;     // the bridge's collision ground, scripted
+        host.groundZVal = 10.0f; // LongStage's street level
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
+        host.wall = true; // the target digs in: the flush comes due
+        host.wallC = Vec3(0.5f, 10.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        const int gren0 = Heard(SND_BOSS_GREN1);
+        bool thrown = false;
+        for (int i = 0; i < 400 && !thrown; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.0f), 0, true, none);
+            if (!gBossNades.empty())
+                thrown = true;
+        }
+        CHECK(thrown, "under CleanSA a dug-in target is still answered with a grenade");
+        CHECK(Heard(SND_BOSS_GREN1) > gren0, "and the throw is called out - his grenade line fires");
+        float arcPeak = 0.0f, minZ = 1e9f;
+        Vec3 rest;
+        bool landed = false;
+        const int blasts0 = host.explosions;
+        host.playerHurt = 0.0f;
+        for (int i = 0; i < 200 && host.explosions == blasts0; ++i) {
+            if (!gBossNades.empty()) {
+                const BossNade& n = gBossNades[0];
+                arcPeak = std::max(arcPeak, n.pos.z);
+                minZ = std::min(minZ, n.pos.z);
+                if (n.vel.LengthSq() == 0.0f) {
+                    landed = true;
+                    rest = n.pos;
+                }
+            }
+            const Vec3 pp = landed ? rest + Vec3(1.0f, 0.0f, 1.0f) : Vec3(0.5f, 20.5f, 11.0f);
+            MobsTick(0.05f, pp, 0, true, none);
+        }
+        CHECK(landed && arcPeak > 11.5f, "the flight is a real arc (peak %.1f m)", arcPeak);
+        CHECK(minZ >= 9.99f, "and it never sinks under the street (lowest %.2f m)", minZ);
+        CHECK(host.explosions > blasts0, "the detonation fires - through the host, on the surface");
+        const float expect = CsHeHh(1.41421f, 5.5f, 96.0f, false, 0.0f, nullptr);
+        CHECK(Near(host.playerHurt, expect, 0.6f), "and the hurt is the CS curve at the parked distance (%.1f vs %.1f)",
+              host.playerHurt, expect);
+        host.wall = false;
+        host.groundMode = 0;
+        gRules.cleanSA = false;
+    }
+}
+
+// The engagement law itself (the user's order, 2026-11-07): by default the
+// boss has NOTHING to do with the player - no warnings, no commands, no
+// interest. Three provocations, and only those, make the player his enemy.
+static void TestBossAggroLaw() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    {
+        WideStage();
+        gPlayed.clear();
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        RunMobsB(2.0f, Vec3(0.5f, 8.5f, 11.0f), none);    // walks up
+        RunMobsB(3.0f, Vec3(0.5f, 3.5f, 11.0f), none);    // stands at 3 m
+        NotePlayerShot(Vec3(0.5f, -30.5f, 11.0f), 70.0f); // shots, away from him
+        RunMobsB(2.0f, Vec3(0.5f, 3.5f, 11.0f), none);
+        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0 && host.playerHurt == 0.0f,
+              "a calm player is scenery: no enemy made, no engagement, not a shot fired at him");
+        CHECK(Heard(SND_BOSS_CMD1) + Heard(SND_BOSS_CMD2) + Heard(SND_BOSS_CMD3) == 0,
+              "and no order is ever shouted at a calm man");
+        host.aimingAtHim = true; // a passing sweep of the crosshair: not a provocation
+        RunMobsB(0.3f, Vec3(0.5f, 3.5f, 11.0f), none);
+        host.aimingAtHim = false;
+        RunMobsB(0.5f, Vec3(0.5f, 3.5f, 11.0f), none);
+        CHECK(!gMobs[s].aggro, "a 0.3 s sweep across him does not trip the law - the line is 0.45 s");
+        host.aimingAtHim = true; // held aim: the provocation itself
+        RunMobsB(0.6f, Vec3(0.5f, 3.5f, 11.0f), none);
+        host.aimingAtHim = false;
+        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2, "but a weapon held on him makes the player his enemy");
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        MobProxyDamage(s, 12.0f, Vec3(0.5f, 2.5f, 11.0f), -2); // one fist, through his perception body
+        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2, "and one punch is enough: damage dealt is an enemy made");
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 12.5f, 11.0f), none);
+        CHECK(gMobs[s].aggro, "provoked, he is an enemy");
+        gGame.deathTime = 0.5f; // the player dies
+        RunMobsB(0.2f, Vec3(0.5f, 12.5f, 11.0f), none);
+        gGame.deathTime = -1.0f; // and respawns
+        RunMobsB(1.0f, Vec3(0.5f, 12.5f, 11.0f), none);
+        CHECK(!gMobs[s].aggro && gMobs[s].bossState == 0,
+              "dead and respawned, he is a stranger again - death wipes the slate clean");
+        gGame.deathTime = -1.0f;
+    }
 }
 
 int main(int argc, char** argv) {
@@ -7723,6 +8101,8 @@ int main(int argc, char** argv) {
     TestBoss();
     TestSmartPack();
     TestCsRules();
+    TestBossFixRound();
+    TestBossAggroLaw();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
     TestBossDeathReset();

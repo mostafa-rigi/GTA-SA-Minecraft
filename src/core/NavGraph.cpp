@@ -175,9 +175,22 @@ bool NavRouteBudget(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, in
     if (avoidNode == start || avoidNode == goal)
         avoidNode = -1; // a route's own ends are never banned
     const int n = (int)gNodes.size();
-    std::vector<float> g(n, 1e18f);
-    std::vector<int> came(n, -1);
-    std::vector<char> closed(n, 0);
+    // the search's scratch lives between calls: three node-sized arrays were
+    // allocated and first-touched on EVERY route, and the very first route of
+    // a session paid the whole pile at once inside one brain frame (a 111 ms
+    // spawn tick was measured in the game). Reused, a route costs its search
+    // and nothing else. The search is never re-entered, so sharing is safe.
+    static std::vector<float> g;
+    static std::vector<int> came;
+    static std::vector<char> closed;
+    if ((int)g.size() < n) {
+        g.resize(n);
+        came.resize(n);
+        closed.resize(n);
+    }
+    std::fill(g.begin(), g.begin() + n, 1e18f);
+    std::fill(came.begin(), came.begin() + n, -1);
+    std::fill(closed.begin(), closed.begin() + n, (char)0);
     typedef std::pair<float, int> QN;
     std::priority_queue<QN, std::vector<QN>, std::greater<QN>> open;
     g[start] = 0.0f;

@@ -81,6 +81,10 @@ struct Host {
     virtual bool CapAt(const Int3& c, float* top) { return false; }          // a partly filled cell, solid up to *top
     virtual bool GroundBelow(const Vec3& from, float maxDrop, float* z) { return false; } // its own ground under a point
     virtual bool LineBlocked(const Vec3& a, const Vec3& b) { return false; } // a wall, a car, a prop between two points
+    // the same line, but one vehicle does not count as standing in it: a man
+    // asking "can I see the driver of THAT car" must not be answered by the
+    // car's own bodywork, the way the shot trace already ignores a vehicle
+    virtual bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int vehRef) { return LineBlocked(a, b); }
     virtual bool WaterLevel(const Vec3& at, float* level) { return false; }  // its own water (sea, pools) at that spot
     virtual bool FlammableUnder(const Int3& c) { return false; }             // bushes, dry grass under the cell
     // earth of its ground under a point (sand too when asked); *z: how high it is

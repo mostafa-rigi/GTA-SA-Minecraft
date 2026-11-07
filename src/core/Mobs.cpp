@@ -909,6 +909,15 @@ struct BossTune {
     // I - presence
     float idleVoiceMin, idleVoiceMax; // an idle radio line every 45-90 s on post
     float returnRange;   // idle and farther than this from Grove: he routes home
+    // H - the warm trail (the fix round after the 2026-11-07 eye verdict)
+    float warmSeconds;   // a firefight stays warm this long after the last exchange
+    float warmArea;      // ...and the hunt may not stand down while the prey is inside this radius
+    // the engagement law + damage feedback (the user's order, 2026-11-07)
+    float aimAggroSeconds; // a weapon pointed at him this long makes the player his enemy
+    float staggerHit;      // a single hit (post-armour half hearts) at or above this staggers him
+    float staggerSeconds;  // ...for this long: no fire, barely any movement
+    float hurtVoiceHit;    // a single hit at or above this always earns a hurt line,
+                           // whatever the voice throttle says
 };
 const BossTune kBoss = {
     4000.0f, 1200.0f, 0.35f,                   // body (smart pack: a deeper pool, same structure)
@@ -925,7 +934,17 @@ const BossTune kBoss = {
     0.12f, 9.0f, 2.0f, 0.5f,                   // the settle + vehicle damage (smart pack)
     1.6f, 4.0f, 60.0f,                         // talk first
     45.0f, 90.0f, 150.0f,                      // presence
+    60.0f, 175.0f,                             // the warm trail: a minute of memory, a wide hunt area
+    0.45f, 150.0f, 0.35f, 100.0f,              // the engagement law + damage feedback
 };
+
+// Talk-first (workstream G) belongs to the future GUARD step - a posted
+// soldier at his checkpoint, under orders. The free-roam boss lives under
+// the engagement law the user ordered on 2026-11-07: no warnings, no
+// commands, nothing to do with the player until the player provokes him.
+// The command machinery stays in the tree for the guard step, behind this
+// switch, OFF - there must be no live path that shouts orders at a calm man.
+constexpr bool kGuardTalkEnabled = false;
 
 
 
@@ -1327,7 +1346,7 @@ Vec3 SoldierAdvance(Mob& m, const Vec3& want, float dt) {
 // shoulders peek over a wall is a third, and a third still fills the meter,
 // only slower. The cone is three-dimensional (roofs and jetpacks are in it),
 // the range is the tune's, and night trades range for hearing (kBoss).
-float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& seat, bool* inCentre) {
+float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& seat, int vehRef, bool* inCentre) {
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
     const Vec3 mid = inVehicle ? seat : feet + Vec3(0, 0, 0.95f);
     Vec3 to = mid - eye;
@@ -1350,7 +1369,13 @@ float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& 
     if (inCentre)
         *inCentre = angH <= kBoss.centreHalfDeg;
     if (inVehicle)
-        return TheHost().LineBlocked(eye, seat) ? 0.0f : 0.8f; // a driver is a partial target by nature
+        // a driver is a partial target by nature - and he is judged through
+        // his own glass, not against his own bodywork: the plain line query
+        // counts the target's car as a wall standing on the line, so a seated
+        // man went invisible the moment he got in (the eye verdict of
+        // 2026-11-07). This line runs with his vehicle ignored, the shot
+        // trace's own trick.
+        return TheHost().LineBlockedSkipVeh(eye, seat, vehRef) ? 0.0f : 0.8f;
     int clear = 0;
     const float hs[3] = { 0.25f, 0.95f, 1.62f };
     for (float h : hs)
@@ -1397,6 +1422,8 @@ bool BossWalkToward(Mob& m, const Vec3& goal, float speedWanted, float dt) {
 // This is the CALM walker (patrol, return, the talk-first approach): its
 // repath policy is the loose one. Combat and the hunt use BossChaseTo below.
 bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist) {
+    if (m.staggerT > 0.0f)
+        speedWanted *= 0.3f; // a staggered man stumbles, he does not travel
     Vec3 toDest = dest - m.pos;
     toDest.z = 0.0f;
     const float distDest = toDest.Length();
@@ -1409,7 +1436,12 @@ bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriv
         m.routeT -= dt;
         if (m.route.empty() || m.routeIdx >= (int)m.route.size() || m.routeT <= 0.0f ||
             (m.routeGoal - dest).LengthSq() > 9.0f) {
-            if (NavRoute(m.pos, dest, &m.route)) {
+            // the calm walker's route is budget-capped like the combat one:
+            // the unbounded search could eat a whole frame on a far goal
+            // (the spawn tick's 111 ms), and a route the budget cannot find
+            // is simply retried in a second while the probe walks - the
+            // budget covers every measured Los Santos route anyway
+            if (NavRouteBudget(m.pos, dest, &m.route, kBoss.repathBudget, -1)) {
                 m.routeIdx = 0;
                 m.routeGoal = dest;
                 m.routeT = 2.5f;
@@ -1457,6 +1489,11 @@ bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriv
 //     same spot the pocket's nearest node is banned from that repath.
 // The probe keeps only micro-obstacles, through BossWalkToward.
 bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriveDist) {
+    if (m.staggerT > 0.0f)
+        speedWanted *= 0.3f; // a staggered man stumbles, he does not travel
+    else if (m.health < kBoss.health * 0.5f)
+        speedWanted *= 0.92f; // decline, visible before the wounded threshold:
+                              // a man under half health runs a step slower
     m.chaseDest = dest;
     Vec3 toDest = dest - m.pos;
     toDest.z = 0.0f;
@@ -1552,6 +1589,34 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
 // he does about them.
 enum BossState { BS_CALM = 0, BS_COMMAND = 1, BS_COMBAT = 2, BS_HUNT = 3, BS_SUSPICIOUS = 4 };
 
+static const char* BossStateName(int s) {
+    switch (s) {
+    case BS_COMMAND: return "command";
+    case BS_COMBAT: return "combat";
+    case BS_HUNT: return "hunt";
+    case BS_SUSPICIOUS: return "suspicious";
+    default: return "calm";
+    }
+}
+
+// The point a hunt runs to: the last seen spot, led by the prey's tracked
+// velocity for as long as the run itself will take (plus the time he has
+// already been lost) - capped at six seconds of travel, so a stale velocity
+// cannot throw the point across the city. The combat-to-hunt seam and every
+// hunt renewal share this one point, so a hunt never restarts colder than
+// the chase it continues. (The shipped lead was a flat 2.5 s off the live
+// distance: against a man who kept running after breaking the line, the
+// boss arrived at where the prey had been a breath after losing him -
+// and then searched a twelve-metre disc around that stale spot.)
+static Vec3 BossHuntDest(const Mob& m) {
+    Vec3 vel = m.preyVel;
+    if (std::sqrt(vel.x * vel.x + vel.y * vel.y) < 0.5f)
+        vel = m.exitDir * 3.0f; // no tracked velocity: a man leaving at a jog, the way he was heading
+    const float toSeen = (m.lastSeen - m.pos).Length();
+    const float lead = Clamp(m.lostT + toSeen / kBoss.chaseSpeed, 0.0f, 6.0f);
+    return m.lastSeen + vel * lead;
+}
+
 bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
                   const std::vector<BeingInfo>* beings) {
     const MobType& t = kTypes[m.kind];
@@ -1560,6 +1625,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.voiceCd = std::max(0.0f, m.voiceCd - dt);
     m.hurtSayT = std::max(0.0f, m.hurtSayT - dt);
     m.flinchT = std::max(0.0f, m.flinchT - dt);
+    m.staggerT = std::max(0.0f, m.staggerT - dt);
     m.attackerFresh = std::max(0.0f, m.attackerFresh - dt);
     m.playerHostileT = std::max(0.0f, m.playerHostileT - dt);
     m.primedT = std::max(0.0f, m.primedT - dt);
@@ -1572,6 +1638,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.loudT = std::min(99.0f, m.loudT + dt);
     m.firePlantT = std::max(0.0f, m.firePlantT - dt);
     m.fallbackBanT = std::max(0.0f, m.fallbackBanT - dt);
+    m.fightWarmT = std::max(0.0f, m.fightWarmT - dt);
     // Counter-Strike's recoil recovery: while the trigger rests, the spray
     // index walks back down (fast, the rifles' own habit) and a spray that
     // fully recovers is over - the next one sways on a fresh seed, the way
@@ -1592,8 +1659,11 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.moveSpeed = 0.0f;
     if (!m.onGround)
         m.airT += dt;
-    if (m.alerted && m.bossState == BS_CALM)
-        m.bossState = BS_SUSPICIOUS; // a hurt or a noise leaves him primed, not calm
+    if (m.alerted && m.bossState == BS_CALM && m.fightStarted)
+        m.bossState = BS_SUSPICIOUS; // a hurt or a noise leaves a man who has
+                                     // fought primed, not calm - but under the
+                                     // engagement law an unprovoked stranger's
+                                     // sight or sound alone never promotes him
 
     const bool playerAlive = gGame.deathTime < 0.0f;
     // The kill ends the fight - the law of this world: death resets only the
@@ -1612,11 +1682,18 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         Log("boss diag: player death edge (boss in state %d)", m.bossState);
     if (!wasAlive && playerAlive)
         Log("boss diag: player respawn edge - alive again; the boss is on post, primed");
-    if (wasAlive && !playerAlive && m.bossState >= BS_COMMAND) {
-        m.bossState = BS_SUSPICIOUS;
+    if (wasAlive && !playerAlive) {
+        // the engagement law: death pays EVERYTHING off - the respawned man
+        // is a stranger again until he provokes him anew.
+        m.bossState = BS_CALM;
+        m.stateWhy = "the player died: the pressure resets, the slate is clean";
         m.fightStarted = false;
-        m.detect = 0.45f;  // primed, not blind: the compliance stand-down's own level
-        m.primedT = 60.0f; // ...and its own minute of doubled sharpness
+        m.aggro = false;
+        m.aimAggroT = 0.0f;
+        m.playerHostileT = 0.0f;
+        m.detect = 0.0f;
+        m.primedT = 60.0f; // a veteran's sharpness only: it can speed a NEW
+                           // fight's detection, it cannot start one
         m.cmdPhase = 0;
         m.cmdT = 0.0f;
         m.huntT = 0.0f;
@@ -1637,6 +1714,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         m.tgtLockT = 0.0f;
         m.lostT = 0.0f;
         m.targetVisT = 0.0f;
+        m.fightWarmT = 0.0f; // death pays the fight off in full: no warmth survives it
     }
     m.sawPlayerAlive = playerAlive;
     const int playerVeh = TheHost().PlayerVehicle();
@@ -1651,7 +1729,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     bool inCentre = false;
     float frac = 0.0f;
     if (playerAlive)
-        frac = BossVisibleFraction(m, playerFeet, inVeh && vehPose, vehSeat, &inCentre);
+        frac = BossVisibleFraction(m, playerFeet, inVeh && vehPose, vehSeat, playerVeh, &inCentre);
     const bool seeNow = frac > 0.0f;
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
     Vec3 toPlayer = playerFeet - m.pos;
@@ -1664,6 +1742,34 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         const float dot = distPlayer > 0.01f ? (fwd.x * toPlayer.x + fwd.y * toPlayer.y) / distPlayer : 1.0f;
         if (dot > -0.09f) // inside a wide 190-degree... no: inside the cone's shoulders (95 deg half)
             aimedAt = TheHost().PlayerAimingAt(m.pos + Vec3(0, 0, 1.2f), 1.3f);
+    }
+    // ---------------- the engagement law: being aimed at is a provocation
+    // A weapon pointed at him - from any side, at any range the game's own
+    // aiming flag can see - held for a breath (a passing crosshair sweep
+    // does not count) makes the player his enemy. Checked directly here,
+    // not through the facing-gated aimedAt above: the provocation is the
+    // player's act, not the boss's field of view.
+    if (!m.aggro && playerAlive && distPlayer < 120.0f &&
+        TheHost().PlayerAimingAt(m.pos + Vec3(0, 0, 1.2f), 1.3f)) {
+        m.aimAggroT += dt;
+        if (m.aimAggroT >= kBoss.aimAggroSeconds) {
+            m.aggro = true;
+            m.fightStarted = true;
+            m.negotiated = true;
+            m.detect = 1.0f;
+            m.playerHostileT = 6.0f;
+            m.fightWarmT = kBoss.warmSeconds;
+            m.lastSeen = playerFeet;
+            m.exitDir = Flat(playerVel);
+            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+                m.bossState = BS_COMBAT;
+                m.stateWhy = "a weapon held on him: the player is an enemy now";
+                m.seenTime = 0.0f;
+                BossSay(m, SAY_SPOTTED, 2.0f);
+            }
+        }
+    } else {
+        m.aimAggroT = std::max(0.0f, m.aimAggroT - dt * 2.0f);
     }
     const float primed = m.primedT > 0.0f ? 2.0f : 1.0f;
     if (seeNow) {
@@ -1678,6 +1784,9 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     }
     if (aimedAt) // a gun pointed at him is fast news on top of everything else
         m.detect = std::min(1.5f, m.detect + kBoss.fillAimMul * primed * dt);
+    if (!m.aggro)
+        m.detect = 0.0f; // the engagement law: an unprovoked player is scenery -
+                         // his eyes may track the man, his meter never fills
     const bool detected = m.detect >= 1.0f;
     // tracking while visible: last seen, his velocity, the hiding-spot memory
     if (seeNow) {
@@ -1686,6 +1795,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             const Vec3 v = (newSeen - m.lastSeen) * (1.0f / dt);
             m.preyVel = m.preyVel * 0.6f + v * 0.4f;
         }
+        if (std::sqrt(m.preyVel.x * m.preyVel.x + m.preyVel.y * m.preyVel.y) > 1.0f)
+            m.exitDir = Flat(m.preyVel); // the way he is leaving, kept current while he is seen
         m.lastSeen = newSeen;
         m.targetVisT = std::min(10.0f, m.targetVisT + dt);
         m.lostT = 0.0f;
@@ -1730,7 +1841,9 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.heardT = 2.5f;
             m.alerted = true;
             m.alertFade = 0.0f;
-            if (m.bossState == BS_CALM) {
+            if (m.bossState == BS_CALM && m.fightStarted) {
+                // a noise makes a man who has already fought look up; a man
+                // at peace does not go investigating strangers (the law)
                 m.bossState = BS_SUSPICIOUS;
                 m.detect = std::max(m.detect, 0.3f);
             }
@@ -1738,6 +1851,12 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 // a shot or a blast while he hunts: he checks where it came from
                 m.lastSeen = s.at;
                 m.searchTime = std::max(m.searchTime, 3.0f);
+                if (m.bossState == BS_HUNT && m.huntPhase == 0) {
+                    // fresher news than the point he is running to: re-project
+                    // the intercept on it now, not on arrival at the old one
+                    m.huntDest = BossHuntDest(m);
+                    m.route.clear();
+                }
             }
         }
     }
@@ -1756,17 +1875,21 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             noiseR = kBoss.hearWalk; // zero: CS's law - a creeping man makes no sound
         if (noiseR > 0.0f) {
             float r = noiseR * hearMul;
-            if (TheHost().LineBlocked(eye, playerPos))
-                r *= 0.45f;
+            const bool muffled = inVeh ? TheHost().LineBlockedSkipVeh(eye, playerPos, playerVeh)
+                                       : TheHost().LineBlocked(eye, playerPos);
+            if (muffled)
+                r *= 0.45f; // walls muffle an engine - the driver's own car does not (the eyes' law)
             if (distPlayer < r) {
                 heardSomething = true;
                 m.heardDir = Flat(toPlayer);
                 m.heardT = std::max(m.heardT, 1.2f);
                 m.alerted = true;
                 m.alertFade = 0.0f;
-                m.detect = std::max(m.detect, 0.3f);
-                if (m.bossState == BS_CALM)
-                    m.bossState = BS_SUSPICIOUS;
+                if (m.fightStarted) {
+                    m.detect = std::max(m.detect, 0.3f);
+                    if (m.bossState == BS_CALM)
+                        m.bossState = BS_SUSPICIOUS;
+                }
             }
         }
     }
@@ -1785,18 +1908,21 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
         if (m.attackerFresh > 0.0f && m.attackerBeing >= 0) {
             m.bossState = BS_COMBAT;
+            m.stateWhy = "the street attacked him";
             m.negotiated = true; // a street fight is not a negotiation
             m.fightStarted = true;
             BossSay(m, SAY_SPOTTED, 2.0f);
         } else if (detected && playerAlive) {
             const bool peaceful = m.playerHostileT <= 0.0f && !aimedAt && playerSpeed < 4.2f;
-            // workstream G, as the user settled it: commands belong to the GUARD
-            // context - his post, a calm first contact, no fight in progress. If
-            // a fight has started (he was hurt, the street provoked him, shots
-            // were heard moments ago) there is NO command phase: he fights.
-            const bool guardContext = !m.fightStarted && m.loudT > 3.0f;
+            // workstream G - SUPERSEDED for the free-roam boss by the user's
+            // order of 2026-11-07: no warnings, no commands, nothing to do
+            // with the player at all until provoked. Commands survive only
+            // behind kGuardTalkEnabled (off) for the future checkpoint step,
+            // whose posted guard is a different context with its own orders.
+            const bool guardContext = kGuardTalkEnabled && !m.fightStarted && m.loudT > 3.0f;
             if (peaceful && !m.negotiated && guardContext) {
                 m.bossState = BS_COMMAND;
+                m.stateWhy = "a guard contact: he talks first";
                 m.cmdPhase = 0;
                 m.cmdT = kBoss.commandWindow;
                 m.holdT = 0.0f;
@@ -1809,6 +1935,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 m.aimRate = 8.0f;
             } else {
                 m.bossState = BS_COMBAT;
+                m.stateWhy = "spotted: the fight is on";
                 m.fightStarted = true;
                 m.seenTime = 0.0f;
                 BossSay(m, SAY_SPOTTED, 2.0f);
@@ -1817,6 +1944,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     }
     if (m.bossState == BS_SUSPICIOUS && m.primedT <= 0.0f && m.detect <= 0.05f && !heardSomething) {
         m.bossState = BS_CALM;
+        m.stateWhy = "all quiet: back to a calm watch";
         m.negotiated = false; // a fresh encounter, a fresh chance to talk
         m.fightStarted = false;
         m.alerted = false;
@@ -1937,6 +2065,13 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // ================================================================ COMBAT
     if (m.bossState == BS_COMBAT) {
         m.seenTime = tgtVisible ? m.seenTime + dt : std::max(0.0f, m.seenTime - dt * 2.0f);
+        // a live firing solution on the player - or the player fighting him
+        // back - keeps the encounter warm. This memory is what the hunt's
+        // stand-down answers to: senses alone call a quiet man at ninety
+        // metres "cold" seconds after a firefight, and the law is that he is
+        // hunted, not forgotten, while the fight is still warm.
+        if (tgt.valid && tgt.being < 0 && (tgtVisible || m.playerHostileT > 0.0f))
+            m.fightWarmT = kBoss.warmSeconds;
         const float healthShare = m.health / kBoss.health;
         const bool wounded = healthShare < kBoss.woundedShare;
         // cover: re-judged twice a second - a point is cover when the threat's
@@ -2137,7 +2272,9 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                         }
                     }
                 }
-                if (m.burstShots > 0) {
+                if (m.burstShots > 0 && m.staggerT <= 0.0f) {
+                    // a staggered man does not fire: the burst waits out the
+                    // rock-back, then resumes where it left off
                     m.shotTimer -= dt;
                     if (m.shotTimer <= 0.0f) {
                         m.shotTimer = m.pistolOut ? kBoss.pistolInterval : kSoldier.shotInterval;
@@ -2202,16 +2339,17 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > 1.2f && gGame.deathTime < 0.0f &&
             !(wounded && m.hasFallback)) {
             m.bossState = BS_HUNT;
+            m.stateWhy = "lost him: the hunt takes the chase";
             m.huntPhase = 0;
             m.huntT = 0.0f;
-            const float lead = Clamp(distPlayer / 6.0f, 0.0f, 2.5f);
-            m.huntDest = m.lastSeen + m.preyVel * lead;
+            m.huntDest = BossHuntDest(m);
             m.route.clear();
             BossSay(m, SAY_LOST, 3.0f);
         }
         if (tgt.being >= 0 && m.attackerFresh <= 0.0f && !attackerInfo) {
             // the street fight is over: back to watching for the real enemy
             m.bossState = BS_SUSPICIOUS;
+            m.stateWhy = "the street fight is over";
             m.primedT = std::max(m.primedT, 20.0f);
             m.hasCover = false;
         }
@@ -2236,6 +2374,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
         if (violation) {
             m.bossState = BS_COMBAT;
+            m.stateWhy = "he did not obey the order";
             m.fightStarted = true;
             m.seenTime = 0.0f;
             BossSay(m, SAY_SPOTTED, 2.0f);
@@ -2248,6 +2387,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             } else if (distPlayer > 16.0f) {
                 // walking away, slowly, is not war: he lets him go, primed
                 m.bossState = BS_SUSPICIOUS;
+                m.stateWhy = "he walked off inside the window: let go, primed";
                 m.primedT = std::max(m.primedT, 30.0f);
                 m.detect = 0.3f;
             }
@@ -2264,6 +2404,7 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                 // encounter has had its one talk (no re-commanding a man who
                 // already obeyed; the primed watch above is what he gets)
                 m.bossState = BS_SUSPICIOUS;
+                m.stateWhy = "he obeyed: stood down";
                 m.negotiated = true;
                 m.primedT = kBoss.primedSeconds;
                 m.detect = 0.35f;
@@ -2290,24 +2431,33 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         // down only when the trail is honestly cold, or on the player's
         // death (handled at the top).
         const bool freshClue = m.heardT > 0.0f || m.loudT < 10.0f;
+        // the warm trail: a firefight inside the last minute (fightWarmT,
+        // stamped by the exchange itself) with the prey still inside the
+        // wider hunt area. Senses alone call this trail cold - a quiet man
+        // past gunshot-hearing range makes no clue at all - and standing
+        // down on that verdict is exactly what walked him away from a live
+        // fight into a slow patrol on 2026-11-07. A hunt now stands down
+        // only when the trail is cold BOTH ways: no clue AND no warmth.
+        const bool warmTrail = m.fightWarmT > 0.0f && playerAlive && distPlayer < kBoss.warmArea;
         auto renewHunt = [&]() {
             m.huntPhase = 0;
             m.huntT = 0.0f;
-            const float lead = Clamp(distPlayer / 6.0f, 0.0f, 2.5f);
-            m.huntDest = m.lastSeen + m.preyVel * lead;
+            m.huntDest = BossHuntDest(m);
             m.route.clear();
             m.searchPts.clear();
             m.searchIdx = 0;
         };
         if (seeNow && m.detect >= 0.85f) {
             m.bossState = BS_COMBAT;
+            m.stateWhy = "found him again";
             m.seenTime = 0.0f;
             BossSay(m, SAY_SPOTTED, 2.0f);
         } else if (m.huntT > kBoss.huntSeconds) {
-            if (freshClue) {
+            if (freshClue || warmTrail) {
                 renewHunt();
             } else {
                 m.bossState = BS_SUSPICIOUS;
+                m.stateWhy = "the trail is honestly cold";
                 m.primedT = std::max(m.primedT, 30.0f);
                 m.detect = std::min(m.detect, 0.3f);
             }
@@ -2315,25 +2465,53 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.aimGoal = m.huntDest + Vec3(0, 0, 1.2f);
             m.aimRate = 6.0f;
             if (!BossChaseTo(m, m.huntDest, kBoss.chaseSpeed, dt, 1.8f)) {
-                // arrived: gather the search - his hiding spots first, then the
-                // street's own corners (graph nodes), then the nearest named place
+                // arrived: gather the search - and the search follows the
+                // EXIT, not the disc. A man who broke the line at speed is
+                // not within twelve metres of where he was seen; he is down
+                // the line he was running. So: first the line itself, swept
+                // forward in strides (snapped onto the street's nodes where
+                // the map offers), then his remembered hiding spots - the
+                // ones down the exit line before the ones behind him - then
+                // the street's corners weighted toward the exit side of the
+                // disc over mere nearness, then the nearest named place.
                 m.searchPts.clear();
-                for (const Vec3& s : gHidingSpots)
-                    if ((s - m.lastSeen).LengthSq() < kBoss.searchRadius * kBoss.searchRadius)
-                        m.searchPts.push_back(s);
+                const Vec3 exitD = m.exitDir;
+                for (float step : { 1.5f, 3.0f, 4.5f }) {
+                    Vec3 pt = m.lastSeen + exitD * (kBoss.searchRadius * step);
+                    if (NavReady()) {
+                        const int n = NavNearest(pt, 15.0f);
+                        Vec3 np;
+                        if (n >= 0 && NavNodePos(n, &np))
+                            pt = np;
+                    }
+                    m.searchPts.push_back(pt);
+                }
+                std::vector<std::pair<float, Vec3>> spots;
+                for (const Vec3& s : gHidingSpots) {
+                    const Vec3 rel = s - m.lastSeen;
+                    if (rel.LengthSq() < kBoss.searchRadius * kBoss.searchRadius * 4.0f)
+                        spots.push_back({ -(rel.x * exitD.x + rel.y * exitD.y), s });
+                }
+                std::sort(spots.begin(), spots.end(),
+                          [](const std::pair<float, Vec3>& a, const std::pair<float, Vec3>& b) { return a.first < b.first; });
+                for (const auto& sp : spots)
+                    if (m.searchPts.size() < 12)
+                        m.searchPts.push_back(sp.second);
                 if (NavReady()) {
                     std::vector<std::pair<float, Vec3>> cand;
                     for (int i = 0; i < NavNodeCount(); ++i) {
                         Vec3 np;
                         if (NavNodePos(i, &np)) {
                             const float d2 = (np - m.lastSeen).LengthSq();
-                            if (d2 < kBoss.searchRadius * kBoss.searchRadius)
-                                cand.push_back({ d2, np });
+                            if (d2 < kBoss.searchRadius * kBoss.searchRadius) {
+                                const float along = (np.x - m.lastSeen.x) * exitD.x + (np.y - m.lastSeen.y) * exitD.y;
+                                cand.push_back({ d2 - along * kBoss.searchRadius, np });
+                            }
                         }
                     }
                     std::sort(cand.begin(), cand.end(),
                               [](const std::pair<float, Vec3>& a, const std::pair<float, Vec3>& b) { return a.first < b.first; });
-                    for (size_t i = 0; i < cand.size() && m.searchPts.size() < 10; ++i)
+                    for (size_t i = 0; i < cand.size() && m.searchPts.size() < 12; ++i)
                         m.searchPts.push_back(cand[i].second);
                 }
                 const int poi = NavNearestPoi(m.lastSeen);
@@ -2348,8 +2526,18 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             if (m.searchIdx >= (int)m.searchPts.size()) {
                 if (freshClue) {
                     renewHunt(); // the points are worked but the trail is warm: back to the intercept
+                } else if (warmTrail) {
+                    // the sweep found nothing and the senses hear nothing -
+                    // but the fight is a minute old at most, the prey is
+                    // still in the area, and the ground just searched is
+                    // ground he is NOT on. The search base marches down the
+                    // exit line and the hunt goes on; it does not become a
+                    // patrol, and it does not re-search the same disc.
+                    m.lastSeen = m.lastSeen + m.exitDir * (kBoss.searchRadius * 2.0f);
+                    renewHunt();
                 } else {
                     m.bossState = BS_SUSPICIOUS;
+                    m.stateWhy = "the trail is honestly cold";
                     m.primedT = std::max(m.primedT, 30.0f);
                     m.detect = std::min(m.detect, 0.3f);
                 }
@@ -2375,23 +2563,42 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
     }
 
+    // ================================================================ the warm guard
+    // No road into a quiet state may be walked while a firefight is warm and
+    // its prey is still in the area - not the street fight's wind-down, not
+    // a command's aftermath, not anything. The hunt resumes at the door of
+    // the quiet states themselves; this is the belt over the hunt's own
+    // stand-down gate. (The death edge clears the warmth, so a respawned
+    // man is never re-hunted for a fight he already paid for.)
+    if ((m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) && m.fightStarted && m.fightWarmT > 0.0f &&
+        playerAlive && distPlayer < kBoss.warmArea) {
+        m.bossState = BS_HUNT;
+        m.stateWhy = "a warm trail does not patrol: the hunt resumes";
+        m.huntPhase = 0;
+        m.huntT = 0.0f;
+        m.huntDest = BossHuntDest(m);
+        m.route.clear();
+    }
+
     // ================================================================ CALM / SUSPICIOUS
     if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
         const bool suspicious = m.bossState == BS_SUSPICIOUS;
-        if (m.patrolPts.empty()) {
+        if ((int)m.patrolPts.size() < 6) {
             // his posts stand on Grove Street's own graph nodes when the map is
-            // loaded - the street he guards, in the street's own geometry
-            for (int k = 0; k < 6; ++k) {
-                const float a = (float)k * 1.0472f + (float)(m.id % 6) * 0.5f;
-                Vec3 post = m.anchor + Vec3(std::cos(a), std::sin(a), 0.0f) * kSoldier.patrolRadius;
-                if (NavReady()) {
-                    const int n = NavNearest(post, 10.0f);
-                    Vec3 np;
-                    if (n >= 0 && NavNodePos(n, &np))
-                        post = np;
-                }
-                m.patrolPts.push_back(post);
+            // loaded - the street he guards, in the street's own geometry. One
+            // post a tick, not all six on his first frame: each snap is a full
+            // scan of the node list, and six of them inside the spawn frame
+            // were part of its measured 111 ms
+            const int k = (int)m.patrolPts.size();
+            const float a = (float)k * 1.0472f + (float)(m.id % 6) * 0.5f;
+            Vec3 post = m.anchor + Vec3(std::cos(a), std::sin(a), 0.0f) * kSoldier.patrolRadius;
+            if (NavReady()) {
+                const int n = NavNearest(post, 10.0f);
+                Vec3 np;
+                if (n >= 0 && NavNodePos(n, &np))
+                    post = np;
             }
+            m.patrolPts.push_back(post);
         }
         Vec3 toAnchor = m.anchor - m.pos;
         toAnchor.z = 0.0f;
@@ -2435,6 +2642,15 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.aimRate = 6.0f;
         }
     }
+
+    // crouch is a shooting stance, never a way of travelling: the field is
+    // written inside combat only, and it is cleared here, at the one door
+    // every non-combat tick passes, so the crouch planted for a last burst
+    // at range cannot ride a hunt or a patrol as a crouched torso - the
+    // slow creep of 2026-11-07 wore exactly that, combat's last value,
+    // never cleared by anyone.
+    if (m.bossState != BS_COMBAT)
+        m.crouch = false;
 
     // ================================================================ his body
     // The aim: in a fight his eyes are on the target at a professional's turn
@@ -2600,6 +2816,21 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
     } else {
         m.stepAcc = 0.0f;
+    }
+    // ---- the transition record (permanent): every state change with the
+    // reason its gate recorded and the facts around it, so the next eye
+    // report can be convicted from the log alone - the pose ring proved
+    // this instrumentation pays for itself the first night it flew, and the
+    // creep of 2026-11-07 was only diagnosable as far as it went because
+    // the ring lacked exactly this line.
+    if (m.bossState != m.stateLogFrom) {
+        if (m.stateLogFrom >= 0)
+            Log("boss state: %s -> %s | why %s | seen %d lost %.1f hunt %.0f/%.0f warm %.0f loud %.0f hp %.2f pdist %.0f",
+                BossStateName(m.stateLogFrom), BossStateName(m.bossState),
+                m.stateWhy ? m.stateWhy : "-", tgtVisible ? 1 : 0, m.lostT, m.huntT, (float)m.huntPhase,
+                m.fightWarmT, m.loudT, (double)(m.health / kBoss.health), distPlayer);
+        m.stateLogFrom = m.bossState;
+        m.stateWhy = nullptr;
     }
     *speed = m.moveSpeed;
     return true; // a soldier is always on duty: patrol, talk, hunt and fight are all his
@@ -2876,6 +3107,16 @@ void BossNadesTick(float dt, const Vec3& playerPos) {
         n.fuse -= dt;
         n.vel.z -= 32.0f * dt; // the world's gravity, the one MoveMob falls by
         n.pos = n.pos + n.vel * dt;
+        // the ground is real to it: the arc is shorter than the fuse, so an
+        // unclamped grenade fell THROUGH the street and detonated under it -
+        // an invisible blast with its heart sunk below the pavement (the eye
+        // verdict's "no effect"). It lands, rests where it fell, and goes
+        // off on the surface like the object it is.
+        float gz = 0.0f;
+        if (TheHost().GroundBelow(n.pos + Vec3(0, 0, 0.3f), 1.2f, &gz) && n.pos.z < gz) {
+            n.pos.z = gz;
+            n.vel = Vec3(0, 0, 0);
+        }
         if (n.fuse <= 0.0f) {
             const Vec3 at = n.pos;
             TheHost().Explosion(at, BLAST_SMALL);
@@ -3074,10 +3315,29 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
         m.searchTime = std::max(m.searchTime, kSoldier.searchSeconds);
         m.detect = 1.0f;
         m.hurtHigh = from.z > m.pos.z + 1.4f;
+        // ---- damage feedback, scaled by the blow (the user's eye verdict:
+        // 4,000 half hearts with a fixed chirp read as invincibility). A
+        // light hit earns the brief throttled flinch he always had; a heavy
+        // one staggers him - a visible rock-back where he cannot fire and
+        // barely moves - and a meaningful hit ALWAYS earns a hurt line,
+        // whatever the voice throttle says.
         if (m.flinchT <= 0.0f)
             m.flinchT = 0.30f; // a brief upper-body flinch, throttled (workstream M)
-        if (m.hurtSayT <= 0.0f) {
-            m.hurtSayT = 0.6f;
+        if (dmg >= kBoss.staggerHit) {
+            m.flinchT = std::max(m.flinchT, 0.45f);
+            m.staggerT = std::max(m.staggerT, kBoss.staggerSeconds);
+        }
+        if (dmg >= kBoss.hurtVoiceHit) {
+            // guaranteed: a hit this size is always heard - neither the
+            // hurt throttle nor the voice cooldown may swallow it
+            const Vec3 c = m.pos + Vec3(0, 0, 1.3f);
+            PlaySfx(SND_BOSS_HURT, &c, 1.6f);
+            m.hurtSayT = std::max(m.hurtSayT, 1.2f);
+        } else if (m.hurtSayT <= 0.0f) {
+            // decline made audible before the wounded threshold: below 70%
+            // health his hurt throttle shortens - he reacts to lighter hits
+            // too, and the player can hear the fight going out of him
+            m.hurtSayT = (m.health - dmg < kBoss.health * 0.7f) ? 0.25f : 0.6f;
             if (m.proxyHit)
                 BossSay(m, SAY_SPOTTED, 1.5f); // shot by the street: he calls it
             else {
@@ -3096,20 +3356,28 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
             } else if (m.proxyAttacker == -2) {
                 // no gang hand on the hurt and the player right there: the shot
                 // was his (his projectiles meet the proxy; no task names them)
+                m.aggro = true; // the law: damage dealt makes the player an enemy
                 m.playerHostileT = 5.0f;
+                m.fightWarmT = kBoss.warmSeconds; // a firefight with the player: the trail is warm
                 m.negotiated = true;
-                if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND)
+                if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND) {
                     m.bossState = BS_COMBAT;
+                    m.stateWhy = "shot through his perception body: the fight is on";
+                }
             }
             m.proxyHit = false;
             m.proxyAttacker = -1;
         } else {
             // hurt by the player (his blows, his arrows, his blasts land here):
             // the player is the one fighting him, and any talk is over
+            m.aggro = true; // the law: damage dealt makes the player an enemy
             m.playerHostileT = 5.0f;
+            m.fightWarmT = kBoss.warmSeconds; // a firefight with the player: the trail is warm
             m.negotiated = true;
-            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND)
+            if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS || m.bossState == BS_COMMAND) {
                 m.bossState = BS_COMBAT;
+                m.stateWhy = "hurt by the player: the fight is on";
+            }
         }
     }
     m.health -= dmg;
@@ -3200,11 +3468,33 @@ void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerB
         m.hurt = std::min(m.hurt, std::max(hurtBefore, 0.2f));
 }
 
-void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel) {
+void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool driverIsPlayer) {
     if (index < 0 || index >= (int)gMobs.size())
         return;
     Mob& m = gMobs[index];
-    if (m.kind != MOB_SOLDIER || m.death >= 0.0f || m.dodgeT > 0.0f || !m.onGround)
+    if (m.kind != MOB_SOLDIER || m.death >= 0.0f)
+        return;
+    if (driverIsPlayer) {
+        // the law's third provocation, read at intent: the bridge only calls
+        // this when the player's vehicle is fast, close, and on a line that
+        // runs through his body - driving AT him. A dodge with no consequence
+        // was the eye verdict's complaint ("I run at him and he does nothing
+        // to me"): the attempt itself makes the driver his enemy, hit or miss.
+        m.aggro = true;
+        m.fightStarted = true;
+        m.negotiated = true;
+        m.detect = 1.0f;
+        m.playerHostileT = std::max(m.playerHostileT, 6.0f);
+        m.fightWarmT = kBoss.warmSeconds;
+        m.lastSeen = vehPos;
+        if (m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) {
+            m.bossState = BS_COMBAT;
+            m.stateWhy = "the player drove straight at him: an attempted ram";
+            m.seenTime = 0.0f;
+            BossSay(m, SAY_SPOTTED, 2.0f);
+        }
+    }
+    if (m.dodgeT > 0.0f || !m.onGround)
         return;
     // a fast lateral step, to whichever side has room (probed honestly)
     const Vec3 vh = Flat(vehVel);
@@ -3241,9 +3531,13 @@ void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer
         m.ramT = 0.9f; // a breath on the ground, then he is up and fighting
         m.detect = 1.0f;
         if (driverIsPlayer) {
+            m.aggro = true; // the law: ramming him makes the player an enemy
+            m.fightStarted = true;
+            m.fightWarmT = kBoss.warmSeconds;
             m.playerHostileT = 6.0f;
             m.negotiated = true;
             m.bossState = BS_COMBAT;
+            m.stateWhy = "rammed by the player's vehicle";
             m.seenTime = kSoldier.reaction; // the driver is known, completely, at once
         }
     }

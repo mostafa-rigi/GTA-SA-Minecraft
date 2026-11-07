@@ -1,5 +1,6 @@
 #include "GtaMobs.h"
 
+#include <algorithm>
 #include <chrono>
 
 #include "CCamera.h"
@@ -37,6 +38,11 @@
 namespace mc {
 
 namespace {
+// While this runs, the proxy sync does not relay damage: a vehicle impact
+// the core has already priced through MobVehicleHit has also torn at the
+// proxy's game health, and one blow must not be billed twice.
+float gRamMuteT = 0.0f;
+
 // vehicles hurt and throw the animals they run into
 void CarsHitMobs() {
     auto* pool = CPools::ms_pVehiclePool;
@@ -69,7 +75,7 @@ void CarsHitMobs() {
                     const float perp = closest.Magnitude();
                     const float ahead = speed * tt;
                     if (perp < 1.7f && ahead < 13.0f)
-                        MobVehicleThreat((int)j, vp, vel);
+                        MobVehicleThreat((int)j, vp, vel, v->m_pDriver == (CPed*)FindPlayerPed());
                     else if (perp < 3.5f && ahead < 6.0f && nearMissT <= 0.0f) {
                         NotePlayerShot(m.pos, 22.0f);
                         nearMissT = 2.0f;
@@ -77,12 +83,18 @@ void CarsHitMobs() {
                 }
             }
             CVector d = (m.pos + CVector(0, 0, MobHeight(m) * 0.5f)) - vp;
-            if (std::fabs(d.z) > 1.8f || d.x * d.x + d.y * d.y > 2.3f * 2.3f)
+            // 2.6 m from the vehicle's centre: half a car's length plus his
+            // own radius - the old 2.3 m let a bumper that visibly reached
+            // him stop a hair short of counting (the eye verdict's ram)
+            if (std::fabs(d.z) > 1.8f || d.x * d.x + d.y * d.y > 2.6f * 2.6f)
                 continue;
             m.hitByCar = 0.6f;
             if (m.kind == MOB_SOLDIER) {
                 // his own accounting: capped, never a one-shot, the driver known
                 MobVehicleHit((int)j, speed, vp, v->m_pDriver == (CPed*)FindPlayerPed());
+                gRamMuteT = 0.35f; // the same impact also wounds his perception
+                                   // body in the game's books: the proxy sync
+                                   // must not relay it a second time
             } else {
                 MobHurt((int)j, speed * 0.45f, vp, 0.0f);
             }
@@ -329,15 +341,33 @@ void BossProxySync(float dt, CPlayerPed* player) {
             }
         }
     }
-    // the hurt he took since the last frame, relayed at sensor scale
+    // how long since the player's own gun fired: attribution evidence for
+    // the relay below (his bullets meet the proxy; no task names them, at
+    // ANY range - the old 40 m guess silently un-attributed his long shots,
+    // so damage from a sniper landed with no enemy made)
+    static float sPlayerShotAge = 99.0f;
+    {
+        CWeapon& w = player->m_aWeapons[player->m_nSelectedWepSlot];
+        if (w.m_nState == WEAPONSTATE_FIRING)
+            sPlayerShotAge = 0.0f;
+        else
+            sPlayerShotAge += dt;
+    }
+    // the hurt he took since the last frame, relayed at sensor scale -
+    // except a vehicle blow the core already priced this frame (CarsHitMobs
+    // mutes the relay for it: one impact, one bill)
+    gRamMuteT = std::max(0.0f, gRamMuteT - dt);
     const float h = ped->m_fHealth;
-    if (h < 999.0f) {
+    if (h < 999.0f && gRamMuteT <= 0.0f) {
         int who = attacker;
         if (who < 0) {
-            // no gang hand on it: with the player near, the shot was most
-            // likely his (his projectiles meet the proxy; no task names them)
+            // no gang hand on it: the shot was the player's when he is near,
+            // or when his gun fired within the last second at any range a
+            // rifle reaches. Anything else stays unattributed - it lands on
+            // the boss's health but makes no enemy of a bystander.
             CVector dp = player->GetPosition() - ped->GetPosition();
-            if (dp.x * dp.x + dp.y * dp.y < 40.0f * 40.0f)
+            const float d2 = dp.x * dp.x + dp.y * dp.y;
+            if (d2 < 40.0f * 40.0f || (d2 < 120.0f * 120.0f && sPlayerShotAge < 1.0f))
                 who = -2;
         }
         MobProxyDamage(bi, (1000.0f - h) * 2.0f, from, who);
@@ -511,6 +541,26 @@ void MobsRender(float light) {
         if (m.groundZ > -900.0f)
             AddShadow(CVector(m.pos.x, m.pos.y, m.groundZ), MobWidth(m) * 0.75f,
                       Clamp(1.0f - (m.pos.z - m.groundZ) / 6.0f, 0.0f, 1.0f));
+    }
+    // his grenades in flight: a small dark body riding its arc, drawn HERE -
+    // the one render pass CleanSA keeps - because nothing else draws them:
+    // the Minecraft projectile renderer belongs to the layer CleanSA turns
+    // off, and a grenade nobody can see reads as no grenade at all (the eye
+    // verdict). A plain dark cube from the mob sink: no Minecraft world
+    // comes back with it, just the thrown object itself.
+    if (!gBossNades.empty()) {
+        TheModelSink().Texture(MT_ENTITY);
+        for (const BossNade& n : gBossNades) {
+            Pose p;
+            p.o = n.pos;
+            ModelStyle st;
+            st.untextured = true;
+            st.light = light;
+            st.r = 0.13f;
+            st.g = 0.15f;
+            st.b = 0.09f; // dark olive: a grenade's own colour
+            McCube(p, -1.5f, -1.5f, -1.5f, 3.0f, 3.0f, 3.0f, 0.0f, 0.0f, st);
+        }
     }
     d3::Flush();
 }

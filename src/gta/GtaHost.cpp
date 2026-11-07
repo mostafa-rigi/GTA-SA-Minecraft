@@ -65,6 +65,22 @@ struct GtaHost : Host {
         return CWorld::ProcessLineOfSight(a, b, cp, e, true, true, false, true, false, false, false, false) &&
                !IsCollisionObject(e);
     }
+    bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int vehRef) override {
+        // the driver's own car is not a wall between an eye and the driver:
+        // the line runs with that one vehicle ignored, exactly the trick the
+        // shot trace's LineHit already plays for a shooter's own vehicle
+        CVehicle* veh = vehRef >= 0 && CPools::ms_pVehiclePool ? CPools::ms_pVehiclePool->GetAtRef(vehRef) : nullptr;
+        if (!veh)
+            return LineBlocked(a, b);
+        CColPoint cp;
+        CEntity* e = nullptr;
+        CEntity* old = CWorld::pIgnoreEntity;
+        CWorld::pIgnoreEntity = veh;
+        const bool blocked = CWorld::ProcessLineOfSight(a, b, cp, e, true, true, false, true, false, false, false, false) &&
+                             !IsCollisionObject(e);
+        CWorld::pIgnoreEntity = old;
+        return blocked;
+    }
     bool WaterLevel(const Vec3& at, float* level) override {
         return CWaterLevel::GetWaterLevelNoWaves(at.x, at.y, at.z, level);
     }

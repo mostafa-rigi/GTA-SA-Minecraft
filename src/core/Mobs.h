@@ -103,10 +103,21 @@ struct Mob {
     bool negotiated = false;   // boss: this encounter already had its one talk-first chance
     bool fightStarted = false; // boss: a fight is (or was) in progress this encounter - the gate on talk-first (G): commands belong to the guard context only; summoned into a fight or already engaged, he fights at once and gives no orders
     float loudT = 99.0f;       // boss: seconds since a gunshot-class sound was last heard (the same gate)
+    bool aggro = false;        // boss: the engagement law (the user's order, 2026-11-07): by default
+                               // he has NOTHING to do with the player - no warnings, no commands.
+                               // Only a provocation sets this: the player damages him, aims a
+                               // weapon at him (sustained), or drives a vehicle at/into him.
+    float aimAggroT = 0.0f;    // boss: seconds the player's gun has been pointed at him
+    float staggerT = 0.0f;     // boss: a heavy hit's stagger - he cannot fire and barely
+                               // moves while it runs (damage feedback, scaled by the hit)
     float heardT = 0.0f;       // boss: seconds a heard direction stays worth looking at
     Vec3 heardDir{ 0, 1, 0 };  // boss: where the last heard sound came from
     float coverT = 0.0f;       // boss: seconds before cover is re-judged
     float playerHostileT = 0.0f; // boss: seconds the player still counts as the one fighting him
+    float fightWarmT = 0.0f;   // boss: seconds the last firefight with the player still counts as warm -
+                               // while it runs (and the prey is inside the wider hunt area) no hunt may
+                               // decay into patrol or an anchor walk; stamped by shots exchanged, by a
+                               // live firing solution in combat, and by the player's own hits on him
     int attackerBeing = -1;    // boss: the street being who attacked him (K1), -1 none
     float attackerFresh = 0.0f; // boss: seconds that provocation stays fresh
     bool proxyHit = false;     // boss: the pending MobHurt came through his perception body (bridge sets it)
@@ -133,6 +144,8 @@ struct Mob {
     float lostT = 0.0f;        // boss: seconds since the target was last visible
     float targetVisT = 0.0f;   // boss: seconds the target has been continuously visible
     Vec3 preyVel{ 0, 0, 0 };   // boss: the target's tracked velocity (interception)
+    Vec3 exitDir{ 0, 1, 0 };   // boss: the way the prey was heading when he was last seen - the hunt's
+                               // search sweeps along this line before it searches anywhere else
     float huntT = 0.0f;        // boss: seconds this hunt has run
     int huntPhase = 0;         // boss: 0 to the intercept point, 1 working the search points
     Vec3 huntDest{ 0, 0, 0 };  // boss: the intercept point
@@ -187,6 +200,8 @@ struct Mob {
     int poseLogUp = -1;        // boss diag: the upper category/variant the last ring-log line carried
     int poseLogUpVar = 0;
     float nadeShowT = 0.0f;    // boss: seconds a thrown grenade still shows as his diag weapon
+    int stateLogFrom = -1;     // boss diag: the state the transition logger last reported (-1: no baseline yet)
+    const char* stateWhy = nullptr; // boss diag: the reason the current transition carries, set at the gate
     float steerTime = 0.0f;    // soldier: seconds his obstacle detour still holds
     Vec3 steerDir{ 0, 1, 0 };  // soldier: the detour heading his wall probe picked
     float steerSide = 0.0f;    // soldier: the side (+1/-1) his current obstacle is being rounded on; 0 = none
@@ -247,7 +262,7 @@ void MobProvoked(int index, int being, const Vec3& from);
 // one-shot, and it names the attacker when the bridge knows him.
 void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerBeing);
 // A vehicle is charging him on a collision line: he dodges if there is room.
-void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel);
+void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool driverIsPlayer);
 // A vehicle actually hit him: heavy, capped, never fatal by itself, and the
 // driver is detected completely and at once.
 void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer);
