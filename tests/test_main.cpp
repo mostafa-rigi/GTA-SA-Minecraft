@@ -7957,6 +7957,182 @@ static void TestBossAggroLaw() {
 }
 
 // =====================================================================
+// THE STATE-CHURN FIX (the second eye verdict, 2026-11-07): the session
+// log's own transition lines convicted the shipped brain - combat flipped
+// to hunt after 1.2 s without line of sight, at every range down to
+// thirteen metres, and flipped back seconds later, for minutes: two
+// brains swapping several times a minute is the dithering the eye saw,
+// and the hunt's search destinations are the "he walked off somewhere
+// else". Separately, a wounded fallback could be dragged across the
+// block by its own nav snap and read as a retreat order. The laws now:
+// combat holds a 5 s grace of zero sensory contact, pressing the
+// last-seen point; a hunt inside 28 m does not exist; the fallback is a
+// bound of at most 15 m, and only under the wounded line.
+static void TestBossStateChurn() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    host.velocity = Vec3();
+
+    // ---- (a) two-second gaps in the line, over and over: the fight never
+    // leaves combat, and while he is blind his steering destination is the
+    // last-seen vicinity - he presses the corner, he does not wander off
+    // into a hunt's search pattern
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 20.5f, 11.0f);
+        ProvokeByAim(host, man, none);
+        RunMobsB(1.5f, man, none); // a real fight, at fighting distance
+        CHECK(gMobs[s].bossState == 2 && host.playerHurt > 0.0f,
+              "the churn sim opens with a real fight (state %d)", gMobs[s].bossState);
+        host.wallC = Vec3(0.5f, 10.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        bool leftCombat = false;
+        float worstDest = 0.0f;
+        for (int cyc = 0; cyc < 6; ++cyc) {
+            host.wall = false;
+            for (int i = 0; i < 40; ++i) { // 2 s in the open
+                MobsTick(0.05f, man, 0, true, none);
+                if (gMobs[s].bossState != 2)
+                    leftCombat = true;
+            }
+            host.wall = true; // the line breaks - behind the wall's band
+            for (int i = 0; i < 40; ++i) { // a 2 s gap, the log's own dose
+                MobsTick(0.05f, man, 0, true, none);
+                const Mob& b = gMobs[s];
+                if (b.bossState != 2)
+                    leftCombat = true;
+                if (i >= 2) { // the press owns his steering while he is blind
+                    Vec3 d = b.chaseDest - Vec3(0.5f, 20.5f, 10.0f);
+                    d.z = 0.0f;
+                    worstDest = std::max(worstDest, d.Length());
+                }
+            }
+        }
+        host.wall = false;
+        CHECK(!leftCombat, "six 2 s gaps in the line and he never leaves combat - no churn");
+        CHECK(worstDest < 5.0f,
+              "and while blind his destination stays the last-seen vicinity (worst %.1f m off it)", worstDest);
+    }
+    // ---- (b) the hunt's entry discipline: at close range even a long,
+    // silent blindness never becomes a hunt (the distance gate, not the
+    // clock, is what holds him); far away, the hunt engages only after the
+    // full grace has run out in silence
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
+        RunMobsB(1.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 10.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 30.0f; // a long wall: he cannot round it inside the window
+        bool hunted = false;
+        float peakLost = 0.0f;
+        for (int i = 0; i < 200; ++i) { // 10 s blind at ~20 m, silent
+            MobsTick(0.05f, Vec3(0.5f, 20.5f, 11.0f), 0, true, none);
+            if (gMobs[s].bossState == 3)
+                hunted = true;
+            peakLost = std::max(peakLost, gMobs[s].lostT);
+        }
+        host.wall = false;
+        CHECK(peakLost > 5.5f, "the blindness really outlasted the grace (peak lost %.1f s)", peakLost);
+        CHECK(!hunted && gMobs[s].bossState == 2,
+              "and still no hunt: at twenty metres losing sight is a combat problem (state %d)", gMobs[s].bossState);
+    }
+    {
+        WideStage();
+        for (int x = -15; x <= 15; ++x) // the far street has a floor too
+            for (int y = 15; y <= 175; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
+        RunMobsB(1.0f, Vec3(0.5f, 20.5f, 11.0f), none);
+        float huntAt = -1.0f;
+        bool earlyHunt = false;
+        for (int i = 0; i < 240; ++i) { // 12 s: the man is simply gone, 80 m off
+            const float t = (float)i * 0.05f;
+            MobsTick(0.05f, Vec3(0.5f, 100.5f, 11.0f), 0, true, none);
+            if (gMobs[s].bossState == 3 && huntAt < 0.0f)
+                huntAt = t;
+            if (gMobs[s].bossState == 3 && t < 4.8f)
+                earlyHunt = true;
+        }
+        CHECK(!earlyHunt, "no hunt before the grace runs out - the first seconds are combat's");
+        CHECK(huntAt > 4.8f && huntAt < 9.0f,
+              "and then the hunt takes the genuinely cold, far trail (at %.1f s)", huntAt);
+    }
+    // ---- (c) retreat discipline: at 75% health no fallback exists at all;
+    // below the wounded line the fallback is one short bound, never a walk
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 24.5f, 11.0f), none);
+        RunMobsB(0.6f, Vec3(0.5f, 24.5f, 11.0f), none);
+        gMobs[s].health = 3000.0f; // 75%: hurt, winning, nowhere near the wounded line
+        gMobs[s].hurt = 0.0f;
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 14.0f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        bool anyFallback = false;
+        for (int i = 0; i < 200; ++i) { // 10 s blind at 75%
+            MobsTick(0.05f, Vec3(0.5f, 24.5f, 11.0f), 0, true, none);
+            if (gMobs[s].hasFallback)
+                anyFallback = true;
+        }
+        host.wall = false;
+        CHECK(!anyFallback, "at 75% health there is no retreat order to give - no fallback exists");
+        CHECK(gMobs[s].bossState == 2, "and the fight is still a fight (state %d)", gMobs[s].bossState);
+    }
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        ProvokeByAim(host, Vec3(0.5f, 24.5f, 11.0f), none);
+        RunMobsB(0.6f, Vec3(0.5f, 24.5f, 11.0f), none);
+        gMobs[s].health = 1200.0f; // 30%: under the wounded line - the fallback is legal
+        gMobs[s].hurt = 0.0f;
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 14.0f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 9.0f;
+        bool chosen = false;
+        float boundLen = 0.0f;
+        Vec3 boundPt;
+        for (int i = 0; i < 100 && !chosen; ++i) {
+            MobsTick(0.05f, Vec3(0.5f, 24.5f, 11.0f), 0, true, none);
+            if (gMobs[s].hasFallback) {
+                chosen = true;
+                boundPt = gMobs[s].fallbackPoint;
+                Vec3 off = boundPt - gMobs[s].pos;
+                off.z = 0.0f;
+                boundLen = off.Length();
+            }
+        }
+        CHECK(chosen, "wounded under the line, a fallback is chosen");
+        CHECK(boundLen <= 15.5f, "and it is a short bound to near cover - %.1f m, not a walk away", boundLen);
+        float bestD = 1e9f;
+        for (int i = 0; i < 240; ++i) { // and he completes the bound, then holds
+            MobsTick(0.05f, Vec3(0.5f, 24.5f, 11.0f), 0, true, none);
+            Vec3 d = gMobs[s].pos - boundPt;
+            d.z = 0.0f;
+            bestD = std::min(bestD, d.Length());
+        }
+        host.wall = false;
+        CHECK(bestD < 2.5f, "and he stands on it (closest %.1f m) - the fall-back finishes, short", bestD);
+    }
+}
+
+// =====================================================================
 // THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
 // the POI database, the zone/gang map and the interior door families
 // extracted from the game's own files (atlas-assets/), the vehicle road
@@ -8311,6 +8487,7 @@ int main(int argc, char** argv) {
     TestCsRules();
     TestBossFixRound();
     TestBossAggroLaw();
+    TestBossStateChurn();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

@@ -919,6 +919,20 @@ struct BossTune {
     float staggerSeconds;  // ...for this long: no fire, barely any movement
     float hurtVoiceHit;    // a single hit at or above this always earns a hurt line,
                            // whatever the voice throttle says
+    // the state-churn fix (the second eye verdict, 2026-11-07): the combat
+    // lost-sight grace and the hunt's distance sanity
+    float lostGrace;       // seconds of ZERO sensory contact (no sight, no sound)
+                           // the boss holds combat for when the line breaks, pressing
+                           // the corner the target vanished behind - a professional
+                           // holds the angle; he does not change brains after a
+                           // breath. Only a grace that runs out in full silence
+                           // hands the chase to the hunt
+    float huntMinRange;    // inside this distance to the prey, losing sight is a
+                           // combat problem (the grace + the press), never a hunt:
+                           // the hunt is for a genuinely cold, long trail only
+    float fallbackMax;     // the wounded fallback's longest bound, metres: a short
+                           // step to near cover, never a routed walk away from a
+                           // fight - the nav snap may not drag it farther either
 };
 const BossTune kBoss = {
     4000.0f, 1200.0f, 0.35f,                   // body (smart pack: a deeper pool, same structure)
@@ -937,6 +951,7 @@ const BossTune kBoss = {
     45.0f, 90.0f, 150.0f,                      // presence
     60.0f, 175.0f,                             // the warm trail: a minute of memory, a wide hunt area
     0.45f, 150.0f, 0.35f, 100.0f,              // the engagement law + damage feedback
+    5.0f, 28.0f, 15.0f,                        // the state-churn fix: grace, hunt sanity, fallback bound
 };
 
 // Talk-first (workstream G) belongs to the future GUARD step - a posted
@@ -975,10 +990,18 @@ const BossVoice kBossVoice[SAY_COUNT] = {
 };
 
 void BossSay(Mob& m, int state, float cooldown) {
-    if (state < 0 || state >= SAY_COUNT || m.voiceCd > 0.0f)
+    if (state < 0 || state >= SAY_COUNT)
         return;
     const BossVoice& v = kBossVoice[state];
     if (v.count <= 0)
+        return;
+    // a critical line (spotted, grenade out) cuts the voice cooldown: it is
+    // a warning, not narration, and the hurt line already lives by the same
+    // law - no throttle swallows it. (The grace press's timing put a throw
+    // 0.25 s inside a reload line's cooldown and the call-out vanished;
+    // a grenade the player cannot hear coming is the invisible grenade of
+    // the first eye verdict, back in a smaller coat.)
+    if (m.voiceCd > 0.0f && !v.critical)
         return;
     if (!v.critical && Rand01() < 0.2f) { // the random silence
         m.voiceCd = cooldown;
@@ -1834,12 +1857,16 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             }
         }
         m.targetVisT = 0.0f;
-        // a man holding good cover over a hidden target waits a beat before he
-        // pushes - and that beat is exactly the grenade's window (2.5 s), so
-        // the hunt timer runs slow while he holds cover in grenade range
-        const float lastSeenDist = (m.lastSeen - m.pos).Length();
-        const bool holdingForNade = m.bossState == BS_COMBAT && lastSeenDist > kBoss.nadeMin && lastSeenDist < kBoss.nadeMax;
-        m.lostT += dt * (holdingForNade ? 0.25f : 1.0f);
+        // lostT is honest seconds since the target was last seen, in every
+        // band. It used to run at a quarter speed while he held cover in
+        // grenade range - a patch from the days when the hunt took over
+        // after 1.2 s and the grenade's 2.5 s window had to be protected
+        // from the flip. The combat grace (kBoss.lostGrace, 5 s) holds the
+        // fight far longer than the grenade needs, so the patch is gone:
+        // a quarter-speed clock would have secretly quadrupled the grace
+        // in exactly the band where men dig in, and the log's "lost" line
+        // would have lied about the time again.
+        m.lostT += dt;
         m.searchTime = std::max(0.0f, m.searchTime - dt);
     }
     // ---------------- hearing
@@ -2196,12 +2223,32 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                         Vec3 fb = m.pos - dir * 14.0f;
                         fb.z = m.pos.z;
                         if (NavReady()) {
+                            // the snap may tidy the point onto the street,
+                            // but only a NEAR node: the shipped 25 m snap
+                            // radius could drag the fallback across the
+                            // block, and a routed walk to it read as a
+                            // retreat order across the map (the second eye
+                            // verdict, 2026-11-07). A fallback is a short
+                            // bound to near cover - kBoss.fallbackMax is
+                            // its whole world.
                             const int n = NavNearest(fb, 25.0f);
                             Vec3 np;
-                            if (n >= 0 && NavNodePos(n, &np))
+                            if (n >= 0 && NavNodePos(n, &np) && (np - m.pos).Length() <= kBoss.fallbackMax)
                                 fb = np;
                         }
                         m.fallbackPoint = fb;
+                    }
+                    // and the point itself never sits farther than the
+                    // bound, whoever proposed it: longer legs are the
+                    // hunt's business, not a wounded man's fallback
+                    {
+                        Vec3 off = m.fallbackPoint - m.pos;
+                        off.z = 0.0f;
+                        const float ol = off.Length();
+                        if (ol > kBoss.fallbackMax) {
+                            const Vec3 cl = m.pos + off * (kBoss.fallbackMax / ol);
+                            m.fallbackPoint = Vec3(cl.x, cl.y, m.fallbackPoint.z);
+                        }
                     }
                     m.hasFallback = true;
                 }
@@ -2215,6 +2262,20 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     m.moving = true;
                     m.moveSpeed = kSoldier.strafeSpeed;
                 }
+            } else if (tgt.being < 0 && !tgtVisible &&
+                       (m.lostT <= kBoss.lostGrace || m.heardT > 0.0f || tgt.dist <= kBoss.huntMinRange)) {
+                // the grace press (the state-churn fix, 2026-11-07): the
+                // target is gone from his eyes but the hunt may not take
+                // him - the grace is still running, or sound keeps the
+                // contact alive, or he is too close for a hunt to be the
+                // answer. So combat itself does the pressing: he closes on
+                // the last-seen point (the chase point above already leads
+                // it by the tracked velocity) and arrives ON it, weapon
+                // ready - the corner the man vanished behind gets walked
+                // up to and looked around, not orbited at fighting distance
+                // from a position he cannot honestly know. The band play
+                // below is for a target he can see.
+                BossChaseTo(m, chasePoint, kBoss.chaseSpeed, dt, 1.2f);
             } else if (tgt.dist > 13.0f) {
                 if (((wounded && tgtVisible) ||
                      (tgt.dist >= kBoss.crouchRange && (m.firePlantT > 0.0f || m.burstShots > 0))) &&
@@ -2353,12 +2414,30 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         }
         // ---- losing him starts the hunt (the player only; a street attacker
         // who runs off is let go - the street is not his war until it shoots).
-        // One gate: a wounded man mid-retreat finishes his fall-back first -
-        // the hunt takes him from his fallback, never halfway, turned around.
-        if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > 1.2f && gGame.deathTime < 0.0f &&
+        // The gate is the state-churn fix (the second eye verdict, 2026-11-07):
+        // the shipped 1.2 s flipped him out of combat the moment a car or a
+        // corner crossed the line - at every range, even thirteen metres -
+        // and the hunt's different destination logic then walked him off to
+        // search points while the fight stood next to him; seconds later he
+        // re-acquired, flipped back, and lost him again. Two brains swapping
+        // several times a minute is the dithering the eye reported. Now:
+        //   - the grace: combat holds for kBoss.lostGrace seconds of ZERO
+        //     sensory contact - neither seen (lostT) nor heard (heardT: a
+        //     shot's stimulus refreshes it, and the stimulus handler already
+        //     moves lastSeen to the sound) - and the combat movement above
+        //     spends the grace pressing the last-seen point, weapon ready;
+        //   - the distance sanity: inside kBoss.huntMinRange losing sight
+        //     is never a hunt at all, however long it lasts - the press and
+        //     the corner play are the whole answer at that range, and only
+        //     a genuinely far, cold trail belongs to the hunt.
+        // One older gate stays: a wounded man mid-retreat finishes his
+        // fall-back first - the hunt takes him from his fallback, never
+        // halfway, turned around.
+        if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > kBoss.lostGrace &&
+            m.heardT <= 0.0f && tgt.dist > kBoss.huntMinRange && gGame.deathTime < 0.0f &&
             !(wounded && m.hasFallback)) {
             m.bossState = BS_HUNT;
-            m.stateWhy = "lost him: the hunt takes the chase";
+            m.stateWhy = "lost him past the grace, quiet and far: the hunt takes the chase";
             m.huntPhase = 0;
             m.huntT = 0.0f;
             m.huntDest = BossHuntDest(m);
@@ -2707,12 +2786,22 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // man is never re-hunted for a fight he already paid for.)
     if ((m.bossState == BS_CALM || m.bossState == BS_SUSPICIOUS) && m.fightStarted && m.fightWarmT > 0.0f &&
         playerAlive && distPlayer < kBoss.warmArea) {
-        m.bossState = BS_HUNT;
-        m.stateWhy = "a warm trail does not patrol: the hunt resumes";
-        m.huntPhase = 0;
-        m.huntT = 0.0f;
-        m.huntDest = BossHuntDest(m);
-        m.route.clear();
+        // the hunt's distance sanity binds this door too: a warm fight at
+        // arm's length resumes as a FIGHT, not a hunt - sending him off on
+        // a hunt for a man standing twenty metres away would re-open the
+        // state churn the grace closed, through the belt instead of the gate
+        if (distPlayer <= kBoss.huntMinRange) {
+            m.bossState = BS_COMBAT;
+            m.stateWhy = "a warm trail does not patrol: the fight resumes at close range";
+            m.seenTime = 0.0f;
+        } else {
+            m.bossState = BS_HUNT;
+            m.stateWhy = "a warm trail does not patrol: the hunt resumes";
+            m.huntPhase = 0;
+            m.huntT = 0.0f;
+            m.huntDest = BossHuntDest(m);
+            m.route.clear();
+        }
     }
 
     // ================================================================ CALM / SUSPICIOUS
