@@ -325,6 +325,13 @@ constexpr float kSteerScale = 0.6f;
 void Drive(CopState& c, float gas, float brake, float wheelNorm, bool siren) {
     const float steer = (Page().steerFlip ? -wheelNorm : wheelNorm) * kSteerScale;
     TheHost().CopBodyDrive(c.veh, gas, brake, steer, siren);
+    // the intent rides beside the pedals (fix round 4): the aim point
+    // this tick and the speed wanted on the way - the bridge mirrors
+    // them into the car's own autopilot, the channel this host's AI
+    // cars are actually driven through. In reverse recovery and at a
+    // standstill the desired speed is at or under the crawl and the
+    // autopilot disarms, so it never fights the pedals' own word.
+    TheHost().CopBodyDriveTarget(c.veh, c.target, c.desiredSpeed);
     c.gas = gas;
     c.brake = brake;
 }
@@ -354,6 +361,9 @@ void SpikeDrive(float dt) {
         c.calT += dt;
         const float gas = c.speed < 3.0f ? 0.5f : 0.0f;
         TheHost().CopBodyDrive(c.veh, gas, 0.0f, 0.6f * kSteerScale, false);
+        // the calibration drives straight ahead under power: its intent
+        // is a point down its own nose at a crawl (fix round 4)
+        TheHost().CopBodyDriveTarget(c.veh, c.pos + c.fwd * 40.0f, 3.0f);
         c.gas = gas;
         // the cross product of the nose then and now is sin(yawThen -
         // yawNow): NEGATIVE when the car turned RIGHT on the map (yaw
@@ -421,16 +431,23 @@ void SpikeDrive(float dt) {
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
+    // the intent the autopilot mirror reads (fix round 4): this
+    // waypoint, at this pace
+    c.target = wp;
+    c.desiredSpeed = want;
     Drive(c, gas, brake, steer, false);
     c.spikeLogT -= dt;
     if (c.spikeLogT <= 0.0f) {
         c.spikeLogT = 1.0f;
         Host::CopBody rep;
         if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok)
-            Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f",
+            Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f"
+                " | engine %d handbrake %d broken %d status %d mission %d cruise %d driver-in %d",
                 rep.pos.x, rep.pos.y, rep.pos.z,
                 rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z,
-                rep.gas, rep.brake, rep.steer);
+                rep.gas, rep.brake, rep.steer,
+                rep.engineOn ? 1 : 0, rep.handbrake ? 1 : 0, rep.engineBroken ? 1 : 0,
+                rep.status, rep.mission, rep.cruise, rep.driverInVehicle ? 1 : 0);
     }
 }
 
@@ -492,8 +509,12 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
-    Drive(c, gas, brake, steer, false);
+    // the intent the autopilot mirror reads (fix round 4): the leave
+    // waypoint, at the leave pace - named before the drive, as in the
+    // spike, so the mirror never reads last tick's word
+    c.target = wp;
     c.desiredSpeed = want;
+    Drive(c, gas, brake, steer, false);
 }
 
 // ---------------------------------------------------------------------------

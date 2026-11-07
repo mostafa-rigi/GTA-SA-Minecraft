@@ -180,6 +180,21 @@ struct Host {
         // own velocity change (m/s): the collision signature the core
         // prices his damage book by, on the original's own curve
         float impactDv = 0.0f;
+        // the drive state, read back like the pedals (fix round 4): the
+        // switches the host's own automobile processing reads on its way
+        // to the wheels - engine, handbrake, broken-engine, the entity
+        // status, the autopilot's mission and cruise as the bridge last
+        // found them, and whether the seated driver carries the host's
+        // own in-vehicle flag. A body that answers the pedals but never
+        // moves names its blocker among these, in the log, in plain
+        // words - the spike line prints them every second.
+        bool engineOn = false;
+        bool handbrake = false;
+        bool engineBroken = false;
+        int status = -1;          // the host's eEntityStatus, raw
+        int mission = -1;         // the autopilot's eCarMission, raw
+        int cruise = 0;           // the autopilot's cruise setting, raw
+        bool driverInVehicle = false;
     };
     // Stand the body up at `at` facing `headingDeg`, its nose turned toward
     // `face` (the original's justPinged: a fresh cop starts facing his man).
@@ -189,6 +204,19 @@ struct Host {
     // gas/brake 0..1, steer -1..1 of full lock. Siren: the host's own siren
     // flag follows `siren` while the body is driven.
     virtual void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {}
+    // The drive's INTENT, named alongside the pedals (fix round 4): the
+    // point the brain is driving at this tick and the speed it wants on
+    // the way (m/s, signed). On this host an AI driver's car takes its
+    // controls from its own autopilot - the pedal fields are that
+    // channel's outputs, recomputed inside the game's processing - so
+    // the bridge mirrors the intent into the autopilot (a straight-line
+    // goto at the brain's point and pace) and the pedals ride beside it:
+    // whichever channel the automobile truly honours, the brain's order
+    // is on it. A cruise at or under the bridge's crawl, or a tick with
+    // no throttle, disarms the autopilot back to its rest state, so a
+    // stopped, reversing or stood-down unit is never driven by a stale
+    // order. The full conviction stands in DRIVER2-STEP3-fa.md.
+    virtual void CopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) {}
     // His survival law is HIS, not the host's (the user's order): the core
     // keeps his damage book on the original's scale and commands the
     // body's DISPLAYED health from it - book01 in (0,1] maps into the
