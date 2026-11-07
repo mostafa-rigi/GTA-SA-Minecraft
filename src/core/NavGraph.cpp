@@ -328,6 +328,13 @@ int VehicleNearestNode(const Vec3& at, float maxDist) {
     return best;
 }
 
+bool VehicleNodePos(int node, Vec3* out) {
+    if (!out || node < 0 || node >= (int)vNodes.size())
+        return false;
+    *out = vNodes[node];
+    return true;
+}
+
 bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut) {
     if (!out || vNodes.empty())
         return false;
@@ -402,6 +409,9 @@ std::vector<uint32_t> vRevRow;
 std::vector<uint32_t> vRevTargets;
 std::vector<float> vField; // per-node road distance to the field's target
 int vFieldGoal = -1;
+int vFieldBuilds = 0; // floods actually built (the shared-field ledger)
+
+int VehicleFieldBuildCount() { return vFieldBuilds; }
 
 void VehicleFieldInvalidate() {
     vRevRow.clear();
@@ -451,6 +461,7 @@ bool VehicleFieldTo(const Vec3& target) {
         }
     }
     vFieldGoal = goal;
+    ++vFieldBuilds;
     return true;
 }
 

@@ -72,6 +72,8 @@ bool VehicleGraphReady();
 int VehicleNodeCount();
 int VehicleEdgeCount();
 int VehicleNearestNode(const Vec3& at, float maxDist);
+// The world position of one road node. False for a bad index.
+bool VehicleNodePos(int node, Vec3* out);
 // A* over the road graph; fills world waypoints, and (when distOut is given)
 // the route's length in metres. False when no road route exists.
 bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut);
@@ -89,6 +91,12 @@ bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, floa
 bool VehicleFieldTo(const Vec3& target);
 float VehicleFieldCost(const Vec3& at);
 bool VehicleFieldDescent(const Vec3& at, float ahead, Vec3* out);
+// How many floods VehicleFieldTo has actually built since the graph was
+// loaded. The field is SHARED (Driver 2's PATHFIND.C keeps one map for
+// every cop too): the cop force's manager is its only builder, and the
+// tests read this counter to prove four pursuers still pay for one flood
+// per refresh, never one flood each.
+int VehicleFieldBuildCount();
 
 // Named places the boss checks while hunting. Since the atlas landed these
 // are no longer a hand-placed list: they are the atlas POI database itself

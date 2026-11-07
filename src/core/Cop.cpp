@@ -8,7 +8,8 @@
 namespace mc {
 
 SharedThreat gThreat;
-CopState gCop;
+CopState gCops[kMaxCopUnits];
+CopState& gCop = gCops[0];
 
 void ThreatNoteBoss(int state, bool engaged, const Vec3& pos, bool alive) {
     gThreat.bossState = state;
@@ -16,6 +17,8 @@ void ThreatNoteBoss(int state, bool engaged, const Vec3& pos, bool alive) {
     gThreat.bossPos = pos;
     gThreat.bossAlive = alive;
 }
+
+void ThreatNoteOurUnitLost() { ++gThreat.ourUnitsLost; }
 
 namespace {
 
@@ -56,10 +59,9 @@ constexpr float kPaceCost = 4096 * kM;
 constexpr float kFelonyTrigger = 658.0f;
 constexpr float kFelonyCap = 4096.0f;
 constexpr float kFelonyClock = 31 * kTick; // 0.62 s per +1/-1 step
-constexpr float kBatterFelony = 2457.0f;   // the ladder's top rung (piece 2
-    // brings the ladder itself; today it is the batter line - the
+constexpr float kBatterFelony = 2457.0f;   // the ladder's top rung - the
     // original's gBatterPlayer is a per-mission flag, and top pressure is
-    // the honest stand-in, named as such)
+    // the honest stand-in, named as such (piece 1's reading, kept)
 constexpr float kLostAfter = 256 * kTick;  // 5.12 s unseen = position lost
 constexpr float kWreckLine = 27000.0f;     // the original's retirement line
     // (COP_AI.C: totalDamage > 27000 && !immortal - the dying sequence)
@@ -90,6 +92,85 @@ constexpr float kRepeatDelay[12] = { 128 * kTick, 0, 128 * kTick, 64 * kTick, 64
                                      32 * kTick, 0, 128 * kTick, 256 * kTick, 0, 0 };
 // pursuitFelonyScale is 3000 in InitCops (NOT its header's 4096).
 constexpr float kPursuitScale = 3000.0f;
+
+// ---- step 2: the ladder, the cutoff, the roadblock (COP_AI.C / CIV_AI.C)
+// ControlNumberOfCops counts the felony past the trigger ladder built in
+// InitCopData: {0, 819, 1638, 2457, 32767} - felony >= a rung wants one
+// more car, capped by maxCopCars (4). gMinimumCops is per-mission data
+// (0 in the free-roam data this step stands in for).
+constexpr float kLadderRungs[4] = { 0.0f, 819.0f, 1638.0f, 2457.0f };
+// The spawn timer: gCopRespawnTime 320 ticks (InitCops, normal game),
+// with ControlNumberOfCops' own felony shrink wrapped around it:
+// respawnTime * (4096 - felony*autoRespawnScaleLimit)/4096 ticks must
+// pass. The rebuild never assigns autoRespawnScaleLimit in code - it was
+// initial data in the original's COP_DATA block - so the port adopts
+// 2048 (the delay halves by the felony cap) as a NAMED stand-in, the
+// same epistemic status as the batter line above.
+constexpr float kRespawnTicks = 320.0f;
+constexpr float kRespawnScale = 2048.0f / 4096.0f;
+// The cutoff (ControlNumberOfCops + its use in CopControl1): when more
+// pursuers are live than the ladder wants, cutOffDistance is set to the
+// wanted-th nearest pursuer's distance, and a pursuer beyond it reads
+// his desired speed through cutOffPowerScale = 2048 of 4096 - one half.
+constexpr float kCutoffScale = 2048.0f / 4096.0f;
+// CheckPingOut's own radius: a car farther than 24000 units (93.75 m)
+// from the player's spool centre leaves the world.
+constexpr float kPingOut = 24000 * kM;
+// Ladder spawns enter at range, the traffic spawner's shape (PingInCivCar
+// seats a car on a road spool position the player is not looking at):
+// ours is the road-graph node nearest a ring point 70 m out, accepted
+// inside 50..95 m - inside this host's body streaming, outside the near
+// field, never in the player's face.
+constexpr float kSpawnRing = 70.0f;
+// The roadblock chain (NoteFelony / MAIN.C's StepSim / CreateRoadblock):
+// felony crossing 1318 (0x526) arms roadblockCount with
+// roadblockDelayDiff[difficulty] + (Random & 0xFF) - the hardest row is
+// 800 ticks; the count runs down while no block cars stand; at zero,
+// with the pursuit live and felony >= 1319 (0x527), CreateRoadblock
+// scans a fan ahead of the player (to ~16384 units = 64 m) for the first
+// straight-or-curved road segment at least 6 car-lengths long and lays
+// sleeping cars across its lanes.
+constexpr float kBlockArmFelony = 1318.0f;
+constexpr float kBlockFireFelony = 1319.0f;
+constexpr float kBlockDelayTicks[3] = { 1500.0f, 1000.0f, 800.0f };
+constexpr float kBlockAhead = 48.0f;  // where on the found road the block
+                                      // stands, metres ahead of the player
+// A block car wakes the way PassiveCopTasks converts any flagged car:
+// felony over the trigger and the player's position known. The original
+// checks nothing about distance - its block cars sit in the traffic flow
+// the player is about to meet - so ours wakes inside 45 m, the honest
+// SA reading of "about to meet", named here rather than hidden.
+constexpr float kBlockWakeDist = 45.0f;
+
+// The system page: slot 0's felony-side fields. In the original the
+// felony lives on the player's own record; here slot 0 carries the page
+// for the whole force (see Cop.h).
+CopState& Page() { return gCops[0]; }
+
+bool UnitLiving(const CopState& c) { return c.veh >= 0 && c.mode != COP_NONE; }
+
+// The manager's books (ControlNumberOfCops / StepSim state).
+bool sForce = false;        // a summon stood the force up this session
+float sRespawnT = 0.0f;     // the ladder's spawn clock, seconds
+int sWanted = 0;            // the ladder's wanted count this tick
+float sCutoff = 1e9f;       // the cutoff distance in force (1e9: none)
+bool sBlockWasLow = true;   // the arm latch: felony was at/under 1318
+bool sBlockTimerOn = false;
+float sBlockTimer = 0.0f;   // the armed roadblock count, seconds
+
+float BlockDelay() {
+    return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick;
+}
+
+int LadderWanted(float felony) {
+    int wanted = 0;
+    for (int i = 0; i < 4; ++i)
+        if (felony >= kLadderRungs[i])
+            ++wanted;
+    if (wanted > kMaxCopCars)
+        wanted = kMaxCopCars;
+    return wanted;
+}
 
 // The sight gates (UpdateCopSightData): placid / hot, front range and
 // half-angle, peripheral range; a height gap past 1500 units (5.9 m)
@@ -128,8 +209,9 @@ bool CopSees(const Vec3& copPos, const Vec3& copFwd, bool hot) {
 // FELONY.C's NoteFelony, whole: occurrence warm-up and re-occurrence delay
 // gate the note; the placid value lands whole below the trigger, the angry
 // value rides the pursuit scale above it; an additional scale rides on top.
+// The felony and its timers are the system page's, whoever earned them.
 void NoteFelony(int type, int additionalScale) {
-    CopState& c = gCop;
+    CopState& c = Page();
     if (type < 0 || type > 11)
         return;
     if (c.offenceOccur[type] < kOccurDelay[type])
@@ -162,25 +244,37 @@ float WheelToward(float wheel, float desired, float dt) {
 }
 
 // Every drive out of this brain passes here: the steering sign the
-// spike's calibration settled is applied at this one choke point, and
-// the magnitude rides kSteerScale - chosen so both readings of the
-// field's unit stay sane (radians: 0.6 rad is a full city lock;
-// normalised: 0.6 of lock still turns a chase). The spike's in-game
-// behaviour is the scale's judge, named here rather than hidden.
+// spike's calibration settled (a fact about the host, kept on the system
+// page) is applied at this one choke point, and the magnitude rides
+// kSteerScale - chosen so both readings of the field's unit stay sane
+// (radians: 0.6 rad is a full city lock; normalised: 0.6 of lock still
+// turns a chase). The spike's in-game behaviour is the scale's judge,
+// named here rather than hidden.
 constexpr float kSteerScale = 0.6f;
-void Drive(float gas, float brake, float wheelNorm, bool siren) {
-    CopState& c = gCop;
-    const float steer = (c.steerFlip ? -wheelNorm : wheelNorm) * kSteerScale;
+void Drive(CopState& c, float gas, float brake, float wheelNorm, bool siren) {
+    const float steer = (Page().steerFlip ? -wheelNorm : wheelNorm) * kSteerScale;
     TheHost().CopBodyDrive(c.veh, gas, brake, steer, siren);
+    c.gas = gas;
+    c.brake = brake;
+}
+
+// Standing still, for IDLE and BLOCK alike: on this host a held brake at
+// a standstill is a reverse gear, not a handbrake - he brakes only while
+// he is still rolling.
+void StandDrive(CopState& c) {
+    if (std::fabs(c.speed) > 1.0f)
+        Drive(c, 0.0f, 0.7f, 0.0f, false);
+    else
+        Drive(c, 0.0f, 0.0f, 0.0f, false);
 }
 
 // ---------------------------------------------------------------------------
-// Piece 0's spike controller: first the steering calibration (one second
-// of commanded turn, read back off the car's own nose), then the block
-// route by pure pursuit on the waypoints the road graph itself hands
-// back. Deliberately dumb beyond that - its job is proving the body
-// answers gas, brake and steering, with the read-back (the bridge's,
-// from the vehicle itself) logged every second.
+// Piece 0's spike controller (slot 0 only): first the steering calibration
+// (one second of commanded turn, read back off the car's own nose), then
+// the block route by pure pursuit on the waypoints the road graph itself
+// hands back. Deliberately dumb beyond that - its job is proving the body
+// answers gas, brake and steering, with the read-back (the bridge's, from
+// the vehicle itself) logged every second.
 void SpikeDrive(float dt) {
     CopState& c = gCop;
     if (!c.steerCalDone) {
@@ -206,7 +300,7 @@ void SpikeDrive(float dt) {
         return;
     }
     if (c.spikeIdx >= c.spikeRoute.size()) {
-        Drive(0.0f, c.speed > 1.0f ? 1.0f : 0.0f, 0.0f, false); // brake while
+        Drive(c, 0.0f, c.speed > 1.0f ? 1.0f : 0.0f, 0.0f, false); // brake while
             // rolling only - a held brake at rest is reverse on this host
         if (!c.spikeDone) {
             c.spikeDone = true;
@@ -256,9 +350,7 @@ void SpikeDrive(float dt) {
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
-    Drive(gas, brake, steer, false);
-    c.gas = gas;
-    c.brake = brake;
+    Drive(c, gas, brake, steer, false);
     c.spikeLogT -= dt;
     if (c.spikeLogT <= 0.0f) {
         c.spikeLogT = 1.0f;
@@ -272,11 +364,78 @@ void SpikeDrive(float dt) {
 }
 
 // ---------------------------------------------------------------------------
-// CopControl1 (COP_AI.C), ported whole onto metres. dt-driven: the
-// original runs one decision per frame at 50 ticks/s, so every per-tick
-// constant rides kTick.
-void CopControl(float dt) {
-    CopState& c = gCop;
+// The leaving drive (step 2): a stood-down unit drives AWAY from the man
+// along the road graph until CheckPingOut's own radius takes him out of
+// the world. He does not charge, does not chase, does not stop to fight:
+// the route's far end is 140 m past him on the line away from the player,
+// and if the graph cannot lay it he drives the straight line off.
+void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
+    if ((c.pos - playerPos).Length() > kPingOut) {
+        Log("cop: the stood-down unit pinged out at %.0f m - the world takes him back",
+            (c.pos - playerPos).Length());
+        TheHost().CopBodyRetire(c.veh, false);
+        c.veh = -1;
+        c.mode = COP_NONE;
+        return;
+    }
+    if (c.leaveIdx >= c.leaveRoute.size()) {
+        c.leaveRoute.clear();
+        Vec3 away = c.pos - playerPos;
+        away.z = 0.0f;
+        const float al = away.Length();
+        away = al > 0.5f ? away * (1.0f / al) : Vec3(1, 0, 0);
+        const Vec3 dest = c.pos + away * 140.0f;
+        // the first leg is his own ground, straight off the man: a stood-
+        // down unit was just pacing on top of him, and a road route laid
+        // from that spot can cross the man's position on its way out -
+        // he leaves AWAY first, then joins the road. (This step's sims
+        // caught the crossing; the push leg is the fix.)
+        const Vec3 push = c.pos + away * 25.0f;
+        c.leaveRoute.push_back(push);
+        std::vector<Vec3> road;
+        if (VehicleRoute(push, dest, &road, nullptr) && road.size() >= 2) {
+            for (size_t i = 0; i < road.size(); ++i)
+                c.leaveRoute.push_back(road[i]);
+        } else {
+            c.leaveRoute.push_back(dest);
+        }
+        c.leaveIdx = 0;
+    }
+    const Vec3 wp = c.leaveRoute[c.leaveIdx];
+    Vec3 to = wp - c.pos;
+    to.z = 0.0f;
+    const float dist = to.Length();
+    if (dist < 7.0f) {
+        ++c.leaveIdx;
+        return;
+    }
+    to = to * (1.0f / dist);
+    const float cross = c.fwd.x * to.y - c.fwd.y * to.x;
+    const float dot = c.fwd.x * to.x + c.fwd.y * to.y;
+    const float err = std::atan2(cross, dot);
+    const float steer = dot < 0.0f ? (cross >= 0.0f ? -1.0f : 1.0f)
+                                   : Clamp(-err * 1.4f, -1.0f, 1.0f);
+    float gas = 0.0f, brake = 0.0f;
+    const float want = dist < 25.0f || std::fabs(err) > 0.7f ? 6.0f : 11.0f;
+    if (c.speed < want)
+        gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
+    else
+        brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
+    Drive(c, gas, brake, steer, false);
+    c.desiredSpeed = want;
+}
+
+// ---------------------------------------------------------------------------
+// CopControl1 (COP_AI.C), ported whole onto metres, one instance per
+// unit. dt-driven: the original runs one decision per frame at 50
+// ticks/s, so every per-tick constant rides kTick. Step 2 changes two
+// things only, both the original's own: the road field is the force's
+// ONE shared field (PATHFIND.C keeps a single map), read through the
+// system page's throttle; and the desired speed passes the cutoff's
+// scale - a unit beyond the manager's cutOffDistance reads his tables
+// at cutOffPowerScale, one half, exactly where the original applies it
+// (the front-zone desire, before the pacing blend).
+void CopControl(CopState& c, float dt) {
     const bool playerInCar = gThreat.playerInVehicle;
     const Vec3 pPos = gThreat.playerPos;
     const Vec3 pVel = gThreat.playerVel;
@@ -284,7 +443,8 @@ void CopControl(float dt) {
     // the bumper corners, probed every 8 ticks like the original: a point
     // 400 units ahead and 150 to the side (1.56 m / 0.59 m) - the original
     // asks CellAtPositionEmpty there; the host's wall oracle stands in
-    // (the same named swap as the sight gates).
+    // (the same named swap as the sight gates). With a force of them the
+    // probes are staggered by slot so a tick never pays for all at once.
     c.probeT -= dt;
     if (c.probeT <= 0.0f) {
         c.probeT = 8 * kTick;
@@ -308,9 +468,9 @@ void CopControl(float dt) {
         // the reverse bites - the original holds it for the 22 ticks
         const float err = c.desiredSpeed - c.speed;
         float pedal = Clamp(err / (50 * kV), -1.0f, 1.0f);
-        c.gas = pedal > 0.0f ? pedal : 0.0f;
-        c.brake = pedal < 0.0f ? -pedal : 0.0f;
-        Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        const float g = pedal > 0.0f ? pedal : 0.0f;
+        const float b = pedal < 0.0f ? -pedal : 0.0f;
+        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
         return;
     }
 
@@ -374,8 +534,8 @@ void CopControl(float dt) {
             if (flat.Length() > 2.0f) {
                 pFwd = flat * (1.0f / flat.Length());
             } else if (playerInCar) {
-                Vec3 c, f, chest, v;
-                if (TheHost().PlayerVehiclePose(&c, &f, &chest, &v)) {
+                Vec3 cc, f, chest, v;
+                if (TheHost().PlayerVehiclePose(&cc, &f, &chest, &v)) {
                     f.z = 0.0f;
                     if (f.Length() > 0.01f)
                         pFwd = f * (1.0f / f.Length());
@@ -404,7 +564,7 @@ void CopControl(float dt) {
             // speed x10 ticks of road, +680 units: in metres, |v|*0.216 + 2.66
         Vec3 far, farther;
         bool straight = false;
-        if (c.fieldOk && VehicleFieldDescent(c.pos, ahead, &far)) {
+        if (Page().fieldOk && VehicleFieldDescent(c.pos, ahead, &far)) {
             target = far;
             if (VehicleFieldDescent(c.pos, ahead * 2.2f, &farther)) {
                 Vec3 a = far - c.pos;
@@ -418,7 +578,7 @@ void CopControl(float dt) {
             target = pPos; // no road field (graph absent): the original's
                            // own fallback aims at the man himself
         }
-        c.desiredSpeed = straight ? kSpeed2[kDifficulty] : kSpeed1[kDifficulty];
+        c.desiredSpeed = (straight ? kSpeed2[kDifficulty] : kSpeed1[kDifficulty]) * c.powerScale;
         // (pathStraight is consumed by the speed choice and the thrust
         // bonus below; it is recomputed with the target every far tick)
         c.target = target;
@@ -452,9 +612,9 @@ void CopControl(float dt) {
         if (c.speed < 48 * kV)
             thrust *= (c.speed / kV + 80.0f) / 128.0f;
         float pedal = Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f);
-        c.gas = pedal > 0.0f ? pedal : 0.0f;
-        c.brake = pedal < 0.0f ? -pedal : 0.0f;
-        Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        const float g = pedal > 0.0f ? pedal : 0.0f;
+        const float b = pedal < 0.0f ? -pedal : 0.0f;
+        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
         return;
     }
 
@@ -484,7 +644,7 @@ void CopControl(float dt) {
     }
     float wantWheel;
     if (zone == ZONE_FRONT) {
-        c.desiredSpeed = kSpeed1[kDifficulty];
+        c.desiredSpeed = kSpeed1[kDifficulty] * c.powerScale;
         // the anti-rear-end pacing: close and not battering, blend the
         // desire toward just under the man's own speed. Car-to-car only:
         // on foot the man gets the full pressure speed (the same user
@@ -525,49 +685,283 @@ void CopControl(float dt) {
     if (c.speed < 48 * kV)
         thrust *= (c.speed / kV + 80.0f) / 128.0f;
     const float pedal = Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f);
-    c.gas = pedal > 0.0f ? pedal : 0.0f;
-    c.brake = pedal < 0.0f ? -pedal : 0.0f;
+    const float g = pedal > 0.0f ? pedal : 0.0f;
+    const float b = pedal < 0.0f ? -pedal : 0.0f;
     c.target = target;
-    Drive(c.gas, c.brake, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+    Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+}
+
+// ---------------------------------------------------------------------------
+// Spawning units. A ladder unit enters at range on the road graph (the
+// traffic spawner's shape); a roadblock unit is placed by the block
+// builder below. Slot 0 carries the system page: if the ladder ever
+// replaces the anchor's BODY, the page is lifted out and laid back - the
+// felony is the player's and does not die with one car.
+struct PageSnapshot {
+    float felony, felonyClock, offenceOccur[12], offenceRepeat[12];
+    bool seen, known, informed, steerFlip, steerCalDone, spikeDone;
+    float unseenT, fieldT;
+    Vec3 fieldGoal;
+    bool fieldOk;
+};
+void SnapshotPage(PageSnapshot* s) {
+    const CopState& c = Page();
+    s->felony = c.felony;
+    s->felonyClock = c.felonyClock;
+    for (int i = 0; i < 12; ++i) {
+        s->offenceOccur[i] = c.offenceOccur[i];
+        s->offenceRepeat[i] = c.offenceRepeat[i];
+    }
+    s->seen = c.seen;
+    s->known = c.known;
+    s->informed = c.informed;
+    s->steerFlip = c.steerFlip;
+    s->steerCalDone = c.steerCalDone;
+    s->spikeDone = c.spikeDone;
+    s->unseenT = c.unseenT;
+    s->fieldT = c.fieldT;
+    s->fieldGoal = c.fieldGoal;
+    s->fieldOk = c.fieldOk;
+}
+void RestorePage(const PageSnapshot& s) {
+    CopState& c = Page();
+    c.felony = s.felony;
+    c.felonyClock = s.felonyClock;
+    for (int i = 0; i < 12; ++i) {
+        c.offenceOccur[i] = s.offenceOccur[i];
+        c.offenceRepeat[i] = s.offenceRepeat[i];
+    }
+    c.seen = s.seen;
+    c.known = s.known;
+    c.informed = s.informed;
+    c.steerFlip = s.steerFlip;
+    c.steerCalDone = s.steerCalDone;
+    c.spikeDone = s.spikeDone;
+    c.unseenT = s.unseenT;
+    c.fieldT = s.fieldT;
+    c.fieldGoal = s.fieldGoal;
+    c.fieldOk = s.fieldOk;
+}
+
+bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
+    PageSnapshot snap;
+    const bool keepPage = slot == 0;
+    if (keepPage)
+        SnapshotPage(&snap);
+    Vec3 d = face - at;
+    const float heading = std::atan2(d.x, d.y) * 57.29578f;
+    const int veh = TheHost().SpawnCopBody(at, heading, face);
+    if (veh < 0)
+        return false;
+    gCops[slot] = CopState();
+    CopState& c = gCops[slot];
+    c.veh = veh;
+    c.pos = at;
+    c.blockUnit = block;
+    c.mode = block ? COP_BLOCK : COP_IDLE;
+    c.probeT = (float)(slot % 4) * 2.0f * kTick; // the probes stagger by slot
+    if (keepPage)
+        RestorePage(snap);
+    return true;
+}
+
+// A ladder spawn point: the road node nearest a ring point 70 m out,
+// accepted in the 50..95 m band. The fan of ring points is walked in
+// full; the first in-band node wins, with a preference for the half of
+// the ring behind the player's motion (the spawner seats cars where the
+// player is not looking - ours approximates the looking with his vel).
+bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out) {
+    Vec3 back(0, -1, 0);
+    {
+        Vec3 v = gThreat.playerVel;
+        v.z = 0.0f;
+        if (v.Length() > 2.0f)
+            back = v * (-1.0f / v.Length());
+    }
+    int bestNode = -1;
+    float bestScore = -1e18f;
+    for (int i = 0; i < 12; ++i) {
+        const float a = (float)i * (6.2831853f / 12.0f);
+        const Vec3 ring = playerPos + Vec3(std::sin(a), std::cos(a), 0.0f) * kSpawnRing;
+        const int node = VehicleNearestNode(ring, 45.0f);
+        if (node < 0)
+            continue;
+        Vec3 np;
+        if (!VehicleNodePos(node, &np))
+            continue;
+        const float d = (np - playerPos).Length();
+        if (d < 50.0f || d > 95.0f)
+            continue;
+        Vec3 dirv = np - playerPos;
+        dirv.z = 0.0f;
+        const float dl = dirv.Length();
+        const float behind = dl > 0.5f ? (dirv * (1.0f / dl)).Dot(back) : 0.0f;
+        const float score = behind * 100.0f - std::fabs(d - kSpawnRing);
+        if (score > bestScore) {
+            bestScore = score;
+            bestNode = node;
+            *out = np;
+        }
+    }
+    if (bestNode >= 0)
+        return true;
+    // no in-band node anywhere on the ring (a sparse corner of the map):
+    // the nearest node to the point straight behind him, whatever its
+    // distance - the ladder would rather have its car than its band
+    const Vec3 behindPt = playerPos + back * kSpawnRing;
+    const int node = VehicleNearestNode(behindPt, 120.0f);
+    return node >= 0 && VehicleNodePos(node, out);
+}
+
+// ---------------------------------------------------------------------------
+// CreateRoadblock on our road graph: the original fans angles ahead of
+// the player to ~64 m looking for the first road segment; the graph's
+// honest equivalent is a fan of ROUTES - for each fan direction, lay the
+// road route to a point 64 m out and read the road the player is
+// actually on. The first fan whose road runs at least ~35 m takes the
+// block: two cars across it, noses turned across the lanes, asleep.
+bool PlaceRoadblock(const Vec3& playerPos) {
+    Vec3 pDir(0, 1, 0);
+    {
+        Vec3 v = gThreat.playerVel;
+        v.z = 0.0f;
+        if (v.Length() > 2.0f) {
+            pDir = v * (1.0f / v.Length());
+        } else {
+            Vec3 cc, f, chest, vv;
+            if (gThreat.playerInVehicle && TheHost().PlayerVehiclePose(&cc, &f, &chest, &vv)) {
+                f.z = 0.0f;
+                if (f.Length() > 0.01f)
+                    pDir = f * (1.0f / f.Length());
+            }
+        }
+    }
+    static const float kFanDeg[9] = { 0, 10, -10, 20, -20, 35, -35, 55, -55 };
+    for (int fi = 0; fi < 9; ++fi) {
+        const float a = kFanDeg[fi] * 0.0174533f;
+        const float ca = std::cos(a), sa = std::sin(a);
+        const Vec3 dir(pDir.x * ca - pDir.y * sa, pDir.x * sa + pDir.y * ca, 0.0f);
+        const Vec3 dest = playerPos + dir * 64.0f;
+        std::vector<Vec3> route;
+        float roadLen = 0.0f;
+        if (!VehicleRoute(playerPos, dest, &route, &roadLen) || route.size() < 2 || roadLen < 35.0f)
+            continue;
+        // the block point: kBlockAhead metres of road along the route
+        float covered = 0.0f;
+        Vec3 at = route.back();
+        Vec3 segDir = pDir;
+        for (size_t i = 1; i < route.size(); ++i) {
+            Vec3 seg = route[i] - route[i - 1];
+            seg.z = 0.0f;
+            const float sl = seg.Length();
+            if (covered + sl >= kBlockAhead) {
+                const float t = sl > 0.001f ? (kBlockAhead - covered) / sl : 0.0f;
+                at = route[i - 1] + (route[i] - route[i - 1]) * t;
+                if (sl > 0.001f)
+                    segDir = seg * (1.0f / sl);
+                break;
+            }
+            covered += sl;
+            if (sl > 0.001f)
+                segDir = seg * (1.0f / sl);
+            at = route[i];
+        }
+        const Vec3 lateral(segDir.y, -segDir.x, 0.0f); // across the lanes
+        int placed = 0;
+        for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed < kMaxBlockCars; ++slot) {
+            if (UnitLiving(gCops[slot]))
+                continue;
+            const float side = placed == 0 ? 2.3f : -2.3f;
+            const Vec3 carAt = at + lateral * side;
+            // the nose turns across the road, toward the far side: the
+            // two cars meet nose-outward across the lanes between them
+            const Vec3 face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f);
+            if (SpawnUnit(slot, carAt, face, true)) {
+                ++placed;
+                Log("cop: roadblock car asleep across the road at (%.0f, %.0f)", carAt.x, carAt.y);
+            }
+        }
+        if (placed > 0) {
+            Log("cop: ROADBLOCK placed %.0f m ahead of the player (%d car%s)",
+                kBlockAhead, placed, placed > 1 ? "s" : "");
+            return true;
+        }
+        return false; // the road was found but no block slot is free
+    }
+    Log("cop: roadblock wanted but no road ahead of the player took it");
+    return false;
 }
 
 } // namespace
 
 void CopReset() {
-    gCop = CopState();
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        gCops[i] = CopState();
+    sForce = false;
+    sRespawnT = 0.0f;
+    sWanted = 0;
+    sCutoff = 1e9f;
+    sBlockWasLow = true;
+    sBlockTimerOn = false;
+    sBlockTimer = 0.0f;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
     gThreat.felony = 0.0f;
+    gThreat.ourUnitsLost = 0;
 }
 
 bool CopActive() { return gCop.mode != COP_NONE && gCop.veh >= 0; }
 
+int CopUnitCount() {
+    int n = 0;
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (UnitLiving(gCops[i]))
+            ++n;
+    return n;
+}
+int CopPursuingCount() {
+    int n = 0;
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (UnitLiving(gCops[i]) && gCops[i].mode == COP_PURSUE)
+            ++n;
+    return n;
+}
+int CopBlockCount() {
+    int n = 0;
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (UnitLiving(gCops[i]) && gCops[i].blockUnit)
+            ++n;
+    return n;
+}
+int CopWantedCount() { return sWanted; }
+float CopCutoffDistance() { return sCutoff; }
+
 bool CopSummon(const Vec3& at, const Vec3& playerPos) {
-    if (gCop.veh >= 0)
-        TheHost().CopBodyRetire(gCop.veh, false); // one cop: a re-summon
-                                        // stands a fresh body up, old removed
-    CopState fresh;
-    // face the man: the original's justPinged heading snap
-    Vec3 d = playerPos - at;
-    const float heading = std::atan2(d.x, d.y) * 57.29578f;
-    const int veh = TheHost().SpawnCopBody(at, heading, playerPos);
+    // a re-summon clears the field first (every old body removed through
+    // the bridge, none burned), then the force stands up fresh
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (gCops[i].veh >= 0)
+            TheHost().CopBodyRetire(gCops[i].veh, false);
+    CopReset();
+    const int veh = TheHost().SpawnCopBody(at, 0.0f, playerPos);
     if (veh < 0)
         return false;
-    gCop = fresh;
-    gCop.veh = veh;
-    gCop.mode = COP_SPIKE;
-    gCop.pos = at;
+    sForce = true;
+    CopState& c = gCop;
+    c.veh = veh;
+    c.mode = COP_SPIKE;
+    c.pos = at;
     // piece 0's route: a block of Grove's own streets, out and to a second
     // point the road graph itself connects - the same streets, the same
     // graph the atlas round proved (Grove rides to the airport on it)
     Vec3 dest = at + Vec3(-170.0f, -110.0f, 0.0f);
-    if (VehicleRoute(at, dest, &gCop.spikeRoute, nullptr) && gCop.spikeRoute.size() >= 2) {
+    if (VehicleRoute(at, dest, &c.spikeRoute, nullptr) && c.spikeRoute.size() >= 2) {
         Log("cop: body up at (%.0f, %.0f) - spike route of %d points laid over Grove's streets",
-            at.x, at.y, (int)gCop.spikeRoute.size());
+            at.x, at.y, (int)c.spikeRoute.size());
     } else {
-        gCop.spikeRoute.clear();
-        gCop.spikeRoute.push_back(at);
-        gCop.spikeRoute.push_back(playerPos);
+        c.spikeRoute.clear();
+        c.spikeRoute.push_back(at);
+        c.spikeRoute.push_back(playerPos);
         Log("cop: body up at (%.0f, %.0f) - no road route for the spike; he drives at the player's mark and stops",
             at.x, at.y);
     }
@@ -575,199 +969,432 @@ bool CopSummon(const Vec3& at, const Vec3& playerPos) {
     // cop starts informed - the record says so, and the felony that goes
     // with joining a live fight is the original's own placid hit (659).
     if (gThreat.bossEngaged) {
-        gCop.informed = true;
-        gCop.felony = 659.0f;
-        gCop.known = true;
+        c.informed = true;
+        c.felony = 659.0f;
+        c.known = true;
         Log("cop: summoned into the boss's fight - he starts informed (shared threat record)");
     }
     return true;
 }
 
 void CopTick(float dt, const Vec3& playerPos) {
-    CopState& c = gCop;
-    // the feed: both brains read the same man from the same record
+    CopState& page = Page();
+
+    // the shared record's player page, refreshed every tick (piece 1's
+    // feed, unchanged: both brains read the same man from the same record)
     gThreat.playerPos = playerPos;
     gThreat.playerVel = TheHost().PlayerVelocity();
     gThreat.playerVehicle = TheHost().PlayerVehicle();
     gThreat.playerInVehicle = gThreat.playerVehicle >= 0;
-    if (c.mode == COP_NONE || c.veh < 0) {
-        gThreat.copAlive = false;
-        gThreat.copPursuing = false;
-        return;
-    }
-    Host::CopBody rep;
-    if (!TheHost().CopBodyReport(c.veh, &rep) || !rep.ok) {
-        // the body is gone from the world (streamed out, removed): the
-        // brain forgets the car, exactly the boss body's own discipline -
-        // no dangling hands, no invented state
-        Log("cop: his body is gone from the world - the brain stands down");
-        c.mode = COP_NONE;
-        c.veh = -1;
-        gThreat.copAlive = false;
-        gThreat.copPursuing = false;
-        return;
-    }
-    c.pos = rep.pos;
-    c.fwd = rep.fwd;
-    c.vel = rep.vel;
-    c.speed = rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z;
-    gThreat.copPos = rep.pos;
-    gThreat.copAlive = true;
-    gThreat.felony = c.felony;
 
-    // ---- his damage book, priced HERE on the original's scale (the SA
-    // body's health is a display the bridge holds for us - it never rules
-    // his survival). Collisions bill by their own strike, the rest by the
-    // host's health points at the anchor conversion; a hit on the DRIVER
-    // bills the same book - car and driver are one unit, and he is not
-    // independently killable (the user's order; in Driver 2 no separate
-    // driver death exists at all).
-    if (rep.impactDv > kImpactFree) {
-        float price = (rep.impactDv - kImpactFree) * kImpactRate;
-        if (price > kImpactCap)
-            price = kImpactCap;
-        c.totalDamage += price * kPursuerToughness;
-    }
-    c.totalDamage += rep.struckShot * kSaBookRate;
-    c.totalDamage += rep.struckWorld * kSaBookRate;
-    c.totalDamage += rep.struckDriver * kSaBookRate;
-    c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
-    TheHost().CopBodySetHealth(c.veh, c.health); // the display follows
-
-    // a spent book retires him, as in the original: the display is handed
-    // to the host's fire and the brain forgets the car
-    if (c.totalDamage > kWreckLine && c.mode != COP_WRECKED) {
-        c.mode = COP_WRECKED;
-        Log("cop: his book is spent (totalDamage %.0f past %.0f) - he retires and burns", c.totalDamage, kWreckLine);
-        TheHost().CopBodySetHealth(c.veh, 0.0f);
-        TheHost().CopBodyRetire(c.veh, true);
-        c.veh = -1;
-        c.mode = COP_NONE;
+    if (!sForce) {
         gThreat.copAlive = false;
         gThreat.copPursuing = false;
+        gThreat.felony = page.felony;
         return;
     }
 
-    // felony timers always run (the warmth of each offence type, and the
-    // 31-tick AdjustFelony clock)
+    // the offence clocks run even in peace (FELONY.C's own timers)
     for (int i = 0; i < 12; ++i) {
-        if (c.offenceOccur[i] < kOccurDelay[i])
-            c.offenceOccur[i] += dt;
-        if (c.offenceRepeat[i] > 0.0f)
-            c.offenceRepeat[i] -= dt;
+        if (page.offenceOccur[i] < kOccurDelay[i])
+            page.offenceOccur[i] += dt;
+        if (page.offenceRepeat[i] > 0.0f)
+            page.offenceRepeat[i] -= dt;
     }
 
-    // sight: hot gates once the felony is over the trigger
-    const bool hot = c.felony > kFelonyTrigger;
-    c.seen = CopSees(c.pos, c.fwd, hot);
-    // being hit needs no eyes: the victim knows (named extension of the
-    // original's gate - in Driver 2 the player has no gun and no ram
-    // target but the world; here the cop himself can be the victim)
-    if (rep.struckRam > 0.5f || rep.struckShot > 0.5f)
-        c.seen = true;
-    if (c.seen) {
-        c.unseenT = 0.0f;
-        c.known = true;
-    } else {
-        c.unseenT += dt;
-        if (c.unseenT > kLostAfter)
-            c.known = false; // 256 ticks unseen: player_position_known lost
+    // ---- every living unit reports; every report prices its own book
+    float struckRamU[kMaxCopUnits] = {};
+    float struckShotU[kMaxCopUnits] = {};
+    bool anySeen = false;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        CopState& c = gCops[slot];
+        if (c.veh < 0 || c.mode == COP_NONE)
+            continue;
+        Host::CopBody rep;
+        if (!TheHost().CopBodyReport(c.veh, &rep) || !rep.ok) {
+            Log("cop: a unit's body is gone from the world - his brain stands down with it");
+            c.mode = COP_NONE;
+            c.veh = -1;
+            continue;
+        }
+        c.pos = rep.pos;
+        c.fwd = rep.fwd;
+        c.vel = rep.vel;
+        c.speed = rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z;
+        // his damage book (the collision price is BCOLLIDE.C's shape; the
+        // host-priced channels convert at the one anchor). The struck
+        // channels bill the book whoever dealt them; the ledger of what
+        // the PLAYER dealt rides playerBookDamage, and that split is what
+        // the replacement step's ourUnitsLost count reads at retirement.
+        float impactPrice = 0.0f;
+        if (rep.impactDv > kImpactFree) {
+            impactPrice = std::fmin((rep.impactDv - kImpactFree) * kImpactRate, kImpactCap) *
+                          kPursuerToughness;
+            c.totalDamage += impactPrice;
+        }
+        c.totalDamage += (rep.struckShot + rep.struckWorld + rep.struckDriver) * kSaBookRate;
+        c.playerBookDamage += rep.struckShot * kSaBookRate + rep.struckDriver * kSaBookRate +
+                              (rep.struckRam > 0.5f ? impactPrice : 0.0f);
+        c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
+        // the book is DISPLAYED on the body (step 1's display band): the
+        // host shows smoke and fire off its own health, his law decides
+        // when he is out - the body never enters the host's burn band
+        // while his book lives
+        {
+            float shown = c.health;
+            if (shown > 0.02f)
+                shown = 0.38f + 0.62f * shown;
+            TheHost().CopBodySetHealth(c.veh, shown);
+        }
+        if (c.totalDamage > kWreckLine && c.mode != COP_WRECKED) {
+            c.mode = COP_WRECKED;
+            Log("cop: a unit's book is spent (%.0f of his points) - he retires and burns as one unit, car and driver together",
+                c.totalDamage);
+            if (c.playerBookDamage * 2.0f >= c.totalDamage) {
+                ThreatNoteOurUnitLost();
+                Log("cop: that retirement was the player's work - ourUnitsLost = %d (the replacement step's counter)",
+                    gThreat.ourUnitsLost);
+            }
+            TheHost().CopBodySetHealth(c.veh, 0.0f);
+            TheHost().CopBodyRetire(c.veh, true);
+            c.veh = -1;
+            if (!c.blockUnit)
+                c.mode = COP_NONE;
+            else
+                c.mode = COP_NONE; // a spent block car is just gone; the
+                                   // block count re-arms off the live slots
+            continue;
+        }
+        struckRamU[slot] = rep.struckRam;
+        struckShotU[slot] = rep.struckShot;
+        // the victim of a hit knows - the original's felony note for
+        // being struck never asks for his eyes; the unit's own sight
+        // feeds the page's seen flag, whoever of them saw the man
+        bool sees = CopSees(c.pos, c.fwd, page.felony > kFelonyTrigger) ||
+                    rep.struckRam > 0.5f || rep.struckShot > 0.5f;
+        if (sees)
+            anySeen = true;
     }
 
-    // the offences of the simple form: 2 speeding, 4 hit a car, 5 hit a cop
-    if (gThreat.playerInVehicle && c.seen) {
-        // speeding: the original fines past 1.5x the road's limit (19/16x
-        // at the top limit); our road graph carries no per-road limits, so
-        // the one top-limit stand-in (25 m/s) serves the whole city -
-        // named here, not hidden: threshold 25 * 19/16 = 29.7 m/s
+    // the page's sight bookkeeping (ControlCopDetection's shape, piece
+    // 1's reading kept exactly): seen holds the position; 256 unseen
+    // ticks lose it, whatever the felony - the loss gates the pursuit,
+    // not the felony itself, which waits above the trigger. Under the
+    // SA adaptation an informed summon starts with the position known.
+    page.seen = anySeen;
+    if (anySeen) {
+        page.unseenT = 0.0f;
+        page.known = true;
+    } else if (page.known) {
+        page.unseenT += dt;
+        if (page.unseenT > kLostAfter) {
+            page.known = false;
+            Log("cop: position lost (256 unseen ticks)");
+        }
+    }
+
+    // ---- felony notes, piece 1's forms kept whole: speeding is type 2
+    // (the original fines past 19/16 of the road's limit at the top
+    // limit; our graph carries no per-road limits, so the one stand-in
+    // serves the city - threshold 25 * 19/16 = 29.7 m/s); hitting cars
+    // is type 4 off the player's own damage ledger; a cop struck by the
+    // player's car is type 5 on CarHitByPlayer's scale; being shot at
+    // is our named extension (Driver 2's man has no gun), priced at
+    // half the full scale. The victim of a hit knows the position.
+    if (gThreat.playerInVehicle && anySeen) {
         if (gThreat.playerVel.Length() > 25.0f * 19.0f / 16.0f)
             NoteFelony(2, 0);
-        // he hit something hard: his own car's damage is the ledger
         const float impact = TheHost().PlayerVehicleImpact();
         if (impact > 12.0f)
             NoteFelony(4, impact >= 25.0f ? 4096 : (int)(impact * 160.0f));
     }
-    if (rep.struckRam > 2.0f) {
-        // the cop himself, rammed: CarHitByPlayer's scale by hardness
-        NoteFelony(5, rep.struckRam >= 25.0f ? 4096 : (int)(rep.struckRam * 160.0f));
-        c.known = true;
-    }
-    if (rep.struckShot > 0.5f) {
-        // shot by the player (Driver 2's man has no gun: our extension,
-        // named) - priced like the hit he is, at half the full scale
-        NoteFelony(5, 2048);
-        c.known = true;
-    }
-
-    // AdjustFelony: seen and hot, the felony creeps up; at or under the
-    // trigger it bleeds away - 1 per 31 ticks, the original's own rates
-    c.felonyClock += dt;
-    while (c.felonyClock >= kFelonyClock) {
-        c.felonyClock -= kFelonyClock;
-        if (c.felony > kFelonyTrigger) {
-            if (c.seen && c.felony < kFelonyCap)
-                c.felony += 1.0f;
-        } else if (c.felony > 0.0f) {
-            c.felony -= 1.0f;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        if (struckRamU[slot] > 2.0f) {
+            page.known = true;
+            NoteFelony(5, struckRamU[slot] >= 25.0f ? 4096 : (int)(struckRamU[slot] * 160.0f));
         }
-    }
-    gThreat.felony = c.felony;
-
-    // pursuit state. The 256-tick loss gates the felony and the
-    // stand-down, NOT the steering (the work order's own reading, and the
-    // original's shape: an active pursuer's steering is omniscient -
-    // CopControl1 always drives at the live position). He stands down
-    // only when the position is lost AND the man is genuinely gone: past
-    // the original's own ping-out distance (24000 units = 93.75 m, where
-    // CheckPingsOut removes a car from the world - ours stands down
-    // instead of vanishing). Back in sight or back in range, with the
-    // felony intact, the pursuit resumes on its own.
-    const float distToMan = (playerPos - c.pos).Length();
-    const bool lost = !c.known && distToMan > 24000 * kM;
-    const bool wantPursue = c.felony > kFelonyTrigger && !lost;
-    if (c.mode == COP_IDLE && wantPursue) {
-        c.mode = COP_PURSUE;
-        Log("cop: felony %.0f over the trigger - pursuit", c.felony);
-    } else if (c.mode == COP_PURSUE && !wantPursue) {
-        c.mode = COP_IDLE;
-        Log("cop: pursuit stood down (felony %.0f, position %s, %.0f m)", c.felony,
-            c.known ? "known" : "lost", distToMan);
-    }
-    c.batter = c.felony >= kBatterFelony;
-    gThreat.copPursuing = c.mode == COP_PURSUE;
-
-    // the road field rides a throttle: rebuilt when it is stale or the man
-    // has run 25 m from where it was priced
-    if (c.mode == COP_PURSUE) {
-        c.fieldT -= dt;
-        if (!c.fieldOk || c.fieldT <= 0.0f || (playerPos - c.fieldGoal).Length() > 25.0f) {
-            c.fieldOk = VehicleFieldTo(playerPos);
-            c.fieldGoal = playerPos;
-            c.fieldT = 0.75f;
+        if (struckShotU[slot] > 0.5f) {
+            page.known = true;
+            NoteFelony(5, 2048);
         }
     }
 
-    switch (c.mode) {
-    case COP_SPIKE:
-        SpikeDrive(dt);
-        break;
-    case COP_PURSUE:
-        CopControl(dt);
-        break;
-    default: // COP_IDLE: he stands by, felony watching. The stop is
-        // pedal-free once he is slow: on this host a held brake at a
-        // standstill is a reverse gear, not a handbrake - he brakes
-        // only while he is still rolling
-        if (std::fabs(c.speed) > 1.0f) {
-            Drive(0.0f, 0.7f, 0.0f, false);
-            c.brake = 0.7f;
+    // AdjustFelony (FELONY.C), piece 1's exact reading kept: SEEN and
+    // hot, the felony creeps up 1 per 31 ticks; at or below the trigger
+    // it bleeds 1 per 31 ticks; above the trigger unseen it does NOT
+    // bleed (the felony waits). "Seen" is the page's: any unit's eyes,
+    // or any unit struck, this tick.
+    page.felonyClock += dt;
+    while (page.felonyClock >= kFelonyClock) {
+        page.felonyClock -= kFelonyClock;
+        if (page.felony > kFelonyTrigger) {
+            if (anySeen && page.felony < kFelonyCap)
+                page.felony += 1.0f;
+        } else if (page.felony > 0.0f) {
+            page.felony -= 1.0f;
+        }
+    }
+    gThreat.felony = page.felony;
+
+    // ---- the manager: pursuit transitions, the ladder, the cutoff
+    const bool wantPursue = page.felony > kFelonyTrigger && page.known;
+    int livingLadder = 0;
+    for (int slot = 0; slot < kMaxCopCars; ++slot)
+        if (UnitLiving(gCops[slot]))
+            ++livingLadder;
+    sWanted = LadderWanted(page.felony);
+
+    // a summon's spike runs to its end whatever the felony does (piece 0's
+    // proof is not the ladder's to cancel); afterwards slot 0 is a unit.
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        CopState& c = gCops[slot];
+        if (!UnitLiving(c))
+            continue;
+        c.batter = page.felony >= kBatterFelony;
+        if (c.mode == COP_SPIKE || c.mode == COP_LEAVE)
+            continue;
+        if (c.mode == COP_BLOCK) {
+            // PassiveCopTasks' conversion, on our wake terms: felony hot,
+            // position known, and the player closing on the block - or
+            // the block car itself struck, which wakes it on the spot
+            const float d = (c.pos - playerPos).Length();
+            if ((wantPursue && d < kBlockWakeDist) || struckRamU[slot] > 0.5f ||
+                struckShotU[slot] > 0.5f) {
+                c.mode = COP_PURSUE;
+                Log("cop: the roadblock wakes - its unit is in the pursuit now, book and brain his own");
+            } else if (d > kPingOut) {
+                // CheckPingOut takes an unmet block car back, quietly
+                TheHost().CopBodyRetire(c.veh, false);
+                c.veh = -1;
+                c.mode = COP_NONE;
+                Log("cop: the unmet roadblock pinged out at %.0f m", d);
+                continue;
+            } else {
+                continue; // still asleep
+            }
+        }
+        if (wantPursue && (c.mode == COP_IDLE || c.mode == COP_PURSUE)) {
+            if (c.mode != COP_PURSUE)
+                Log("cop: %s - felony %.0f over the trigger, position known", slot == 0 ? "the pursuit opens" : "a unit joins the pursuit", page.felony);
+            c.mode = COP_PURSUE;
+        } else if (!wantPursue && c.mode == COP_PURSUE) {
+            // a block-woken unit with the case gone leaves like the rest;
+            // a plain unit stands down where it stands
+            if (c.blockUnit) {
+                c.mode = COP_LEAVE;
+                c.leaveRoute.clear();
+                c.leaveIdx = 0;
+                Log("cop: the case is over - the block unit drives off");
+            } else {
+                c.mode = COP_IDLE;
+                Log("cop: standing down (felony %.0f, position %s)", page.felony,
+                    page.known ? "still known" : "lost");
+            }
+        } else if (page.felony <= kFelonyTrigger && c.blockUnit && c.mode == COP_IDLE) {
+            c.mode = COP_LEAVE;
+            c.leaveRoute.clear();
+            c.leaveIdx = 0;
+        }
+    }
+
+    // the ladder: count the force, the way ControlNumberOfCops counts
+    // cars - it does not re-rank them every tick. A surplus among the
+    // non-leaving units is stood down, the farthest first, and a unit
+    // told to leave KEEPS leaving (he does not suicide-charge, and he
+    // does not churn) until the world takes him at the ping-out edge or
+    // the ladder genuinely wants everyone again (wanted >= living).
+    // Per-tick rank re-evaluation was tried first in this step and
+    // churned stand-down/turn-back cycles in the sims - the commitment
+    // below is the fix, and the sims pin it.
+    {
+        int nonLeaving = 0;
+        for (int slot = 0; slot < kMaxCopCars; ++slot)
+            if (UnitLiving(gCops[slot]) && gCops[slot].mode != COP_LEAVE)
+                ++nonLeaving;
+        if (sWanted >= livingLadder) {
+            for (int slot = 1; slot < kMaxCopCars; ++slot) {
+                CopState& c = gCops[slot];
+                if (UnitLiving(c) && c.mode == COP_LEAVE) {
+                    c.mode = COP_IDLE; // the felony rose again under him
+                    Log("cop: the ladder wants him again - the leaving unit turns back");
+                }
+            }
         } else {
-            Drive(0.0f, 0.0f, 0.0f, false);
-            c.brake = 0.0f;
+            int excess = nonLeaving - sWanted;
+            while (excess-- > 0) {
+                int farSlot = -1;
+                float farDist = -1.0f;
+                for (int slot = 1; slot < kMaxCopCars; ++slot) {
+                    CopState& c = gCops[slot];
+                    if (!UnitLiving(c) || c.mode == COP_LEAVE || c.mode == COP_SPIKE)
+                        continue; // the anchor never leaves; the spike is proof
+                    const float d = (c.pos - playerPos).Length();
+                    if (d > farDist) {
+                        farDist = d;
+                        farSlot = slot;
+                    }
+                }
+                if (farSlot < 0)
+                    break;
+                CopState& c = gCops[farSlot];
+                c.mode = COP_LEAVE;
+                c.leaveRoute.clear();
+                c.leaveIdx = 0;
+                Log("cop: the ladder wants %d - a surplus unit stands down and drives off", sWanted);
+            }
         }
-        c.gas = 0.0f;
-        break;
     }
+
+    // the cutoff: more pursuers live than the ladder wants (a woken
+    // roadblock is how that happens) - the wanted-th nearest pursuer's
+    // distance becomes the line, and pursuers beyond it read their
+    // desire at the half scale. Nobody beyond: everyone at full strength.
+    {
+        float pDist[kMaxCopUnits];
+        int nP = 0;
+        for (int slot = 0; slot < kMaxCopUnits; ++slot)
+            if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
+                pDist[nP++] = (gCops[slot].pos - playerPos).Length();
+        for (int i = 1; i < nP; ++i) {
+            const float d = pDist[i];
+            int j = i - 1;
+            while (j >= 0 && pDist[j] > d) {
+                pDist[j + 1] = pDist[j];
+                --j;
+            }
+            pDist[j + 1] = d;
+        }
+        if (nP > sWanted && sWanted >= 1)
+            sCutoff = pDist[sWanted - 1];
+        else
+            sCutoff = 1e9f;
+        for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+            CopState& c = gCops[slot];
+            if (UnitLiving(c) && c.mode == COP_PURSUE)
+                c.powerScale = (c.pos - playerPos).Length() > sCutoff ? kCutoffScale : 1.0f;
+            else
+                c.powerScale = 1.0f;
+        }
+    }
+
+    // the spawn clock (ControlNumberOfCops): while the ladder is short,
+    // the delay shrinks with the felony - 320 ticks at felony 0, half
+    // that at the cap, through the named stand-in scale. When the clock
+    // runs out and a ladder slot is free, the unit enters at range.
+    if (livingLadder < sWanted) {
+        sRespawnT += dt;
+        const float delayTicks = kRespawnTicks * (1.0f - page.felony * kRespawnScale / kFelonyCap);
+        if (sRespawnT >= delayTicks * kTick) {
+            sRespawnT = 0.0f;
+            for (int slot = 0; slot < kMaxCopCars; ++slot) {
+                if (UnitLiving(gCops[slot]))
+                    continue;
+                Vec3 at;
+                if (LadderSpawnPoint(playerPos, &at)) {
+                    if (SpawnUnit(slot, at, playerPos, false)) {
+                        Log("cop: the ladder sends another unit - he enters at %.0f m on the road (felony %.0f, wanted %d)",
+                            (at - playerPos).Length(), page.felony, sWanted);
+                        ++livingLadder;
+                    }
+                } else {
+                    Log("cop: the ladder wants a unit but no road position took him this tick");
+                }
+                break;
+            }
+        }
+    } else {
+        sRespawnT = 0.0f;
+    }
+
+    // ---- the roadblock chain (NoteFelony's latch + MAIN.C's count)
+    if (page.felony <= kBlockArmFelony) {
+        sBlockWasLow = true;
+    } else if (sBlockWasLow) {
+        sBlockWasLow = false;
+        sBlockTimer = BlockDelay();
+        sBlockTimerOn = true;
+        Log("cop: felony crossed 1318 - the roadblock count is armed (%.1f s)",
+            sBlockTimer);
+    }
+    if (CopBlockCount() > 0) {
+        sBlockTimer = BlockDelay(); // while block cars stand, the count
+                                    // is held at the delay (MAIN.C)
+    } else if (sBlockTimerOn) {
+        sBlockTimer -= dt;
+        if (sBlockTimer <= 0.0f) {
+            bool pursuing = false;
+            for (int slot = 0; slot < kMaxCopUnits; ++slot)
+                if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
+                    pursuing = true;
+            if (pursuing && page.felony >= kBlockFireFelony)
+                PlaceRoadblock(playerPos);
+            sBlockTimer = BlockDelay();
+        }
+    }
+
+    // ---- the shared road field, refreshed ONCE for the whole force
+    // (the original keeps one field for every cop; the throttle is the
+    // page's, and no unit rebuilds it alone - the perf law of this step)
+    bool anyWillPursue = false;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot)
+        if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
+            anyWillPursue = true;
+    if (anyWillPursue) {
+        page.fieldT -= dt;
+        if (page.fieldT <= 0.0f || (page.fieldGoal - playerPos).Length() > 25.0f) {
+            page.fieldT = 0.75f;
+            page.fieldGoal = playerPos;
+            page.fieldOk = VehicleFieldTo(playerPos);
+        }
+    }
+
+    // ---- drive every unit by its mode
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        CopState& c = gCops[slot];
+        if (!UnitLiving(c))
+            continue;
+        switch (c.mode) {
+        case COP_SPIKE:
+            SpikeDrive(dt);
+            break;
+        case COP_PURSUE:
+            CopControl(c, dt);
+            break;
+        case COP_LEAVE:
+            LeaveDrive(c, dt, playerPos);
+            break;
+        case COP_IDLE:
+        case COP_BLOCK:
+            StandDrive(c);
+            break;
+        default:
+            break;
+        }
+    }
+
+    // ---- the shared record's cop page: the anchor leads it while he
+    // lives; with him gone, the nearest living unit speaks for the force
+    bool alive = false, pursuing = false;
+    float leadDist = 1e18f;
+    Vec3 leadPos = page.pos;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        const CopState& c = gCops[slot];
+        if (!UnitLiving(c))
+            continue;
+        alive = true;
+        if (c.mode == COP_PURSUE)
+            pursuing = true;
+        const float d = (c.pos - playerPos).Length();
+        if (d < leadDist) {
+            leadDist = d;
+            leadPos = c.pos;
+        }
+    }
+    if (UnitLiving(gCops[0]))
+        leadPos = gCops[0].pos;
+    gThreat.copAlive = alive;
+    gThreat.copPursuing = pursuing;
+    gThreat.copPos = leadPos;
 }
 
 } // namespace mc

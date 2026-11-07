@@ -10360,6 +10360,393 @@ static void TestCop() {
     SetHost(nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Step 2's force host: many bodies, one per unit, each with the same
+// honest little physics as piece 1's fake (including the deliberately
+// INVERTED steering the spike calibration exists to catch).
+struct ForceFakeHost : TestHost {
+    struct Body {
+        Vec3 pos, vel;
+        float yaw = 0.0f, speed = 0.0f;
+        float cmdGas = 0, cmdBrake = 0, cmdSteer = 0;
+        bool cmdSiren = false;
+        float display = 1000.0f;
+        bool burned = false, driverDown = false;
+        float qRam = 0, qShot = 0, qWorld = 0, qDriver = 0, qImpact = 0;
+    };
+    std::map<int, Body> bodies;
+    int nextId = 100;
+    float lastSpawnDist = -1.0f; // from the staged player, at the last spawn
+    int SpawnCopBody(const Vec3& at, float, const Vec3& face) override {
+        Body b;
+        b.pos = at;
+        const Vec3 d = face - at;
+        b.yaw = std::atan2(d.x, d.y);
+        const int id = nextId++;
+        bodies[id] = b;
+        lastSpawnDist = Dist2D(at, player);
+        return id;
+    }
+    bool CopBodyReport(int veh, CopBody* out) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return false;
+        Body& b = it->second;
+        out->ok = true;
+        out->pos = b.pos;
+        out->fwd = Vec3(std::sin(b.yaw), std::cos(b.yaw), 0.0f);
+        out->vel = b.vel;
+        out->health = 1.0f;
+        out->gas = b.cmdGas;
+        out->brake = b.cmdBrake;
+        out->steer = b.cmdSteer;
+        out->siren = b.cmdSiren;
+        out->struckRam = b.qRam;
+        out->struckShot = b.qShot;
+        out->struckWorld = b.qWorld;
+        out->struckDriver = b.qDriver;
+        out->impactDv = b.qImpact;
+        b.qRam = b.qShot = b.qWorld = b.qDriver = b.qImpact = 0.0f;
+        return true;
+    }
+    void CopBodySetHealth(int veh, float book01) override {
+        auto it = bodies.find(veh);
+        if (it != bodies.end())
+            it->second.display = book01 > 0.0f ? 380.0f + 620.0f * book01 : 90.0f;
+    }
+    void CopBodyRetire(int veh, bool burnOut) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return;
+        it->second.burned = burnOut;
+        it->second.driverDown = burnOut;
+        bodies.erase(it);
+    }
+    void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return;
+        it->second.cmdGas = gas;
+        it->second.cmdBrake = brake;
+        it->second.cmdSteer = steer;
+        it->second.cmdSiren = siren;
+    }
+    float PlayerVehicleImpact() override { return 0.0f; }
+    Body* Find(int veh) {
+        auto it = bodies.find(veh);
+        return it == bodies.end() ? nullptr : &it->second;
+    }
+    void StepAll(float dt) {
+        for (auto& kv : bodies) {
+            Body& b = kv.second;
+            if (b.cmdGas > 0.0f)
+                b.speed += b.cmdGas * 9.0f * dt;
+            if (b.cmdBrake > 0.0f) {
+                if (b.speed > 0.3f)
+                    b.speed -= b.cmdBrake * 13.0f * dt;
+                else {
+                    b.speed -= b.cmdBrake * 12.0f * dt;
+                    if (b.speed < -9.0f)
+                        b.speed = -9.0f;
+                }
+            }
+            b.speed -= b.speed * 0.30f * dt;
+            if (b.speed > 56.0f)
+                b.speed = 56.0f;
+            const float sf = Clamp(b.speed / 8.0f, -1.0f, 1.0f);
+            b.yaw -= b.cmdSteer * 3.4f * sf * dt; // inverted, like piece 1's fake
+            const Vec3 f(std::sin(b.yaw), std::cos(b.yaw), 0.0f);
+            b.pos = b.pos + f * b.speed * dt;
+            b.vel = f * b.speed;
+        }
+    }
+};
+
+static void TestCopForce() {
+    ForceFakeHost host;
+    SetHost(&host);
+    WideStage();
+    CopReset();
+    CHECK(LoadVehicleGraphFromRepo(), "the force sims ride the real vehicle graph");
+    const float dt = 0.02f;
+    const Vec3 grove(2486.0f, -1654.0f, 13.5f);
+    auto ladderLiving = []() {
+        int n = 0;
+        for (int s = 0; s < kMaxCopCars; ++s)
+            if (gCops[s].veh >= 0 && gCops[s].mode != COP_NONE)
+                ++n;
+        return n;
+    };
+    auto stageAnchor = [&](const Vec3& at, const Vec3& man) {
+        CopReset();
+        host.bodies.clear();
+        host.hasPlayer = true;
+        host.player = man;
+        host.vehicle = 42;
+        host.velocity = Vec3();
+        CHECK(CopSummon(at, man), "the force's anchor stands up");
+        // the spike is piece 0's proof, not this step's: skip it the way
+        // piece 1's chase sims do, calibration already the anchor's
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true; // this fake body is inverted, as calibrated
+        gCop.spikeDone = true;
+    };
+    auto tick = [&](float seconds) {
+        for (float t = 0.0f; t < seconds; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+        }
+    };
+
+    // ---- (i) the ladder: felony climbs 0->1->2->3 more units, decays
+    // back down, and the surplus LEAVES - drives off to the ping-out
+    // radius, never charges the man it is standing down from
+    {
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        stageAnchor(grove, man);
+        gCop.felony = 700.0f;
+        tick(1.0f);
+        CHECK(ladderLiving() == 1 && CopPursuingCount() == 1,
+              "felony 700: the anchor alone pursues (living %d, pursuing %d)",
+              ladderLiving(), CopPursuingCount());
+        gCop.felony = 900.0f;
+        tick(9.0f);
+        CHECK(ladderLiving() == 2, "felony 900: the ladder sent a second unit (%d)", ladderLiving());
+        gCop.felony = 1700.0f;
+        tick(9.0f);
+        CHECK(ladderLiving() == 3, "felony 1700: a third unit (%d)", ladderLiving());
+        gCop.felony = 2500.0f;
+        tick(9.0f);
+        CHECK(ladderLiving() == 4, "felony 2500: the ladder is full at maxCopCars (%d)", ladderLiving());
+        // decay: two units are surplus. Watch them leave: each must end
+        // at the ping-out edge and never close on the man after leaving
+        gCop.felony = 900.0f;
+        float leaveStart[kMaxCopUnits], leaveMin[kMaxCopUnits], leaveMax[kMaxCopUnits];
+        bool leaving[kMaxCopUnits] = {}, left[kMaxCopUnits] = {};
+        for (int s = 0; s < kMaxCopUnits; ++s) {
+            leaveStart[s] = -1.0f;
+            leaveMin[s] = 1e9f;
+            leaveMax[s] = -1.0f;
+        }
+        for (float t = 0.0f; t < 30.0f && ladderLiving() > 2; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+            for (int s = 0; s < kMaxCopUnits; ++s) {
+                if (gCops[s].mode == COP_LEAVE) {
+                    const float d = (gCops[s].pos - host.player).Length();
+                    if (!leaving[s]) {
+                        leaving[s] = true;
+                        leaveStart[s] = d;
+                    }
+                    if (d < leaveMin[s])
+                        leaveMin[s] = d;
+                    if (d > leaveMax[s])
+                        leaveMax[s] = d;
+                } else if (leaving[s] && gCops[s].veh < 0) {
+                    left[s] = true;
+                }
+            }
+        }
+        CHECK(ladderLiving() == 2, "felony back to 900: the surplus is gone (%d)", ladderLiving());
+        int leftCount = 0;
+        for (int s = 0; s < kMaxCopUnits; ++s) {
+            if (!leaving[s])
+                continue;
+            ++leftCount;
+            CHECK(leaveMax[s] >= 90.0f, "a leaver reached the ping-out edge (max %.0f m)", leaveMax[s]);
+            CHECK(leaveMin[s] >= leaveStart[s] - 8.0f,
+                  "a leaver never charged the man while leaving (start %.0f, closest %.0f)",
+                  leaveStart[s], leaveMin[s]);
+            CHECK(left[s], "a leaver actually pinged out, not parked in LEAVE");
+        }
+        CHECK(leftCount == 2, "exactly the two surplus units left (%d)", leftCount);
+        gCop.felony = 200.0f;
+        tick(30.0f);
+        CHECK(ladderLiving() == 1 && gCop.mode == COP_IDLE,
+              "felony 200: the anchor alone, stood down (living %d, mode %d)", ladderLiving(), (int)gCop.mode);
+        CHECK(gThreat.ourUnitsLost == 0, "stand-downs and ping-outs are not losses (%d)", gThreat.ourUnitsLost);
+    }
+
+    // ---- (ii) a retired unit is replaced on the timer while the felony
+    // holds; (vi) ourUnitsLost counts ONLY the player's own work
+    {
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        stageAnchor(grove, man);
+        gCop.felony = 1700.0f;
+        for (float t = 0.0f; t < 20.0f && ladderLiving() < 3; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+        }
+        CHECK(ladderLiving() == 3, "the force staged at three units (%d)", ladderLiving());
+        int slotA = -1, slotB = -1;
+        for (int s = 1; s < kMaxCopCars; ++s)
+            if (gCops[s].veh >= 0 && gCops[s].mode != COP_NONE) {
+                if (slotA < 0)
+                    slotA = s;
+                else if (slotB < 0)
+                    slotB = s;
+            }
+        CHECK(slotA > 0 && slotB > 0, "two ladder units to spend (%d, %d)", slotA, slotB);
+        // the player's gun spends the first: his book fills past 27000
+        // through the shot channel alone, so the loss is wholly his
+        if (ForceFakeHost::Body* b = host.Find(gCops[slotA].veh))
+            b->qShot = 1200.0f;
+        tick(0.1f);
+        CHECK(gCops[slotA].veh < 0, "the shot-spent unit retired");
+        CHECK(gThreat.ourUnitsLost == 1, "a player-caused retirement counted (%d)", gThreat.ourUnitsLost);
+        // the world spends the second: nothing of it is the player's
+        if (ForceFakeHost::Body* b = host.Find(gCops[slotB].veh))
+            b->qWorld = 1200.0f;
+        tick(0.1f);
+        CHECK(gCops[slotB].veh < 0, "the world-spent unit retired");
+        CHECK(gThreat.ourUnitsLost == 1, "a world-caused retirement did NOT count (%d)", gThreat.ourUnitsLost);
+        // replacements ride the respawn timer in, at range
+        host.lastSpawnDist = -1.0f;
+        for (float t = 0.0f; t < 9.0f && ladderLiving() < 2; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+        }
+        CHECK(ladderLiving() >= 2, "a replacement arrived on the timer (%d)", ladderLiving());
+        CHECK(host.lastSpawnDist >= 45.0f && host.lastSpawnDist <= 100.0f,
+              "the replacement entered at range, not in the player's face (%.0f m)", host.lastSpawnDist);
+    }
+
+    // ---- (iv) the roadblock: felony past 1318 arms the count; the block
+    // stands across the road ahead of a moving player, asleep until he
+    // closes; (iii) once it wakes, pursuers exceed the ladder's want and
+    // the cutoff halves the far units' power - the nearest fights full
+    {
+        std::vector<Vec3> roadPts;
+        CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(1690, -2280, 13), &roadPts, nullptr) &&
+                  roadPts.size() > 4,
+              "the roadblock sim rides the Grove-to-airport road");
+        RoadWalker road;
+        road.Build(roadPts);
+        float manS = road.NearestDist(grove) + 60.0f;
+        Vec3 md;
+        const Vec3 man0 = road.PosAt(manS, &md);
+        const float copS = manS - 30.0f;
+        stageAnchor(road.PosAt(copS, nullptr), man0);
+        gCop.felony = 1400.0f;
+        bool placed = false, asleepOk = true, woke = false;
+        Vec3 blk0, blk1, atPlayer, atDir;
+        float tAll = 0.0f;
+        for (; tAll < 90.0f && !woke; tAll += dt) {
+            manS += 15.0f * dt;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.player = mp;
+            host.velocity = md * 15.0f;
+            CopTick(dt, mp);
+            host.StepAll(dt);
+            for (auto& kv : host.bodies)
+                kv.second.pos.z = road.PosAt(road.NearestDist(kv.second.pos), nullptr).z;
+            if (!placed && CopBlockCount() == 2) {
+                placed = true;
+                blk0 = gCops[kMaxCopCars].pos;
+                blk1 = gCops[kMaxCopCars + 1].pos;
+                atPlayer = mp;
+                atDir = md;
+                CHECK(gCops[kMaxCopCars].mode == COP_BLOCK && gCops[kMaxCopCars + 1].mode == COP_BLOCK,
+                      "the block cars stand asleep");
+            } else if (placed && !woke) {
+                const float d0 = (gCops[kMaxCopCars].pos - mp).Length();
+                const float d1 = (gCops[kMaxCopCars + 1].pos - mp).Length();
+                if (d0 > 50.0f && d1 > 50.0f) {
+                    // still far: asleep means asleep - no gas, no pursuit
+                    ForceFakeHost::Body* b0 = host.Find(gCops[kMaxCopCars].veh);
+                    ForceFakeHost::Body* b1 = host.Find(gCops[kMaxCopCars + 1].veh);
+                    if (gCops[kMaxCopCars].mode != COP_BLOCK || gCops[kMaxCopCars + 1].mode != COP_BLOCK ||
+                        (b0 && b0->cmdGas != 0.0f) || (b1 && b1->cmdGas != 0.0f))
+                        asleepOk = false;
+                }
+                if (gCops[kMaxCopCars].mode == COP_PURSUE && gCops[kMaxCopCars + 1].mode == COP_PURSUE)
+                    woke = true;
+            }
+        }
+        CHECK(placed, "felony 1400 armed the count and the block was placed");
+        if (placed) {
+            const Vec3 rel = blk0 - atPlayer;
+            CHECK(rel.Dot(atDir) > 15.0f, "the block stands AHEAD of the moving player (%.0f m along his road)",
+                  rel.Dot(atDir));
+            const float bd = rel.Length();
+            CHECK(bd >= 25.0f && bd <= 85.0f, "the block's distance is the fan's own (%.0f m)", bd);
+            CHECK(std::fabs((blk0 - blk1).Length() - 4.6f) < 1.5f,
+                  "the two cars stand across the lanes (%.1f m apart)", (blk0 - blk1).Length());
+        }
+        CHECK(asleepOk, "the block stayed asleep until the player closed in");
+        CHECK(woke, "the block woke as the player closed - both units pursue");
+        // (iii) the cutoff, staged exactly: the nearest pursuer 10 m
+        // behind the man, the farthest 80 m behind him on the same road
+        if (woke) {
+            int nearSlot = -1, farSlot = -1;
+            float nd = 1e18f, fd = -1.0f;
+            for (int s = 0; s < kMaxCopUnits; ++s) {
+                if (gCops[s].veh < 0 || gCops[s].mode != COP_PURSUE)
+                    continue;
+                const float d = (gCops[s].pos - host.player).Length();
+                if (d < nd) {
+                    nd = d;
+                    nearSlot = s;
+                }
+                if (d > fd) {
+                    fd = d;
+                    farSlot = s;
+                }
+            }
+            CHECK(nearSlot >= 0 && farSlot >= 0 && nearSlot != farSlot,
+                  "four pursuers to rank (near %d, far %d)", nearSlot, farSlot);
+            CHECK(CopPursuingCount() > CopWantedCount(),
+                  "pursuers exceed the ladder's want (%d > %d)", CopPursuingCount(), CopWantedCount());
+            if (nearSlot >= 0 && farSlot >= 0 && nearSlot != farSlot) {
+                if (ForceFakeHost::Body* b = host.Find(gCops[nearSlot].veh)) {
+                    b->pos = road.PosAt(manS - 10.0f, nullptr);
+                    b->speed = 0.0f;
+                }
+                if (ForceFakeHost::Body* b = host.Find(gCops[farSlot].veh)) {
+                    b->pos = road.PosAt(manS - 80.0f, nullptr);
+                    b->speed = 0.0f;
+                }
+                const Vec3 mp = road.PosAt(manS, &md);
+                host.player = mp;
+                host.velocity = md * 15.0f;
+                CopTick(dt, mp);
+                host.StepAll(dt);
+                CHECK(CopCutoffDistance() < 100.0f, "a cutoff line is in force (%.0f m)", CopCutoffDistance());
+                CHECK(gCops[nearSlot].powerScale == 1.0f,
+                      "the nearest pursuer fights at full power (%.2f)", gCops[nearSlot].powerScale);
+                CHECK(gCops[farSlot].powerScale == 0.5f,
+                      "the far pursuer is cut to the half scale (%.2f)", gCops[farSlot].powerScale);
+                CHECK(gCops[farSlot].desiredSpeed <= 27.5f,
+                      "the far unit's desired speed rides the half scale (%.1f m/s)", gCops[farSlot].desiredSpeed);
+                int full = 0;
+                for (int s = 0; s < kMaxCopUnits; ++s)
+                    if (gCops[s].veh >= 0 && gCops[s].mode == COP_PURSUE && gCops[s].powerScale == 1.0f)
+                        ++full;
+                CHECK(full == CopWantedCount(), "exactly the wanted number fight at full strength (%d)", full);
+            }
+        }
+    }
+
+    // ---- (v) perf: four units, ONE shared field - the refresh counter
+    // moves at the field's own cadence, not once per unit per tick
+    {
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        stageAnchor(grove, man);
+        gCop.felony = 2500.0f;
+        for (float t = 0.0f; t < 30.0f && CopPursuingCount() < 4; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+        }
+        CHECK(CopPursuingCount() == 4, "four units pursuing for the field proof (%d)", CopPursuingCount());
+        const int before = VehicleFieldBuildCount();
+        tick(7.5f);
+        const int delta = VehicleFieldBuildCount() - before;
+        CHECK(delta >= 4 && delta <= 14,
+              "one shared field for the whole force: %d refreshes in 7.5 s (the 0.75 s cadence), not per-unit", delta);
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1)
         return InspectWorldFile(argv[1]);
@@ -10521,6 +10908,7 @@ int main(int argc, char** argv) {
     TestBossOffPath();
     TestBossCoreJump();
     TestCop();
+    TestCopForce();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
