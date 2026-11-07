@@ -7,7 +7,7 @@
 #include "CDecisionMakerTypes.h"
 #include "CPools.h"
 #include "CPlayerPed.h"
-#include "CTaskComplexEnterCarAsDriver.h"
+#include "CTask.h"
 #include "CVehicle.h"
 #include "CWorld.h"
 #include "common.h"
@@ -43,8 +43,9 @@ struct CopBodyState {
     CPed* driver = nullptr;
     int driverRef = -1;
     bool seated = false;
-    float seatT = 0.0f;      // seconds since spawn; the enter task's budget
+    float seatT = 0.0f;      // seconds since spawn; the seat warp's budget
     bool seatRetried = false;
+    float seatLogT = 0.0f;   // the seat watch's per-second diagnostic clock
     // his survival book lives in the core; this bridge only DISPLAYS it:
     // book01 in (0,1] shows as 380..1000 host points (damage stages ride
     // the host's own bands; the fire band under ~300 is never entered
@@ -112,7 +113,26 @@ CPed* LiveDriver(const CopBodyState& b) {
     return p == b.driver ? p : nullptr;
 }
 
-float DisplayHealth(float book01) { return book01 > 0.0f ? 380.0f + 620.0f * book01 : 90.0f; }
+// The display band, with blast headroom (fix round 3): the input is
+// the core's shown fraction (0.38 at a spent book .. 1.0 at a full
+// one; 0 is the wreck order). The floor is unchanged - 380 host
+// points, never the host's burn band while his book lives - but the
+// ceiling is no longer the host's own 1000: a point-blank blast
+// strips ~1000 host points inside one frame, and at a 1000 ceiling
+// the host would explode the body in the very damage stack that
+// dealt it, before any re-assert could run, while his book still
+// lived. The band now runs to 2500, so no single frame can zero the
+// body out from under the book; billing reads deltas against the
+// last set value in the same points, so no price changes. Named
+// cost: the host's own smoke stages key off its thresholds and sit
+// higher on the book now - with his own body drawn over the host,
+// the dent blend is his damage display, not the host's smoke.
+float DisplayHealth(float shown) {
+    if (shown <= 0.0f)
+        return 90.0f;
+    const float frac = Clamp((shown - 0.38f) / 0.62f, 0.0f, 1.0f);
+    return 380.0f + 2120.0f * frac;
+}
 
 // piece 3: silence one body's two loops (siren = slot*2, engine =
 // slot*2+1, the ids CopBodyPost drives)
@@ -154,12 +174,22 @@ void CopSessionReset() {
 }
 
 // the drawn wheel's radius: CARS.C's rewrite scales the ring by
-// wheelSize * 14142 / 10000 = 69 of his units at 256 units = 1 m
-constexpr float kCopWheelRadiusM = 69.0f / 256.0f;
+// wheelSize * 14142 / 10000 = 69 of his units, at the convicted
+// geometry factor of 153.6 units = 1 m (fix round 3)
+constexpr float kCopWheelRadiusM = 69.0f / 153.6f;
 // DrawCarWheels swaps CLEANWHEEL for FASTWHEEL when the wheel's angular
 // increment passes 400 of 4096 per 1/50 s tick: 400/4096 of a turn per
-// tick is ~30.7 rad/s, which at his wheel radius is ~8.3 m/s of road
-constexpr float kCopFastWheelMps = 8.3f;
+// tick is ~30.7 rad/s, which at his wheel radius is ~13.8 m/s of road
+constexpr float kCopFastWheelMps = 13.8f;
+// his drawn body's lift over the host car's origin (fix round 3): his
+// contact patch sits 0.866 m under his own origin (wheel centre -0.417
+// at the convicted factor, less the 0.449 m radius) and the settled
+// 596 carries its origin ~0.53 m over its contact patch, so his
+// origin rides 0.336 m above the host's for the two ground lines to
+// meet. At the old 0.6x bake the same arithmetic gave ~0 lift, which
+// is why the small body sat plausibly while the true-size one would
+// have sunk its tyres a third of a metre into the road.
+constexpr float kCopBodyLiftM = 0.336f;
 
 void CopBodyPre(float dt) {
     // every body's driver, every frame (the one-unit law): what he lost
@@ -186,7 +216,11 @@ void CopBodyPre(float dt) {
                 b.driverHitAcc += 1000.0f - driver->m_fHealth;
             driver->m_fHealth = 1000.0f;
         }
-        // seating: the enter task is the game's own; watch it land
+        // seating: the seat warp is the game's own task (fix round 3 -
+        // the animated enter task never completed once in six units;
+        // the conviction and the trade are in DRIVER2-STEP3-fa.md).
+        // Watch the warp land by the round-trip the spike verdict
+        // reads: his ped in the car, the car's driver him.
         CVehicle* veh = LiveVeh(b);
         CPed* driver = LiveDriver(b);
         if (veh && driver && !b.seated) {
@@ -205,16 +239,44 @@ void CopBodyPre(float dt) {
                         break;
                     }
                 }
-            } else if (b.seatT > 8.0f && !b.seatRetried) {
-                b.seatRetried = true;
-                driver->m_pIntelligence->m_TaskMgr.SetTask(new CTaskComplexEnterCarAsDriver(veh),
-                                                           TASK_PRIMARY_PRIMARY, false);
-                Log("cop body: a driver had not sat in 8 s - the enter task was issued once more");
             } else if (b.seatT > 20.0f) {
                 // said out loud, in the log the spike verdict is read from:
-                // if this line ever prints, field control has no driver
+                // if this line ever prints, field control has no driver.
+                // Round 3 adds the discipline the first night lacked:
+                // a body that never seats does not stay in service
+                // driverless - it is taken out whole (the core sees
+                // the report fail and stands the unit down), never
+                // left standing in the street as a parked shell.
                 Log("cop body: A DRIVER NEVER SAT (20 s) - field control has no driver to work through");
-                b.seatT = -1e9f; // say it once
+                const int ref = b.vehRef;
+                GtaCopBodyRetire(ref, false);
+                Log("cop body: the driverless body was taken out of service");
+                continue;
+            } else {
+                // the watch names its reason once a second while it
+                // waits: how far the ped stands from his door, and
+                // what his primary task currently is - a stall after
+                // this round reads its own cause off the log
+                b.seatLogT += dt;
+                if (b.seatT > 8.0f && !b.seatRetried) {
+                    b.seatRetried = true;
+                    Command<Commands::TASK_WARP_CHAR_INTO_CAR_AS_DRIVER>(
+                        CPools::GetPedRef(driver), CPools::GetVehicleRef(veh));
+                    Log("cop body: a driver had not sat in 8 s - the seat warp was issued once more");
+                }
+                if (b.seatLogT >= 1.0f) {
+                    b.seatLogT = 0.0f;
+                    const CMatrix& cm = *veh->m_matrix;
+                    const CVector doorP = cm.pos + cm.right * -0.9f + cm.up * 0.6f;
+                    const CVector dp = driver->GetPosition();
+                    const float dx = dp.x - doorP.x, dy = dp.y - doorP.y, dz = dp.z - doorP.z;
+                    CTask* task = nullptr;
+                    if (driver->m_pIntelligence)
+                        task = driver->m_pIntelligence->m_TaskMgr.m_aPrimaryTasks[TASK_PRIMARY_PRIMARY];
+                    Log("cop body: seat watch - driver %.1f m from the door of car %d, primary task %p (type %d)",
+                        std::sqrt(dx * dx + dy * dy + dz * dz), b.vehRef,
+                        (void*)task, task ? (int)task->GetId() : -1);
+                }
             }
         }
     }
@@ -255,8 +317,17 @@ void CopBodyPost() {
         // and the force drives on the named stand-in.
         const bool shown = CopBodyFilesReady();
         veh->bIsVisible = !shown;
-        if (CPed* driver = LiveDriver(b))
+        if (CPed* driver = LiveDriver(b)) {
             driver->bIsVisible = !shown;
+            // Pre's measure-and-hold, mirrored after the game's frame:
+            // a hit that lands between Pre and Post is measured and
+            // topped up in the same frame instead of the next. The
+            // measure consumes the drop it sees (health returns to
+            // 1000 at each measure), so the pair never double-counts.
+            if (driver->m_fHealth < 1000.0f)
+                b.driverHitAcc += 1000.0f - driver->m_fHealth;
+            driver->m_fHealth = 1000.0f;
+        }
         // ---- piece 3: his own voice, driven off the same state the
         // pedals are. The siren is his pursuit flag (the core sets it
         // exactly while CopControl1 drives), looped positionally from
@@ -314,29 +385,30 @@ void CopRender(float light) {
         CVector d = m.pos - cam;
         if (d.x * d.x + d.y * d.y + d.z * d.z > 120.0f * 120.0f)
             continue; // MobsRender's own distance courtesy
-        if (!TheCamera.IsSphereVisible(m.pos, 2.6f))
+        if (!TheCamera.IsSphereVisible(m.pos, 2.7f))
             continue;
         // the pose is the vehicle's own matrix, read in the core's car
         // frame: the matrix's "up" slot is the car's forward, its "at"
         // slot is the car's up (the spawn's own basis write proves the
-        // layout). His origin lands on the vehicle's origin - the
-        // settled 596 carries its origin ~0.53 m over its contact
-        // patch and his wheel bottoms sit 0.526 m under his, so the
-        // two ground lines meet with no lift; the eye test owns the
-        // last centimetres and this is the constant it would tune.
+        // layout). His origin rides kCopBodyLiftM over the vehicle's
+        // origin along the car's own up, so his contact patch meets
+        // the host's ground line (the constant's derivation stands at
+        // its definition); the eye test owns the last centimetres and
+        // this is the constant it would tune.
         Pose pose;
         pose.X = Vec3(m.right.x, m.right.y, m.right.z);
         pose.Y = Vec3(m.up.x, m.up.y, m.up.z);
         pose.Z = Vec3(m.at.x, m.at.y, m.at.z);
-        pose.o = Vec3(m.pos.x, m.pos.y, m.pos.z);
+        pose.o = Vec3(m.pos.x, m.pos.y, m.pos.z) + pose.Z * kCopBodyLiftM;
         DrawCopCar(pose, 1.0f - b.book01, centers, steerSign * veh->m_fSteerAngle,
                    b.wheelSpin, b.speedMps > kCopFastWheelMps, light, 1.0f, 1.0f, 1.0f);
         // his shadow: hiding the 596 takes the game's own blob with it,
-        // so ours stands in (the mob shadow's own mechanism)
+        // so ours stands in (the mob shadow's own mechanism), sized to
+        // the true body now - a 4.9 m car's blob, not the 0.6x one's
         bool found = false;
         const float gz = CWorld::FindGroundZFor3DCoord(m.pos.x, m.pos.y, m.pos.z + 2.0f, &found, nullptr);
         if (found)
-            AddShadow(CVector(m.pos.x, m.pos.y, gz), 1.6f, 0.55f);
+            AddShadow(CVector(m.pos.x, m.pos.y, gz), 2.5f, 0.55f);
     }
 }
 
@@ -515,9 +587,20 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     driver->m_fMaxHealth = 1000.0f; // held at the top by Pre, like the
     driver->m_fHealth = 1000.0f;    // boss's body: he is the unit's face,
                                     // not a life of his own
-    // stand him at his own door and give him the game's own enter task -
-    // the one door the SDK opens into a car (the drive task itself is not
-    // in the SDK, and no task is ever built from raw addresses here)
+    // the two channels that could kill him inside a single frame -
+    // before any top-up of ours can run - are proofed shut (fix round
+    // 3): a blast and a fire. Both bill the book through the car's own
+    // channels anyway (the blast through the shot/world delta and the
+    // impact price, fire through the world drain), so nothing priced
+    // is lost; what is lost is only the double-count through his body
+    // and the chance of a separate ped death. Bullets and melee still
+    // land on him and bill through the driver channel, headshots
+    // included - the one-unit law keeps its priced residue.
+    driver->bExplosionProof = true;
+    driver->bFireProof = true;
+    // stand him at his own door for the frame before the seat warp
+    // lands (the warp does not care where he stands; the door is for
+    // the eye and for the seat watch's distance reading)
     const CVector door(at.x - fwd.y * 1.3f, at.y + fwd.x * 1.3f, gz + 1.0f);
     // the same lazy-matrix law, one door down: nothing between the
     // driver's construction and here allocates his matrix either, so
@@ -531,27 +614,35 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     } else {
         driver->SetPosn(door);
     }
-    // the enter task is issued through the driver's intelligence -
-    // the block above only CONFIGURES it under a null check, this line
-    // used to deref it bare (the audit's one unchecked field deref on
-    // this path). A constructed cop ped always carries one, so this is
-    // a guard, not an expectation - but a spawn that cannot give its
-    // driver the door is refused whole, never half-built.
-    if (!driver->m_pIntelligence) {
-        Log("cop body: the driver has no intelligence to take the enter task - spawn refused");
-        CWorld::Remove(driver);
-        delete driver;
-        CWorld::Remove(veh);
-        delete veh;
-        s = CopBodyState();
-        return -1;
-    }
-    driver->m_pIntelligence->m_TaskMgr.SetTask(new CTaskComplexEnterCarAsDriver(veh),
-                                               TASK_PRIMARY_PRIMARY, false);
+    // SEATING (fix round 3) - the animated enter, convicted: piece 3
+    // seated him with CTaskComplexEnterCarAsDriver, the game's own
+    // walk-to-the-door task, and in the 2026-11-07 eye test six of six
+    // drivers never sat - two issuances each, twenty seconds each,
+    // standing a metre from the door on flat ground. Every ingredient
+    // on our side of the call checks out (the header's ctor takes the
+    // vehicle alone, exactly as called; the same ped construction,
+    // PED_EMPTY and SetTask form run the boss body's tasks in the
+    // same build; nothing in Pre fights the task; the car is a fresh
+    // script car of the kind missions task chars into daily) - the
+    // stall lives inside the task's own line-up phase, which has no
+    // body in the SDK to inspect or repair. So the spawn takes the
+    // game's OTHER own door into the seat: the script warp
+    // TASK_WARP_CHAR_INTO_CAR_AS_DRIVER, the verb missions seat chars
+    // with when the seat must simply happen, on the same script
+    // surface this codebase already works (WARP_CHAR_FROM_CAR_TO_COORD
+    // in GtaMining.cpp). THE TRADE, stated plainly: the walk-to-the-
+    // door animation is given up for certainty - he is simply IN the
+    // seat when the warp's task lands, a frame or two after this call.
+    // (He is invisible under his drawn body anyway; nobody loses a
+    // show.) The seating is then PROVEN by Pre's watch - the m_pDriver
+    // / m_pVehicle round-trip - and a body that still has not seated
+    // in 20 s is taken out of service whole, never left driverless.
+    Command<Commands::TASK_WARP_CHAR_INTO_CAR_AS_DRIVER>(CPools::GetPedRef(driver),
+                                                         CPools::GetVehicleRef(veh));
     s.driver = driver;
     s.driverRef = ppool->GetRef(driver);
     PedSkinsExcludePed(driver);
-    Log("cop spawn: step 7 - enter task issued; the seating itself is watched in Pre");
+    Log("cop spawn: step 7 - seat warp issued; the seating itself is watched in Pre");
     Log("cop body: car %d and driver up at (%.0f, %.0f)", s.vehRef, at.x, at.y);
     return s.vehRef;
 }
@@ -570,8 +661,10 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
     out->fwd = Vec3(v->m_matrix->up.x, v->m_matrix->up.y, v->m_matrix->up.z);
     out->vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
-    out->health = v->m_fHealth / 1000.0f; // the DISPLAY's fraction; the
-                                          // book itself lives in the core
+    out->health = v->m_fHealth / 2500.0f; // the DISPLAY's fraction of
+                                          // its band (380..2500 since
+                                          // fix round 3); the book
+                                          // itself lives in the core
     // READ BACK from the vehicle itself - never the stored command. If the
     // game's own processing overwrote a pedal between our two asserts,
     // this is the number that says so.
@@ -661,13 +754,23 @@ void GtaCopBodyRetire(int veh, bool burnOut) {
     CVehicle* v = LiveVeh(s);
     CPed* driver = LiveDriver(s);
     if (burnOut) {
-        // his book is spent: the unit goes down together - the driver
-        // slumps in his seat by the game's own hand (health zeroed, the
-        // corpse is the city's to clean) and the car is handed to the
-        // fire at burn-band health. Nothing of ours is left pointing at
-        // either body. ONLY this body is forgotten - the force drives on.
-        if (driver)
-            driver->m_fHealth = 0.0f;
+        // his book is spent: the unit retires AS A CAR (fix round 3).
+        // The old path zeroed the driver's health - he died a ped's
+        // death in his seat: blood out of the car and a corpse for the
+        // city, while the eye expects a machine's end. Now the driver
+        // leaves the world silently (removed, never killed - no death,
+        // no blood, no body) and the car alone is handed to the fire
+        // at burn-band health: the host's own fire takes it, it
+        // explodes as a car explodes, and the burnt wreck STAYS in the
+        // world - nothing of ours deletes it; the city's own cleanup
+        // owns it from here, like any burnt car on the street. What
+        // the eye sees after this fix: fire, a car's explosion, a
+        // blackened wreck that remains - and no blood anywhere.
+        // ONLY this body is forgotten - the force drives on.
+        if (driver) {
+            CWorld::Remove(driver);
+            delete driver;
+        }
         if (v)
             v->m_fHealth = 90.0f;
         s = CopBodyState();
