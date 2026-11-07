@@ -578,6 +578,15 @@ bool BossDriverPreTick(float dt, CPlayerPed* player) {
         return true; // no soldier: the kill above is the whole duty
     }
     Mob& m = gMobs[bi];
+    if (m.drvDropBody) {
+        // The core declared this body gone (it fell out of the world):
+        // retire and kill it here, hands off afterwards. The sync's glue
+        // path stands a fresh body up as the parked sensor this same
+        // frame, and the mode entry below stands it back up as his feet
+        // when the long-haul law re-engages the body.
+        BossProxyKill();
+        return false;
+    }
     if (!BossBodyEnsure(m))
         return false;
     CPed* ped = gBossProxy.ped;
@@ -664,6 +673,10 @@ void BossDriverApply(float dt) {
         BossProxyKill();
         return;
     }
+    if (m.drvDropBody || m.drvCoreTravel)
+        return; // a condemned or parked body takes no objective: the fall
+                // was declared inside this frame's report, or the core
+                // took his feet for the long haul between the two halves
     CPed* ped = BossProxyResolve();
     if (!ped || !ped->m_pIntelligence)
         return; // the pre-tick's body is gone mid-frame: next frame rebuilds
@@ -899,7 +912,17 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     // brain ticks - the brain reads the feet the game gave him and answers
     // with objectives, which BossProxySync applies after the tick
     gBossDriver.didPre = false;
-    if (gGta.enabled && !gBossTest.proxyOff && !gBossTest.driverOff)
+    // the long-haul law (2026-11-07): while the core owns his feet for a
+    // stretch beyond the body's country, no report is taken at all - the
+    // sync below retires the driver once and the legacy glue parks the
+    // body as his sensor for the whole stretch, duties and all
+    bool coreTravel = false;
+    {
+        const int bi = BossFindSoldier();
+        if (bi >= 0)
+            coreTravel = gMobs[bi].drvCoreTravel;
+    }
+    if (gGta.enabled && !gBossTest.proxyOff && !gBossTest.driverOff && !coreTravel)
         BossDriverPreTick(dt, player);
     MobsTick(dt, playerPos, gGta.enabled ? gInv.Held().id : 0, !player->bInVehicle, &beings);
     if (gGta.enabled) {

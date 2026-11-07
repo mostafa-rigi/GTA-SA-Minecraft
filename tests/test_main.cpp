@@ -8124,8 +8124,9 @@ static void TestBossStateChurn() {
     }
     // ---- (b) the hunt's entry discipline: at close range even a long,
     // silent blindness never becomes a hunt (the distance gate, not the
-    // clock, is what holds him); far away, the hunt engages only after the
-    // full grace has run out in silence
+    // clock, is what holds him); far away, the successor - the hunt in
+    // its day, the tracker feed since the tenacity leash (2026-11-07) -
+    // engages only after the full grace has run out in silence
     {
         WideStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
@@ -8158,19 +8159,38 @@ static void TestBossStateChurn() {
         FaceMob(s, 0.0f);
         ProvokeByAim(host, Vec3(0.5f, 20.5f, 11.0f), none);
         RunMobsB(1.0f, Vec3(0.5f, 20.5f, 11.0f), none);
-        float huntAt = -1.0f;
-        bool earlyHunt = false;
+        // LAW UPDATE (the tenacity leash, the user's amendment of
+        // 2026-11-07): this block used to pin the hunt taking the far
+        // trail. A trail 80 m cold is not the hunt's any more - past the
+        // leash the hunt hands the chase back to the tracker feed the
+        // tick it forms, because a search worked on stale ground is a
+        // pause the feed never ordered. What survives of the entry
+        // discipline, and is pinned here: the grace is still combat's
+        // (no successor state before it runs out), the feed takes the
+        // trail inside the same window the hunt used to, and the road
+        // actually closes - the pause is gone, not renamed.
+        float trackAt = -1.0f;
+        bool earlyExit = false;
+        const Vec3 farMan(0.5f, 100.5f, 11.0f);
+        auto flatFar = [&]() {
+            Vec3 d = gMobs[s].pos - farMan;
+            d.z = 0.0f;
+            return d.Length();
+        };
+        const float dStart = flatFar();
         for (int i = 0; i < 240; ++i) { // 12 s: the man is simply gone, 80 m off
             const float t = (float)i * 0.05f;
-            MobsTick(0.05f, Vec3(0.5f, 100.5f, 11.0f), 0, true, none);
-            if (gMobs[s].bossState == 3 && huntAt < 0.0f)
-                huntAt = t;
-            if (gMobs[s].bossState == 3 && t < 4.8f)
-                earlyHunt = true;
+            MobsTick(0.05f, farMan, 0, true, none);
+            if (gMobs[s].bossState == 5 && trackAt < 0.0f)
+                trackAt = t;
+            if (gMobs[s].bossState != 2 && t < 4.8f)
+                earlyExit = true;
         }
-        CHECK(!earlyHunt, "no hunt before the grace runs out - the first seconds are combat's");
-        CHECK(huntAt > 4.8f && huntAt < 9.0f,
-              "and then the hunt takes the genuinely cold, far trail (at %.1f s)", huntAt);
+        CHECK(!earlyExit, "no successor before the grace runs out - the first seconds are combat's");
+        CHECK(trackAt > 4.8f && trackAt < 9.0f,
+              "and then the feed takes the genuinely cold, far trail (at %.1f s)", trackAt);
+        CHECK(flatFar() < dStart - 15.0f,
+              "and the trail is walked, not contemplated (%.0f -> %.0f m)", dStart, flatFar());
     }
     // ---- (c) retreat discipline: at 75% health no fallback exists at all;
     // below the wounded line the fallback is one short bound, never a walk
@@ -8268,8 +8288,19 @@ struct FakeDriverBody {
     float rampTurn = 0.0f; // the turn this start-up owes (by heading change)
     float rampSpeed = 0.0f; // the start-up's current pace
     float facing = 0.0f;   // his heading (the codebase's yaw: dir = (-sin, cos))
-    void Report(int s, float dt) const { MobDriverReport(s, pos, true, dt); }
+    // the tracker repair round: a body that falls out of the world. While
+    // `falling`, every step drops it 9 m and it stops answering orders;
+    // `lieGrounded` selects the liar's variant - the standing flag keeps
+    // claiming solid ground while the z plunges (the fall detector's
+    // below-ground witness exists for exactly that stream).
+    bool falling = false;
+    bool lieGrounded = false;
+    void Report(int s, float dt) const { MobDriverReport(s, pos, !falling || lieGrounded, dt); }
     void Walk(int s, float dt) {
+        if (falling) {
+            pos.z -= 9.0f * dt;
+            return;
+        }
         if (frozen)
             return;
         const Mob& m = gMobs[s];
@@ -8437,15 +8468,20 @@ static void TestBossDriver() {
 
         const int countAtLoss = gMobs[s].drvObjCount;
         const Vec3 far(0.5f, 140.5f, 11.0f); // the man vanishes, far beyond the hunt gate
-        bool sawHunt = false;
-        for (int i = 0; i < 300 && !sawHunt; ++i) { // up to 15 s: grace, then the hunt
+        // LAW UPDATE (the tenacity leash, 2026-11-07): the successor to a
+        // FAR cold loss is the tracker feed now, not the hunt - the hunt
+        // is a close tool and the feed owns stale ground. The deed this
+        // pin has always carried is unchanged: the loss ends nothing,
+        // and fresh movement orders keep flowing under the successor.
+        bool sawTrack = false;
+        for (int i = 0; i < 300 && !sawTrack; ++i) { // up to 15 s: grace, then the feed
             drv.Report(s, 0.05f);
             MobsTick(0.05f, far, 0, true, none);
             drv.Walk(s, 0.05f);
-            if (gMobs[s].bossState == 3 && gMobs[s].drvObjCount > countAtLoss)
-                sawHunt = true;
+            if (gMobs[s].bossState == 5 && gMobs[s].drvObjCount > countAtLoss)
+                sawTrack = true;
         }
-        CHECK(sawHunt, "a far, cold loss trades combat for the hunt, with fresh orders under it");
+        CHECK(sawTrack, "a far, cold loss trades combat for the tracker feed, with fresh orders under it");
     }
 
     // (d) one writer: with the body frozen mid-fight (it reports, it does
@@ -9050,27 +9086,551 @@ static void TestBossTracker() {
         CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
     }
 
-    // (e) the driver contract under the law: a driven body 400 m from a
+    // (e) the driver contract under the law: a driven body far from a
     // standing man is ordered at his ground, at chase pace, in the
-    // tracker state - no provocation involved anywhere.
+    // tracker state - no provocation involved anywhere. LAW UPDATE (the
+    // long-haul law, 2026-11-07): the staging moved from 400 m to 250 m -
+    // past the user's 300 m line the CORE owns his feet by law and there
+    // is no driver body to carry (that road is TestBossTravelModes' own
+    // sim); the driver contract is exercised inside the body's country,
+    // where the law says the body drives.
     {
         TrackerStage();
         const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
         FaceMob(s, 0.0f);
         FakeDriverBody drv{ gMobs[s].pos };
-        const Vec3 man(0.5f, 400.5f, 11.0f);
+        const Vec3 man(0.5f, 250.5f, 11.0f);
         RunDriven(drv, s, 3.0f, man, none);
         const Mob& m = gMobs[s];
         CHECK(m.bossState == 5, "driven, the tracker state owns the road (state %d)", m.bossState);
+        CHECK(!m.drvCoreTravel, "inside the body's country the body drives (250 m is his ground)");
         CHECK(m.drvObjValid && m.drvObjSpeed > 2.6f, "the objective runs: chase pace on the driver body (%.1f m/s)", m.drvObjSpeed);
-        Vec3 d = m.drvObj - Vec3(0.5f, 400.5f, 10.0f);
+        Vec3 d = m.drvObj - Vec3(0.5f, 250.5f, 10.0f);
         d.z = 0.0f;
         CHECK(d.Length() < 6.0f, "and it is aimed at the far man's ground (%.1f m off)", d.Length());
     }
 }
 
+// A synthetic ped graph in the loader's own format (the TestSmartPack
+// builder's pattern), for the travel sims that need a road of their own.
+static bool BuildTestGraph(const std::vector<Vec3>& nodes, const std::vector<std::pair<int, int>>& edges) {
+    std::vector<std::vector<uint32_t>> adj(nodes.size());
+    for (auto& e : edges) {
+        adj[e.first].push_back((uint32_t)e.second);
+        adj[e.second].push_back((uint32_t)e.first);
+    }
+    std::vector<unsigned char> g;
+    auto put = [&](const void* d, size_t n) { const unsigned char* c = (const unsigned char*)d; g.insert(g.end(), c, c + n); };
+    auto u32 = [&](uint32_t v) { put(&v, 4); };
+    auto f32 = [&](float v) { put(&v, 4); };
+    put("MCNAV1", 6);
+    u32((uint32_t)nodes.size());
+    uint32_t total = 0;
+    for (auto& a : adj)
+        total += (uint32_t)a.size();
+    u32(total);
+    for (auto& n : nodes) { f32(n.x); f32(n.y); f32(n.z); }
+    uint32_t off = 0;
+    u32(0);
+    for (auto& a : adj) { off += (uint32_t)a.size(); u32(off); }
+    for (auto& a : adj)
+        for (uint32_t t : a)
+            u32(t);
+    uint32_t sum = 0;
+    for (unsigned char c : g)
+        sum += c;
+    u32(sum);
+    return LoadNavGraph(g.data(), g.size());
+}
+
 // =====================================================================
-// THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
+// THE LONG-HAUL LAW (the tracker repair round, 2026-11-07): the session
+// of that day watched the driver body fall out of the world at 510 m
+// and be adopted, falling, for thirteen minutes - z without bound, x/y
+// frozen, no gone line, no new objective (the standing order deduped,
+// by design, over a corpse). Three roots, all convicted from code: the
+// report path adopted positions with no sanity gate; the bridge's
+// gone-checks (pool ref, health, ped state) all pass forever on a body
+// whose health we ourselves top up; and the legacy legs' ground-hold
+// protection never runs in driver mode because MoveMob is skipped by
+// design there. The law: a fall detector on the report itself, and the
+// user's own 300 m as the body's country - inside it the native body
+// drives, beyond it the core walks him and the body is parked as the
+// glued sensor (320 out / 280 back: hysteresis around his number).
+static void TestBossTravelModes() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(4242);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    const float dt = 0.05f;
+    auto flatD = [](const Vec3& a, const Vec3& b) {
+        Vec3 d = a - b;
+        d.z = 0.0f;
+        return d.Length();
+    };
+
+    // (A) THE FALL, both streams: an honest body whose standing flag
+    // drops as it falls, and a liar whose flag keeps claiming ground
+    // while the z plunges. Either way: gone declared inside a second,
+    // the fall never adopted past the evidence threshold, his feet
+    // restored to the last sane ground, the bridge word set - and once
+    // the bridge obeys it, core travel keeps closing on the man.
+    for (int variant = 0; variant < 2; ++variant) {
+        TrackerStage(); // a long floor: the core-travel leg after the fall runs 50+ m
+        UnloadNavGraph();
+        host.wall = false;
+        host.vehicle = -1;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        const Vec3 man(0.5f, 60.5f, 11.0f);
+        RunDriven(drv, s, 1.0f, man, none); // a healthy driven approach
+        CHECK(gMobs[s].drvOn, "fall sim %d: the body drives before anything is wrong", variant);
+        drv.falling = true;
+        drv.lieGrounded = (variant == 1);
+        float goneAt = -1.0f, minZ = 99.0f;
+        for (int i = 0; i < 40; ++i) { // 2 s of falling reports
+            drv.Report(s, dt);
+            MobsTick(dt, man, 0, true, none);
+            drv.Walk(s, dt);
+            minZ = std::min(minZ, gMobs[s].pos.z);
+            if (!gMobs[s].drvOn && goneAt < 0.0f)
+                goneAt = (i + 1) * dt;
+        }
+        CHECK(goneAt > 0.0f && goneAt <= 1.0f,
+              "fall sim %d: the falling body is declared gone within a second (%.2f s)", variant, goneAt);
+        CHECK(gMobs[s].drvDropBody, "fall sim %d: the bridge word is set - retire and kill this body", variant);
+        CHECK(minZ > 7.5f, "fall sim %d: the fall is never adopted past the evidence threshold (min z %.2f)", variant, minZ);
+        CHECK(gMobs[s].pos.z > 9.9f, "fall sim %d: his feet are restored to the last sane ground (z %.2f)", variant, gMobs[s].pos.z);
+        MobDriverGone(s); // the bridge obeys the word
+        CHECK(!gMobs[s].drvDropBody, "fall sim %d: the retirement clears the word", variant);
+        const float d0 = flatD(gMobs[s].pos, man);
+        for (int i = 0; i < 200; ++i)
+            MobsTick(dt, man, 0, true, none);
+        CHECK(flatD(gMobs[s].pos, man) < d0 - 20.0f,
+              "fall sim %d: core travel takes his feet and keeps closing (%.0f -> %.0f m)", variant, d0, flatD(gMobs[s].pos, man));
+        CHECK(gMobs[s].bossState == 5 || gMobs[s].bossState == 2,
+              "fall sim %d: the pursuit itself never blinked (state %d)", variant, gMobs[s].bossState);
+        CHECK(gMobs[s].pos.z > 9.9f, "fall sim %d: and his feet stay on the ground the whole way", variant);
+    }
+
+    // (B) THE LONG HAUL: the man waits 800 m off. An honest bridge parks
+    // the body while the core owns the stretch and stands it back up at
+    // his feet inside the engage line. The mode flips exactly once each
+    // way, no tick ever moves him faster than his own pace (no teleport
+    // hides in either handover), and the road ends the way the tracker
+    // law promises: arrival and a fight on sight.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        host.wall = false;
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 800.5f, 11.0f);
+        FakeDriverBody body{ gMobs[s].pos };
+        bool parked = false, alive = true, wasCore = false, sawCoreLegs = false;
+        int coreOn = 0, coreOff = 0;
+        float maxStep = 0.0f;
+        bool engaged = false;
+        for (int i = 0; i < 4000 && !engaged; ++i) { // up to 200 s of road
+            Mob& m = gMobs[s];
+            if (m.drvDropBody) { MobDriverGone(s); alive = false; parked = true; }
+            if (m.drvCoreTravel && !parked) {
+                if (m.drvOn)
+                    MobDriverGone(s);
+                parked = true;
+            }
+            if (!m.drvCoreTravel && parked && m.drvReengageT <= 0.0f) {
+                parked = false; // the mode entry: the body is placed at
+                alive = true;   // his feet - the sensor comes back as him
+                body.pos = m.pos;
+            }
+            if (!parked && alive)
+                body.Report(s, dt);
+            const Vec3 before = gMobs[s].pos;
+            MobsTick(dt, man, 0, true, none);
+            if (!parked && alive)
+                body.Walk(s, dt);
+            maxStep = std::max(maxStep, flatD(gMobs[s].pos, before));
+            if (gMobs[s].drvCoreTravel != wasCore) {
+                if (gMobs[s].drvCoreTravel) ++coreOn; else ++coreOff;
+                wasCore = gMobs[s].drvCoreTravel;
+            }
+            if (gMobs[s].drvCoreTravel && !gMobs[s].drvOn)
+                sawCoreLegs = true;
+            if (flatD(gMobs[s].pos, man) < 30.0f && (gMobs[s].bossState == 2 || host.playerHurt > 0.0f))
+                engaged = true;
+        }
+        CHECK(coreOn == 1 && coreOff == 1, "long haul: core travel engages once and hands back once (%d/%d)", coreOn, coreOff);
+        CHECK(sawCoreLegs, "long haul: beyond the line his own legs carry him - no body is adopted out there");
+        CHECK(maxStep < 0.45f, "long haul: no teleport in either handover (largest tick step %.2f m)", maxStep);
+        CHECK(engaged, "long haul: 800 m of road ends in arrival and a fight (state %d, %.0f m out)",
+              gMobs[s].bossState, flatD(gMobs[s].pos, man));
+    }
+
+    // (C) THE BOUNDARY: hysteresis around the user's 300. A man hovering
+    // inside the band (285-315 m) never flips the mode at all; a man
+    // swinging across the whole band flips it a bounded number of times
+    // - the law answers the crossing, it does not flap.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        host.wall = false;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody body{ gMobs[s].pos };
+        auto runBand = [&](float dNear, float dFar, float legSeconds, int legs) {
+            int flips = 0;
+            bool was = gMobs[s].drvCoreTravel;
+            for (int leg = 0; leg < legs; ++leg) {
+                const float d = (leg % 2 == 0) ? dFar : dNear;
+                for (float t = 0.0f; t < legSeconds; t += dt) {
+                    body.pos = gMobs[s].pos; // a carried body: the distance scripted is the distance read
+                    body.Report(s, dt);
+                    const Vec3 mp(gMobs[s].pos.x, gMobs[s].pos.y + d, 11.0f);
+                    MobsTick(dt, mp, 0, true, none);
+                    if (gMobs[s].drvCoreTravel != was) {
+                        ++flips;
+                        was = gMobs[s].drvCoreTravel;
+                    }
+                }
+            }
+            return flips;
+        };
+        const int hoverFlips = runBand(285.0f, 315.0f, 1.0f, 20); // 20 s inside the band
+        CHECK(hoverFlips == 0, "boundary: hovering at the user's 300 never flaps the mode (%d flips)", hoverFlips);
+        const int swingFlips = runBand(250.0f, 350.0f, 5.0f, 8); // 40 s across the whole band
+        CHECK(swingFlips >= 6 && swingFlips <= 9,
+              "boundary: full swings flip the mode once per crossing, no more (%d flips in 8 legs)", swingFlips);
+    }
+    CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+}
+
+// =====================================================================
+// THE TENACITY PASS (the user's amendment, 2026-11-07: «مثل سگ ولم
+// نکنه»): the tracker feed never dies, but the pursuit used to spend
+// the feed's gift on stale ground - the hunt working a disc the prey
+// had long left, or running out its 45-second clock toward a stand-
+// down the feed never ordered (the session fossil: combat flipped to
+// hunt at 510 m and the clock owned the next 45 s). The leash: past
+// 72 m from the boss - beyond the search's own farthest stride - the
+// hunt hands the chase back to the feed the same tick. Near prey the
+// hunt keeps every bit of its corner craft; the re-acquire out of a
+// brief loss was already fast and is pinned, not changed.
+static void TestBossTenacity() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(99);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    const float dt = 0.05f;
+    auto flatD = [](const Vec3& a, const Vec3& b) {
+        Vec3 d = a - b;
+        d.z = 0.0f;
+        return d.Length();
+    };
+
+    // the zigzag-and-car script: 14 s of zigzag on foot, 5 s in a car,
+    // 15 s of zigzag again. Net-net he must LOSE ground the whole way,
+    // and the boss must never once leave the pursuit family for patrol.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        host.wall = false;
+        host.playerHurt = 0.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        Vec3 manPos(0.5f, 120.5f, 11.0f);
+        Vec3 seat(0.5f, 0.5f, 10.6f);
+        const float d0 = flatD(gMobs[s].pos, manPos);
+        int badState = -1;
+        float yAtCarStart = 0.0f, yAtCarEnd = 0.0f;
+        for (int i = 0; i < 680; ++i) { // 34 s of tricks
+            const float t = i * dt;
+            Vec3 mp;
+            if (t < 14.0f || t >= 19.0f) { // on foot, zigzagging
+                host.vehicle = -1;
+                host.vehPoseOn = false;
+                const int leg = (int)(t / 0.8f);
+                const float sx = (leg % 2 == 0) ? 3.98f : -3.98f;
+                const Vec3 vel(sx, 3.34f, 0.0f); // 5.2 m/s at +/-50 degrees
+                host.velocity = vel;
+                manPos = manPos + vel * dt;
+                mp = manPos;
+            } else { // the car hop: 11 m/s straight north
+                if (host.vehicle != 77) {
+                    seat = Vec3(manPos.x, manPos.y, 10.6f);
+                    host.vehicle = 77;
+                    host.vehPoseOn = true;
+                    yAtCarStart = gMobs[s].pos.y;
+                }
+                host.velocity = Vec3(0.0f, 11.0f, 0.0f);
+                seat = seat + Vec3(0.0f, 11.0f * dt, 0.0f);
+                host.vehCentre = seat;
+                host.vehSeat = seat;
+                mp = seat + Vec3(0, 0, 0.4f);
+                manPos = Vec3(seat.x, seat.y, 11.0f);
+                if (t + dt >= 19.0f)
+                    yAtCarEnd = gMobs[s].pos.y;
+            }
+            MobsTick(dt, mp, 0, true, none);
+            if (i > 20 && badState < 0) {
+                const int st = gMobs[s].bossState;
+                if (st != 5 && st != 3 && st != 2)
+                    badState = st;
+            }
+        }
+        host.vehicle = -1;
+        host.vehPoseOn = false;
+        host.velocity = Vec3();
+        const float d1 = flatD(gMobs[s].pos, manPos);
+        CHECK(badState < 0, "tenacity: zigzag and car hops never shake him into patrol (worst state %d)", badState);
+        CHECK(yAtCarEnd > yAtCarStart + 15.0f, "tenacity: he kept running through the car phase (y %.0f -> %.0f)", yAtCarStart, yAtCarEnd);
+        CHECK(d1 < d0 - 40.0f, "tenacity: net-net the tricks LOSE ground (%.0f -> %.0f m)", d0, d1);
+    }
+
+    // the brief-loss re-acquire: a wall eats the contact at 40 m, the
+    // hunt takes the ground (near prey - the leash does not apply), and
+    // the moment the wall drops the fight resumes inside 0.6 s.
+    {
+        TrackerStage(); // a long floor: the fight closes most of the 40 m first
+        UnloadNavGraph();
+        host.wall = false;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 40.5f, 11.0f);
+        for (int i = 0; i < 16; ++i) // the fight opens on sight
+            MobsTick(dt, man, 0, true, none);
+        CHECK(gMobs[s].bossState == 2, "re-acquire: the fight is on before the wall (state %d)", gMobs[s].bossState);
+        host.wall = true;
+        // the wall goes up between the two men, and the man falls back
+        // behind it to 75 m: the combat press walks to his last-seen
+        // point during the grace, so the prey himself must still be
+        // beyond the hunt's distance gate when the grace runs out -
+        // that is the gate's own law, and the sim stages it honestly
+        host.wallC = Vec3(0.5f, (gMobs[s].pos.y + man.y) * 0.5f, 10.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 30.0f; // too wide to round inside the window
+        const Vec3 manFar(0.5f, 75.5f, 11.0f);
+        bool sawHunt = false;
+        for (int i = 0; i < 160; ++i) { // 8 s behind the wall
+            MobsTick(dt, manFar, 0, true, none);
+            if (gMobs[s].bossState == 3)
+                sawHunt = true;
+        }
+        CHECK(sawHunt, "re-acquire: a near loss still belongs to the hunt, not the feed (the leash is honest)");
+        host.wall = false; // the wall drops and the man is back on the open street
+        int ticks = 0;
+        while (gMobs[s].bossState != 2 && ticks < 40) {
+            MobsTick(dt, man, 0, true, none);
+            ++ticks;
+        }
+        CHECK(ticks <= 12, "re-acquire: sight restored, the fight resumes inside 0.6 s (%d ticks)", ticks);
+    }
+    CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+}
+
+// =====================================================================
+// THE OFF-PATH FREEDOM (the user's amendment, 2026-11-07: he is not
+// bound to where pedestrians walk): where the direct line is honestly
+// traversable he cuts across country; where it is not - a real wall -
+// the chooser refuses and the graph road stands, whole. Priced against
+// the graph-only road the freedom replaces (the switch's other side).
+static void TestBossOffPath() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(2024);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    const float dt = 0.05f;
+    auto stageLot = [&]() {
+        WideStage();
+        for (int x = -12; x <= 36; ++x) // the north street's ground
+            for (int y = 15; y <= 26; ++y)
+                gWorld.SetRaw(x, y, 9, MakeVox(ID_STONE));
+        // the road around the lot: A(0,0) B(0,20) C(15,20) D(30,20) E(30,0)
+        // - 70 m of street against 30 m of open country
+        CHECK(BuildTestGraph({ Vec3(0, 0, 10), Vec3(0, 20, 10), Vec3(15, 20, 10), Vec3(30, 20, 10), Vec3(30, 0, 10) },
+                             { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 } }),
+              "off-path: the lot's road graph loads");
+        host.wall = false;
+    };
+    auto flatD = [](const Vec3& a, const Vec3& b) {
+        Vec3 d = a - b;
+        d.z = 0.0f;
+        return d.Length();
+    };
+    // arrival is a PLACE, not a state: sight opens the fight at 30 m on
+    // any road, so the stopwatch runs until he is actually on the man
+    auto runToContact = [&](int s, const Vec3& man, float* maxPerp, float* crossY) {
+        int ticks = 0;
+        while (flatD(gMobs[s].pos, man) >= 13.0f && ticks < 800) { // 40 s cap
+            MobsTick(dt, man, 0, true, none);
+            ++ticks;
+            if (maxPerp)
+                *maxPerp = std::max(*maxPerp, std::fabs(gMobs[s].pos.y - 0.5f));
+            if (crossY && *crossY < -900.0f && gMobs[s].pos.x >= 15.0f)
+                *crossY = gMobs[s].pos.y;
+        }
+        return ticks;
+    };
+    const Vec3 man(30.5f, 0.5f, 11.0f);
+
+    // the graph-only road (the freedom switched off): the price of the road
+    gOffPathCut = false;
+    stageLot();
+    int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+    FaceMob(s, 0.0f);
+    const int tGraph = runToContact(s, man, nullptr, nullptr);
+    CHECK(tGraph < 800, "off-path: the graph road still arrives (%d ticks)", tGraph);
+
+    // the cut: open country, straight across, materially sooner, and the
+    // road he takes is the direct line, not a waypoint's shadow
+    gOffPathCut = true;
+    stageLot();
+    s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+    FaceMob(s, 0.0f);
+    float maxPerp = 0.0f;
+    const int tCut = runToContact(s, man, &maxPerp, nullptr);
+    CHECK(tCut < 800, "off-path: the cut arrives (%d ticks)", tCut);
+    CHECK(tCut < (int)(tGraph * 0.65f), "off-path: the cut is materially sooner than the road (%d vs %d ticks)", tCut, tGraph);
+    CHECK(maxPerp < 6.0f, "off-path: the cut holds the direct line (max %.1f m off it)", maxPerp);
+
+    // the walled lot: the chooser refuses, the road stands, and he
+    // crosses the wall's line only where the road crosses it - north,
+    // at the street, never through the wall
+    stageLot();
+    host.wall = true;
+    host.wallC = Vec3(15, 0.5f, 10);
+    host.wallDir = Vec3(0, 1, 0);
+    host.wallHalf = 12.0f; // the wall spans y -11.5..12.5 at x=15
+    s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+    FaceMob(s, 0.0f);
+    float crossY = -999.0f;
+    const int tWall = runToContact(s, man, nullptr, &crossY);
+    host.wall = false;
+    CHECK(tWall < 800, "off-path: walled, the road still arrives (%d ticks)", tWall);
+    CHECK(crossY > 13.0f, "off-path: he crosses the wall's line at the street, not through it (y %.1f)", crossY);
+    CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+}
+
+// =====================================================================
+// THE JUMP IN BOTH MODES (the user's amendment, 2026-11-07: «پرشم
+// نداره» - in his latest play he never saw one): driver mode's hop is
+// the repair round's own, already pinned. Core mode always had the
+// walker's probe reflex for the goal line; this round adds the stall
+// witness for the wedges the reflex cannot see - progress is the only
+// witness, a fresh destination owns a fair start, and the probe toward
+// the destination must read the jumpable class before a hop exists.
+static void TestBossCoreJump() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(5150);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+    const float dt = 0.05f;
+
+    // (i) THE DEED: a fence across the road in core mode - he hops it
+    // once, visibly, and continues to the man. Exactly one airborne
+    // episode in the fence's corridor: a hop, not a pogo stick.
+    {
+        TrackerStage();
+        UnloadNavGraph();
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 30.5f, 8.0f); // its top at z=11: shin reads
+        host.wallDir = Vec3(1, 0, 0);        // it, the head line passes
+        host.wallHalf = 8.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 60.5f, 11.0f);
+        bool crossed = false, wasAir = false;
+        int episodes = 0;
+        float maxZ = 0.0f;
+        for (int i = 0; i < 600; ++i) { // 30 s
+            MobsTick(dt, man, 0, true, none);
+            const Mob& m = gMobs[s];
+            if (m.pos.y < 33.0f) {
+                const bool air = !m.onGround && m.vel.z > 4.0f;
+                if (air && !wasAir)
+                    ++episodes;
+                wasAir = air;
+                if (std::fabs(m.pos.y - 30.5f) < 3.0f)
+                    maxZ = std::max(maxZ, m.pos.z);
+            }
+            if (m.pos.y > 30.5f)
+                crossed = true;
+        }
+        host.wall = false;
+        CHECK(crossed, "core jump: he crosses the fence line instead of wedging on it");
+        CHECK(maxZ > 10.8f, "core jump: the crossing is a visible hop (peak z %.2f)", maxZ);
+        CHECK(episodes == 1, "core jump: exactly one hop for the fence (%d episodes)", episodes);
+        CHECK(gMobs[s].bossState == 2, "core jump: and the road ends in the fight (state %d)", gMobs[s].bossState);
+    }
+
+    // (ii) THE WITNESS: his feet are pinned by an outside hand (the
+    // harness holds his position, the way a real wedge would) with his
+    // route's waypoint leading EAST - the walker's reflex probes the
+    // goal line and honestly sees nothing - while a fence stands 1.2 m
+    // north, across the line to his destination. Only the progress
+    // witness can convict this wedge: no approach for the fair start
+    // plus the window, the probe toward the destination reads the
+    // jumpable class, and exactly one hop is ordered - no spam under
+    // the cooldown. Unpinned, he walks his route and hops the fence on
+    // it on the reflex's word, like any other road. The off-path freedom
+    // is switched OFF for this sim: with the cut live the destination
+    // line and the goal line reunite, and the reflex - rightly - takes
+    // the fence itself; the witness is priced against the route here,
+    // and the freedom has its own sim above.
+    {
+        gOffPathCut = false;
+        TrackerStage();
+        CHECK(BuildTestGraph({ Vec3(0.5f, 0.5f, 10), Vec3(6.5f, 0.5f, 10), Vec3(6.5f, 60.5f, 10) },
+                             { { 0, 1 }, { 1, 2 } }),
+              "core jump witness: the little route graph loads");
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 1.7f, 8.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 8.0f;
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        const Vec3 man(0.5f, 60.5f, 11.0f);
+        float hopAt = -1.0f, hopVel = 0.0f;
+        for (int i = 0; i < 60 && hopAt < 0.0f; ++i) { // up to 3 s pinned
+            MobsTick(dt, man, 0, true, none);
+            if (gMobs[s].coreHopCount == 1) {
+                hopAt = (i + 1) * dt;
+                hopVel = gMobs[s].vel.z;
+            }
+            Mob& m = gMobs[s]; // the outside hand: his feet do not move
+            m.pos = Vec3(0.5f, 0.5f, 10.0f);
+            m.vel = Vec3();
+            m.onGround = true;
+        }
+        CHECK(hopAt >= 1.5f && hopAt <= 2.5f,
+              "core jump witness: the hop is ordered on the law's clock, not before (%.2f s)", hopAt);
+        CHECK(hopVel > 4.0f, "core jump witness: and it is a real jump's order (vel.z %.1f)", hopVel);
+        for (int i = 0; i < 20; ++i) { // 1 s more of pinning: the cooldown holds
+            MobsTick(dt, man, 0, true, none);
+            Mob& m = gMobs[s];
+            m.pos = Vec3(0.5f, 0.5f, 10.0f);
+            m.vel = Vec3();
+            m.onGround = true;
+        }
+        CHECK(gMobs[s].coreHopCount == 1, "core jump witness: no hop spam under the cooldown (%d)", gMobs[s].coreHopCount);
+        bool continued = false;
+        for (int i = 0; i < 300 && !continued; ++i) { // unpinned: the road resumes
+            MobsTick(dt, man, 0, true, none);
+            if (gMobs[s].pos.y > 10.0f)
+                continued = true;
+        }
+        host.wall = false;
+        gOffPathCut = true;
+        CHECK(continued, "core jump witness: unpinned, he walks his route over the fence and on");
+    }
+    CHECK(LoadNavGraphFromRepo(), "the city graph is restored for the sims after");
+}
 // the POI database, the zone/gang map and the interior door families
 // extracted from the game's own files (atlas-assets/), the vehicle road
 // graph from the other half of nodes*.dat, and the brain wired to all of
@@ -9242,7 +9802,14 @@ static void TestAtlas() {
         host.groundMode = 0;
     }
     // ---- the brain: on Ballas ground the search slices faster than on
-    // Grove ground - the same vanish, two turfs, one stopwatch
+    // Grove ground - the same vanish, two turfs, one stopwatch.
+    // LAW UPDATE (the tenacity leash, 2026-11-07): the vanish is staged
+    // INSIDE the hunt's country now - the prey ducks into an interior
+    // heaven 25 m past the fight (55 m of street from the boss) instead
+    // of standing 400 m off. A 400 m vanish is the tracker feed's work
+    // under the new law and no hunt ever forms on it; the turf pricing
+    // this sim measures lives in the hunt's dwell, which only exists on
+    // near ground. The dwell is the same measurement it always was.
     auto turfScan = [&](const Vec3& bossAt, float faceYaw, const Vec3& preyAt, const Vec3& preyGone) {
         WideStage();
         host.groundMode = 1;
@@ -9265,8 +9832,15 @@ static void TestAtlas() {
         return scanDur;
     };
     {
-        const float ballas = turfScan(Vec3(2200, -1180, 13.4f), -1.5708f, Vec3(2230, -1180, 14.4f), Vec3(2630, -1180, 14.4f));
-        const float grove = turfScan(Vec3(2370, -1660, 13.4f), -1.5708f, Vec3(2400, -1660, 14.4f), Vec3(2800, -1660, 14.4f));
+        // (the Ballas vanish rides at z=1200, above every named heaven:
+        // at the usual heaven height that spot's nearest family is
+        // SVSFMD, whose street doors are in San Fierro - the hunt would
+        // camp a door 4700 m away and no scan could ever be measured.
+        // An unnamed interior is the honest staging here: he ducked
+        // inside, the atlas cannot name the family from that spot, and
+        // the hunt works the street he vanished from - on both turfs.)
+        const float ballas = turfScan(Vec3(2200, -1180, 13.4f), -1.5708f, Vec3(2230, -1180, 14.4f), Vec3(2255, -1180, 1200.0f));
+        const float grove = turfScan(Vec3(2370, -1660, 13.4f), -1.5708f, Vec3(2400, -1660, 14.4f), Vec3(2425, -1660, 1014.4f));
         CHECK(ballas > 0.0f && grove > 0.0f, "both turfs produce a measured scan (Ballas %.2f s, Grove %.2f s)", ballas, grove);
         CHECK(ballas < grove - 0.25f,
               "on Ballas ground he slices a corner in %.2f s against %.2f s at home - he does not linger on enemy turf",
@@ -9431,6 +10005,10 @@ int main(int argc, char** argv) {
     TestBossDriverHop();
     TestBossDriverStartup();
     TestBossTracker();
+    TestBossTravelModes();
+    TestBossTenacity();
+    TestBossOffPath();
+    TestBossCoreJump();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

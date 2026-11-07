@@ -102,6 +102,11 @@ std::vector<ShotFx> gShotFx;
 // game ever flips it.
 bool gTrackerAlways = true;
 
+// The off-path freedom's switch (the user's amendment, 2026-11-07: he
+// must not be bound to where pedestrians walk). Ships TRUE; the suite
+// flips it to price the graph-only road the freedom replaces.
+bool gOffPathCut = true;
+
 // ---- boss diagnostics (the diagnostic build): the phase timings of the tick
 // in flight, read by the long-frame logger at the bottom of MobsTick. The
 // soldier brain's own share is timed around its call in Think; the voice
@@ -1531,6 +1536,9 @@ float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& 
 static constexpr float kDrvFairStart = 1.6f;   // seconds a fresh seek owns before a stall may be read
 static constexpr float kDrvStallWindow = 1.1f; // seconds of no approach progress that make a stall
 static constexpr float kDrvProgressEps = 0.10f; // metres of approach that count as progress
+static constexpr float kCoreFairStart = 0.8f;  // the core legs' fair start: no native
+                                               // ramp to forgive - only the turn onto
+                                               // the road (the core hop's grace)
 
 void BossDriveObjective(Mob& m, const Vec3& point, float speed, const char* why) {
     m.drvMoved = true;
@@ -1577,6 +1585,82 @@ void BossDirectMove(Mob& m, const Vec3& dir, float speed, float reach, const cha
     m.moveSpeed = speed;
 }
 
+// ------------------------------------------------------------------ off-path freedom
+// The user's amendment (2026-11-07): «نیاز نباشه از عابرپیاده یا جاهایی که
+// بقیه راه میرن باشه» - he is not a pedestrian and the ped graph is not
+// his cage. The graph stays what it always was - the answer for ground
+// the direct line cannot honestly cross (a long wall, a river, a cliff, a
+// building) - but where the direct line IS traversable he cuts across
+// country: lots, yards, fields, alleys. The chooser below reads the line
+// the way his own feet would have to walk it, in steps, and answers for a
+// sustained stretch (the whole look-ahead), not a hopeful metre:
+//   - the ground must EXIST under every step (an unsampled stretch is
+//     the graph's word, not his);
+//   - no cliff down (> 2.5 m) and no wall-rise (> 1.8 m) inside the
+//     stretch - big level changes are the graph's business;
+//   - no water crossing (a river is crossed at its bridge, by road);
+//   - a blocked chest line is forgiven only when the head line passes:
+//     a fence or a low wall - his jump's own class, and the walk below
+//     (or the stall witness) owns clearing it.
+// In driver mode no chooser is needed and none runs: the objective the
+// bridge is handed was never a graph waypoint to begin with.
+static bool BossDirectTraversable(const Mob& m, const Vec3& dest) {
+    Vec3 to = dest - m.pos;
+    to.z = 0.0f;
+    const float dist = to.Length();
+    if (dist < 0.05f)
+        return false;
+    const Vec3 dir = to * (1.0f / dist);
+    const float reach = std::min(dist, 30.0f);
+    Vec3 prev = m.pos;
+    for (float t = 2.5f; t <= reach + 0.01f; t += 2.5f) {
+        const float tt = std::min(t, reach);
+        const Vec3 p = m.pos + dir * tt;
+        float gz = 0.0f;
+        if (!GroundBelow(p + Vec3(0, 0, 0.7f), 120.0f, &gz))
+            return false; // unknown ground: the graph's word stands
+        if (gz < m.pos.z - 2.5f || gz > m.pos.z + 1.8f)
+            return false; // a cliff or a rise: the graph's business
+        float wl = 0.0f;
+        if (TheHost().WaterLevel(p, &wl) && wl > gz + 0.3f)
+            return false; // water on the line: the bridge is by road
+        const Vec3 a = prev + Vec3(0, 0, 1.0f), b = p + Vec3(0, 0, 1.0f);
+        if (TheHost().LineBlocked(a, b)) {
+            const Vec3 ah = prev + Vec3(0, 0, 1.35f), bh = p + Vec3(0, 0, 1.35f);
+            if (TheHost().LineBlocked(ah, bh))
+                return false; // a real wall: the graph's business
+            // else: fence-height - jumpable, and therefore traversable
+        }
+        prev = p;
+    }
+    return true;
+}
+
+// The chooser, shared by both core movers: re-judged on a clock (the
+// line's answer is a stretch of ground, not a per-tick mood), and while
+// it says CUT the route is dropped - a stale plan must not resume when
+// the line closes; the route gate re-asks on its own cadence. Returns
+// true when this tick is a cross-country tick (the caller walks the
+// destination direct).
+static bool BossMaybeCut(Mob& m, const Vec3& dest, float distDest, float dt) {
+    if (!gOffPathCut || !NavReady() || distDest <= 12.0f) {
+        m.cutting = false;
+        return false;
+    }
+    m.cutT -= dt;
+    if (m.cutT <= 0.0f) {
+        m.cutT = 0.4f;
+        const bool was = m.cutting;
+        m.cutting = BossDirectTraversable(m, dest);
+        if (m.cutting && !was) {
+            m.route.clear();
+            m.routeIdx = 0;
+            Log("boss travel: the direct line is open country - he cuts across (%.0f m out)", distDest);
+        }
+    }
+    return m.cutting;
+}
+
 // The last stretch of any directed walk: aim his feet at one point through
 // the probe (detours, side commitment), jumping what a man can jump. Shared
 // by the calm walker and the combat navigator - the probe's whole job in the
@@ -1604,6 +1688,8 @@ bool BossWalkToward(Mob& m, const Vec3& goal, float speedWanted, float dt) {
     m.goal = SoldierAdvance(m, dir, dt);
     m.moving = true;
     m.moveSpeed = speedWanted;
+    m.travelOrder = true; // a core mover ordered movement this tick (the
+                          // stall witness's live-order witness)
     return true;
 }
 
@@ -1633,6 +1719,20 @@ bool BossGoTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float arriv
         m.moveSpeed = speedWanted;
         return true;
     }
+    {   // a material change of destination re-bases the stall witness's
+        // progress reference on the new point (the driver law's own rule)
+        Vec3 dd = dest - m.travelDest;
+        dd.z = 0.0f;
+        if (dd.Length() > 1.5f) {
+            Vec3 pd = dest - m.pos;
+            pd.z = 0.0f;
+            m.travelProgDist = pd.Length();
+        }
+    }
+    m.travelDest = dest;
+    // off-path freedom: open country on the direct line beats the road
+    if (BossMaybeCut(m, dest, distDest, dt))
+        return BossWalkToward(m, dest, speedWanted, dt);
     Vec3 goal = dest;
     if (NavReady() && distDest > 6.0f) {
         m.routeT -= dt;
@@ -1719,6 +1819,22 @@ bool BossChaseTo(Mob& m, const Vec3& dest, float speedWanted, float dt, float ar
         m.moveSpeed = speedWanted;
         return true;
     }
+    {   // a material change of destination re-bases the stall witness's
+        // progress reference on the new point (the driver law's own rule)
+        Vec3 dd = dest - m.travelDest;
+        dd.z = 0.0f;
+        if (dd.Length() > 1.5f) {
+            Vec3 pd = dest - m.pos;
+            pd.z = 0.0f;
+            m.travelProgDist = pd.Length();
+        }
+    }
+    m.travelDest = dest;
+    // off-path freedom: open country on the direct line beats the road -
+    // the navigator's route machinery below is for ground the direct
+    // line cannot honestly cross, and only for that ground
+    if (BossMaybeCut(m, dest, distDest, dt))
+        return BossWalkToward(m, dest, speedWanted, dt);
     m.repathT = std::max(0.0f, m.repathT - dt);
     m.navFailT = std::max(0.0f, m.navFailT - dt);
     bool moving = false;
@@ -1897,6 +2013,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     m.reposT = std::max(0.0f, m.reposT - dt);
     m.drvLogT = std::max(0.0f, m.drvLogT - dt);
     m.drvMoved = false; // this tick has ordered no move yet (the driver's book)
+    m.travelOrder = false; // ...and neither has a core mover (the travel book)
+    m.drvReengageT = std::max(0.0f, m.drvReengageT - dt); // a fall's lockout runs down
     // the settle clock: how long his feet have honestly been still - fire
     // control prices his spread off it (Counter-Strike's stop-shoot recovery)
     {
@@ -1965,6 +2083,8 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         m.lostT = 0.0f;
         m.targetVisT = 0.0f;
         m.fightWarmT = 0.0f; // death pays the fight off in full: no warmth survives it
+        m.drvCoreTravel = false; // the long-haul mode is re-judged against the
+        m.drvReengageT = 0.0f;   // respawn's ground within a tick, like the rest
     }
     m.sawPlayerAlive = playerAlive;
     const int playerVeh = TheHost().PlayerVehicle();
@@ -1978,7 +2098,13 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // ---------------- the senses, for the player
     bool inCentre = false;
     float frac = 0.0f;
-    if (playerAlive)
+    // a man inside an interior heaven (z ~ 1000) is in another world:
+    // no eye line from the street reaches him, whatever the flat
+    // distance and the host's line say - the atlas block, not the eye,
+    // owns a man inside (it camps his doors). Without this, closing
+    // flat distance on a ducked-in prey "re-acquires" him through the
+    // world and the fight never breaks into the hunt that camps him.
+    if (playerAlive && playerPos.z < 500.0f)
         frac = BossVisibleFraction(m, playerFeet, inVeh && vehPose, vehSeat, playerVeh, &inCentre);
     const bool seeNow = frac > 0.0f;
     const Vec3 eye = m.pos + Vec3(0, 0, MobHeight(m) * 0.85f);
@@ -2646,8 +2772,15 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         // fall-back first - the hunt takes him from his fallback, never
         // halfway, turned around.
         if (tgt.valid && tgt.being < 0 && !tgtVisible && m.lostT > kBoss.lostGrace &&
-            m.heardT <= 0.0f && tgt.dist > kBoss.huntMinRange && gGame.deathTime < 0.0f &&
+            m.heardT <= 0.0f && (tgt.dist > kBoss.huntMinRange || playerPos.z >= 500.0f) &&
+            gGame.deathTime < 0.0f &&
             !(wounded && m.hasFallback)) {
+            // the distance clause has one honest exception, named: a prey
+            // inside an interior heaven is never "close corner play" -
+            // tgt.dist is the flat distance to his heaven's shadow on the
+            // street, and the press walks it to nothing in seconds, which
+            // would pardon the camp forever. A man inside belongs to the
+            // hunt (which camps his doors) at any flat distance.
             m.bossState = BS_HUNT;
             m.stateWhy = "lost him past the grace, quiet and far: the hunt takes the chase";
             m.huntPhase = 0;
@@ -2788,6 +2921,36 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
         m.prevPlayerPos = playerPos;
     }
 
+    if (m.bossState == BS_HUNT) {
+        // THE TENACITY LEASH (the user's amendment, 2026-11-07: «مثل سگ
+        // ولم نکنه»): under the tracker law the hunt is a CLOSE tool - it
+        // works the ground where contact was lost. Its search disc reaches
+        // 4.5 strides of searchRadius along the exit line (~54 m) and its
+        // points live within ~24 m of the base; a prey farther than the
+        // leash from the boss is not "being searched for", he is GONE from
+        // this ground, and every second the hunt spends working the stale
+        // disc (or running out its 45-second clock toward the stand-down
+        // gate) is a pause the feed never ordered. Past the leash the
+        // hunt hands the chase back to the feed at once - the same tick,
+        // not at the clock's end: the pursuit resumes on the man's true
+        // ground, and the search only ever runs on ground he is
+        // honestly near. (The session fossil: combat flipped to hunt at
+        // 510 m and the hunt's clock, not the feed, owned the next 45 s.)
+        // The leash measures the ground the hunt works - and distPlayer
+        // is flat by construction (the senses zero the height), so a
+        // prey inside an interior heaven is measured by his street
+        // distance, never by the ~1000 m his heaven floats overhead:
+        // his door, the hunt's actual workplace, is what counts.
+        if (gTrackerAlways && playerAlive && distPlayer > 72.0f) {
+            m.bossState = BS_TRACK;
+            m.stateWhy = "tracker: the hunt's ground went stale - the feed takes the chase back";
+            m.lastSeen = playerFeet;
+            m.huntPhase = 0;
+            m.huntT = 0.0f;
+            m.route.clear();
+            m.routeIdx = 0;
+        }
+    }
     if (m.bossState == BS_HUNT) {
         m.huntT += dt;
         // a fresh clue is EVIDENCE: something heard just now, or a loud
@@ -3033,6 +3196,35 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
             m.huntDest = BossHuntDest(m);
             m.route.clear();
         }
+    }
+
+    // ================================================================ THE LONG-HAUL LAW
+    // The user's own number: «۳۰۰ متر خودش باشه» - inside 300 m the native
+    // driver body is his feet; beyond it, the body is a liability, not a
+    // tool. The game streams collision and processes peds around the
+    // PLAYER: the session of 2026-11-07 proved the boundary from both
+    // sides (a body at ~300 m lived and re-engaged; at 510 m its floor
+    // left, it fell out of the world, and the report path adopted the
+    // corpse for thirteen minutes). Beyond the line the CORE walks him -
+    // its own integration reads the host's ground directly and owes
+    // nothing to the ped streamer - and the bridge parks the body as the
+    // glued sensor (its duties live on; only the feet change hands). The
+    // band is hysteresis, not decoration: release past 320, re-engage
+    // under 280, so a man hovering at the user's 300 cannot flap the
+    // mode. A fall's lockout (drvReengageT) gates the re-engage too: a
+    // fresh body is not stood up the same breath the last one was
+    // declared gone. The mode is a wish the bridge honours at frame
+    // level; the brain's states neither know nor care which feet serve.
+    if (playerAlive && distPlayer > 320.0f) {
+        if (!m.drvCoreTravel) {
+            m.drvCoreTravel = true;
+            Log("boss driver: beyond the body's country (%.0f m) - core travel, his own legs walk him",
+                distPlayer);
+        }
+    } else if (playerAlive && m.drvCoreTravel && distPlayer < 280.0f && m.drvReengageT <= 0.0f) {
+        m.drvCoreTravel = false;
+        Log("boss driver: inside the body's country again (%.0f m) - the native feet take him back",
+            distPlayer);
     }
 
     // ================================================================ THE TRACKER GATE
@@ -3298,6 +3490,58 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
                     m.jumpCd = 1.2f;
                     m.drvStallT = 0.0f;
                 }
+            }
+        }
+    }
+
+    // ---- the core legs' own hop (the same round's amendment: the jump
+    // must exist in BOTH modes - «پرشم نداره»). Under the driver the hop
+    // above is an ORDER to the game's task system; under the core's own
+    // legs the jump was always the walker's probe reflex (BossWalkToward
+    // fires it the moment the strip toward the goal reads a fence) - but
+    // a man can wedge where that strip does not read: detour-committed
+    // along a wall, body pressed on an obstacle the goal line passes
+    // beside, not through. For those, the SAME law family as the
+    // driver's, translated honestly: progress is the only witness (the
+    // approach to the travel destination the movers left in travelDest),
+    // a fresh destination owns a fair start, the clock freezes under a
+    // stand order instead of zeroing, and the probe toward the
+    // destination must read the jumpable class (shin blocked, head open)
+    // before a hop exists - a stall alone orders nothing, exactly as
+    // under the driver. The fair start is shorter than the driver's for
+    // an honest reason: our own legs have no native start-up ramp to
+    // forgive - they answer an order the tick it is given; the grace
+    // covers only the turn onto the road. The hop itself is the legacy
+    // arc (kBoss.jumpVel under the world's gravity), on the driver's own
+    // cooldown.
+    if (!m.drvOn) {
+        m.travelGraceT = std::max(0.0f, m.travelGraceT - dt);
+        Vec3 toDest = m.travelDest - m.pos;
+        toDest.z = 0.0f;
+        const float dDest = toDest.Length();
+        if (!m.travelOrder) {
+            m.travelProgDist = dDest; // frozen, not zeroed (the driver's law)
+        } else if (dDest < m.travelProgDist - kDrvProgressEps) {
+            m.travelProgDist = dDest;
+            m.travelStallT = 0.0f;
+        } else if (m.onGround && m.travelGraceT <= 0.0f) {
+            m.travelStallT += dt;
+        }
+        if (m.travelStallT >= kDrvStallWindow && m.jumpCd <= 0.0f && m.onGround && dDest > 0.3f) {
+            const Vec3 dir = Flat(toDest);
+            const Vec3 shin = m.pos + Vec3(0, 0, 0.35f);
+            const Vec3 head = m.pos + Vec3(0, 0, 1.35f);
+            if (TheHost().LineBlocked(shin, shin + dir * 1.7f) &&
+                !TheHost().LineBlocked(head, head + dir * 1.7f)) {
+                m.vel.z = kBoss.jumpVel;
+                m.onGround = false;
+                m.airT = 0.0f;
+                m.jumpCd = 1.2f;
+                m.travelStallT = 0.0f;
+                m.travelGraceT = kCoreFairStart; // the landing owns a fresh
+                                                 // start (the spent hop's law)
+                ++m.coreHopCount;
+                Log("boss travel: hop - wedged against a fence on his road at (%.0f, %.0f)", m.pos.x, m.pos.y);
             }
         }
     }
@@ -4225,6 +4469,9 @@ void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool dr
 // is gone. The soldier adopts the reported transform wholesale - he IS
 // where his body is - and his velocity is the reports' difference, so the
 // settle clock, the gait and the spread all price off his true motion.
+// Wholesale, with one guard the fall of 2026-11-07 bought: a report that
+// reads as a body falling out of the world is evidence, not a position -
+// see the fall detector inside.
 // A body's first report after a rebuild re-anchors him: the difference is
 // not a velocity (the clamp below keeps even that honest), and he never
 // teleports in the player's sight either way - the body was placed at his
@@ -4235,16 +4482,96 @@ void MobDriverReport(int index, const Vec3& feet, bool grounded, float dt) {
     Mob& m = gMobs[index];
     if (m.kind != MOB_SOLDIER || m.death >= 0.0f)
         return;
+    if (m.drvDropBody)
+        return; // this body was declared gone: its late reports are a
+                // corpse's mail - the bridge retires it on its next frame
     m.drvOn = true;
     m.drvPos = feet;
+    Vec3 v;
     if (m.drvPrevInit && dt > 0.001f) {
-        Vec3 v = (feet - m.drvPrevPos) * (1.0f / dt);
+        v = (feet - m.drvPrevPos) * (1.0f / dt);
         if (v.Length() > 14.0f)
             v = v * (14.0f / v.Length()); // a re-anchor's leap is not a speed
-        m.vel = v;
     }
     m.drvPrevPos = feet;
     m.drvPrevInit = true;
+    // ---- the fall detector (the tracker repair round, on the session of
+    // 2026-11-07): the report path used to adopt the body's position
+    // WHOLESALE - no sanity gate of any kind - while the bridge's only
+    // gone-checks (pool ref, health, ped state) all pass forever on a
+    // falling body, whose health we ourselves top up every frame. At
+    // 510 m the game's collision had streamed out from under the body,
+    // it fell out of the world, and this function adopted the fall for
+    // thirteen minutes: z without bound, x/y frozen, the brain ordering
+    // a corpse. The legacy legs carry the equivalent protection inside
+    // MoveMob (a man on known ground does not believe a sample that
+    // drops the world); driver mode bypasses MoveMob by design - one
+    // writer - so the guard belongs HERE, on the report itself. Two
+    // witnesses, either one convicting inside half a second:
+    //   (a) the feet are materially BELOW the host's own ground sample
+    //       under them - whatever the body's standing flag claims;
+    //   (b) an airborne plunge: downward velocity past a man's fall,
+    //       already metres below the last sane ground he stood on. A
+    //       hop's arc can never satisfy either (it rises first and
+    //       returns to its own ground; it never passes below it), and a
+    //       genuine short fall to a lower street ends in a grounded,
+    //       sane report before the bound runs - the clocks zero and
+    //       adoption resumes at the landed position.
+    // A suspect report is NOT adopted: he holds his last sane position
+    // while the evidence gathers. Conviction declares the body gone
+    // through the same fields MobDriverGone writes, restores his feet
+    // to the last sane report clamped to its ground, sets the bridge
+    // word (drvDropBody: retire and kill it) and engages core travel
+    // under a re-engage lockout - the long-haul law takes him from here.
+    // The below-ground witness is judged against the LAST SANE GROUND,
+    // not only against today's sample: a fall outruns its own sample
+    // origin within a few frames (the search starts at the feet and the
+    // floor is soon ABOVE the search), and a blind sample under a man
+    // already metres below his last sane ground is not innocence - it
+    // is the fall, seen from inside it. Only a grounded report WITH a
+    // sample that agrees with it is sane enough to clear the evidence.
+    float gz = 0.0f;
+    const bool sampled = GroundBelow(feet + Vec3(0, 0, 0.7f), 120.0f, &gz);
+    const bool belowGround = m.drvGoodInit && feet.z < m.drvGoodPos.z - 1.5f &&
+                             (!sampled || feet.z < gz - 1.5f);
+    const bool plunging = !grounded && m.drvGoodInit && v.z < -3.5f &&
+                          feet.z < m.drvGoodPos.z - 2.5f;
+    if (belowGround || plunging) {
+        m.drvFallT += dt;
+        if (m.drvFallT >= 0.4f) {
+            Log("boss driver: his body is falling out of the world at (%.0f, %.0f) - declared gone, the core takes his feet",
+                feet.x, feet.y);
+            if (m.drvGoodInit) {
+                m.pos = m.drvGoodPos;
+                m.groundZ = m.drvGoodPos.z;
+            }
+            m.vel = Vec3();
+            m.onGround = true;
+            m.drvOn = false;
+            m.drvPrevInit = false;
+            m.drvHop = false;
+            m.drvHopOut = false;
+            m.drvStallT = 0.0f;
+            m.drvGraceT = kDrvFairStart;
+            m.travelGraceT = kCoreFairStart; // the core legs start fair too
+            m.drvFallT = 0.0f;
+            m.drvDropBody = true;
+            m.drvCoreTravel = true;
+            m.drvReengageT = 2.0f;
+        }
+        return; // a suspect position is never adopted
+    }
+    if (grounded && sampled && !belowGround && feet.z >= gz - 0.35f) {
+        // sane - and anchored: a standing man's feet ARE the ground the
+        // sample reads (a third of a metre of slope/step tolerance).
+        // The anchor matters: a falling stream whose every report sits
+        // a step below the last would otherwise drag the "last sane
+        // ground" down the well with it, one polite step at a time.
+        m.drvFallT = 0.0f;
+        m.drvGoodPos = feet; // a sane report: the ground a fall hands back
+        m.drvGoodInit = true;
+    }
+    m.vel = v;
     m.pos = feet;
     m.onGround = grounded;
     if (grounded)
@@ -4263,9 +4590,12 @@ void MobDriverGone(int index) {
     m.drvHop = false;
     m.drvHopOut = false;
     m.drvStallT = 0.0f;
+    m.drvDropBody = false; // the retirement this word ordered has happened
     // a later body starts from standstill like any other: it owns a fair
     // start before any stall may be read against it
     m.drvGraceT = kDrvFairStart;
+    m.travelGraceT = kCoreFairStart; // and the core legs that take him over
+                                     // own their fair start as well
     m.reanchor = false;
 }
 

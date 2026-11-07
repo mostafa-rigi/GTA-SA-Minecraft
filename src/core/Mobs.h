@@ -263,6 +263,43 @@ struct Mob {
     float drvProgDist = 1e9f;   // the closest distance to the objective this
                                 // stall window has seen: progress is measured
                                 // against it, never against last tick alone
+    // ---- the long-haul law (2026-11-07, the tracker repair round): a real
+    // ped body only lives while the game streams and processes the ground
+    // around the PLAYER - the session of 2026-11-07 watched the driver
+    // body fall out of the world at 510 m and be adopted, falling, for
+    // thirteen minutes. Inside the user's own 300 m the native body
+    // drives; beyond it the core walks him itself (streaming-independent)
+    // and the body is parked as the glued sensor it used to be.
+    bool drvCoreTravel = false; // the core owns his feet for this stretch:
+                                // the bridge parks the body (no reports)
+    bool drvDropBody = false;   // the word to the bridge: this body was
+                                // declared gone (it fell) - retire and kill
+                                // it; a fresh one is stood up on re-entry
+    float drvReengageT = 0.0f;  // seconds before a body may be re-engaged
+                                // after a fall declared the last one gone
+    Vec3 drvGoodPos{ 0, 0, 0 }; // the last SANE driver report (grounded,
+                                // not below the host's ground): the ground
+                                // a fall hands his feet back to
+    bool drvGoodInit = false;
+    float drvFallT = 0.0f;      // seconds of fall evidence against the
+                                // current report stream (MobDriverReport)
+    // ---- core-mode travel (the same law's other half, and the off-path
+    // freedom of the same round): when the core walks him, the movers
+    // leave their destination here and the stall witness below reads it.
+    Vec3 travelDest{ 0, 0, 0 }; // the destination the core movers ordered
+                                // this stretch (chase or calm), flat-read
+    bool travelOrder = false;   // a core mover ordered movement this tick
+    float travelGraceT = 0.8f;  // the fair start a fresh core order owns
+                                // (kCoreFairStart in Mobs.cpp; a new man
+                                // starts with it, like a rebuilt body does)
+    float travelStallT = 0.0f;  // seconds of no approach under a live core
+                                // order, past the fair start (the hop's
+                                // trigger clock - progress is its witness)
+    float travelProgDist = 1e9f; // the closest approach this window has seen
+    int coreHopCount = 0;       // stall-witnessed hops ordered (tests read it)
+    float cutT = 0.0f;          // the off-path chooser's re-evaluation clock
+    bool cutting = false;       // the chooser's verdict: the direct line is
+                                // traversable, he is cutting across country
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
@@ -274,6 +311,13 @@ extern std::vector<Mob> gMobs;
 // of the same morning whole. A variable, not a constant, so the test suite
 // can pin BOTH laws; the game only ever ships it true.
 extern bool gTrackerAlways;
+
+// The off-path freedom's switch (defined in Mobs.cpp with the chooser):
+// true is the shipped law the user ordered on 2026-11-07 - he is NOT bound
+// to pedestrian paths; the graph is a tool for ground the direct line
+// cannot honestly cross, not a cage. A variable for the same reason as
+// the tracker switch: the suite pins both settings.
+extern bool gOffPathCut;
 
 // One visible shot of the soldier's rifle: the core decides it (SoldierShoot), the
 // host draws it (a muzzle flash at `from`, a tracer line to `to`) and it is gone in
