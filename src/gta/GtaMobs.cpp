@@ -15,6 +15,7 @@
 #include "CPlayerPed.h"
 #include "CPools.h"
 #include "CStreaming.h"
+#include "CTaskComplexJump.h"
 #include "CTaskComplexKillPedOnFoot.h"
 #include "CTaskComplexSeekEntityMove.h"
 #include "CTaskSimpleDuck.h"
@@ -229,6 +230,7 @@ struct BossDriverState {
     int anchorRef = 0;            // its pool handle, the only name trusted across frames
     int anchorModel = -1;         // the synthetic model id (process-lifetime registration)
     CTask* seekTask = nullptr;    // the task we issued - an identity to compare, NEVER to dereference
+    CTask* jumpTask = nullptr;    // the hop we issued, same discipline: an identity, never a pointer to read
     eMoveState appliedMove = PEDMOVE_STILL; // the speed class the feet currently walk under
     Vec3 appliedObj{ 0, 0, 0 };   // the objective point the anchor currently sits at
     bool appliedValid = false;
@@ -247,6 +249,7 @@ void BossDriverTeardown() {
         gBossDriver.anchorRef = 0;
     }
     gBossDriver.seekTask = nullptr;
+    gBossDriver.jumpTask = nullptr;
     gBossDriver.active = false;
     gBossDriver.anchored = false;
     gBossDriver.appliedValid = false;
@@ -398,6 +401,7 @@ bool BossProxyCreate(const Mob& m) {
     gBossDriver.anchored = false; // a fresh body has not been placed at his feet yet
     gBossDriver.seekTask = nullptr; // ...and it carries no seek of ours: the old body's
                                     // task pointer is a stale identity from here on
+    gBossDriver.jumpTask = nullptr; // ...nor a hop of ours, for the same reason
     gBossDriver.appliedValid = false;
     gBossProxy.ped = ped;
     gBossProxy.ref = pool->GetRef(ped);
@@ -574,6 +578,22 @@ bool BossDriverPreTick(float dt, CPlayerPed* player) {
     if (!BossBodyEnsure(m))
         return false;
     CPed* ped = gBossProxy.ped;
+    if (m.reanchor) {
+        // A summon re-anchored him (the core's single-soldier door): the
+        // man now stands at the summon point, but this body still walks
+        // where the old man stood. Run the mode entry below again for it -
+        // the body is placed at his feet, invisibly, the anchor re-stands,
+        // and the standing objective is re-applied under the new ground.
+        // No second body is ever built and the seek is not stomped: it
+        // seeks the anchor entity, wherever the apply step moves it. Same
+        // mob id, same body, new ground.
+        m.reanchor = false;
+        if (gBossDriver.anchored) {
+            gBossDriver.anchored = false;
+            gBossDriver.appliedValid = false;
+            Log("boss driver: re-anchored with his soldier - his body is placed at his feet again");
+        }
+    }
     if (!gBossDriver.anchored) {
         // Mode entry: the body has ridden glued above his feet as a
         // sensor; from this frame it IS his feet. It is placed at his
@@ -663,8 +683,33 @@ void BossDriverApply(float dt) {
         gBossDriver.appliedValid = true;
     }
     CTaskManager& tm = ped->m_pIntelligence->m_TaskMgr;
+    // The hop (the commander's order, executed on the body): one real
+    // CTaskComplexJump as his primary task - the game's own jump, the
+    // class its own peds hurdle fences and low walls with. The inventory
+    // was read before a line was designed: CTaskComplexJump exists whole
+    // in this SDK with a public constructor (0 = jump, 1 = climb), and it
+    // is the task used here; CTaskSimpleClimb was NOT used - it wants a
+    // climb entity and a handhold position the game's own obstacle
+    // scanner computes, which we cannot honestly supply. Nothing about
+    // the hop is our physics: no velocity is written, no arc is faked -
+    // the task runs its course on the body, the report's ground state
+    // tells the core he is airborne, and when the task leaves the slot
+    // the ordinary flow below re-issues the seek at the standing
+    // objective: he lands and walks on.
+    if (m.drvHop) {
+        m.drvHop = false;
+        auto* jump = new CTaskComplexJump(0);
+        tm.SetTask(jump, TASK_PRIMARY_PRIMARY, false);
+        gBossDriver.jumpTask = jump;
+        gBossDriver.watchT = 0.0f;
+        Log("boss driver: hop - the commander ordered a jump at (%.0f, %.0f)", m.pos.x, m.pos.y);
+    }
     CTask* cur = tm.m_aPrimaryTasks[TASK_PRIMARY_PRIMARY];
-    if (cur && cur == gBossDriver.seekTask) {
+    if (gBossDriver.jumpTask && cur != gBossDriver.jumpTask)
+        gBossDriver.jumpTask = nullptr; // the jump ran its course and left the slot
+    if (cur && cur == gBossDriver.jumpTask) {
+        gBossDriver.watchT = 0.0f; // our own jump owns his feet: wait it out like a seek
+    } else if (cur && cur == gBossDriver.seekTask) {
         if (classChanged)
             ((CTaskComplexSeekEntityMove*)cur)->m_moveState = ms;
         gBossDriver.watchT = 0.0f;
@@ -729,6 +774,10 @@ void BossProxySync(float dt, CPlayerPed* player) {
     if (!BossBodyEnsure(m))
         return;
     CPed* ped = gBossProxy.ped;
+    // a summon's re-anchor needs no word in this mode: the glue below
+    // re-places his body at his feet this very frame, by construction -
+    // the flag is simply spent
+    m.reanchor = false;
     BossBodyDuties(dt, player, bi, ped);
     if (m.death >= 0.0f) {
         BossProxyKill();
@@ -776,6 +825,7 @@ void BossProxySessionReset() {
     gBossDriver.anchorObj = nullptr;
     gBossDriver.anchorRef = 0;
     gBossDriver.seekTask = nullptr;
+    gBossDriver.jumpTask = nullptr;
     gBossDriver.active = false;
     gBossDriver.anchored = false;
     gBossDriver.appliedValid = false;

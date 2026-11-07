@@ -2,6 +2,8 @@
 
 #include "CClock.h"
 #include "CColPoint.h"
+#include "CPedIntelligence.h"
+#include "CTaskManager.h"
 #include "CEntity.h"
 #include "CExplosion.h"
 #include "CFireManager.h"
@@ -41,6 +43,30 @@ struct OwnBlast {
 std::vector<OwnBlast> gOwnBlasts;
 uint8_t gExpCounter[16] = {};
 CVector gExpPos[16];
+
+// Is the player flying on the game's own jetpack right now? The jetpack
+// runs as a simple task on his own task manager (CTaskSimpleJetPack,
+// TASK_SIMPLE_JETPACK); the scan reads his slots the way the boss's body
+// duties read the street's kill tasks. This state is worth naming exactly:
+// it is the one state in which the game's damage-event processing
+// swallows the fall-type event HurtPlayer pays through (see there) - on
+// foot the same event demonstrably lands, up there it never did.
+bool PlayerJetpackActive(CPlayerPed* ped) {
+    if (!ped || !ped->m_pIntelligence)
+        return false;
+    CTaskManager& tm = ped->m_pIntelligence->m_TaskMgr;
+    for (int s = 0; s < TASK_PRIMARY_MAX; ++s) {
+        CTask* t = tm.m_aPrimaryTasks[s];
+        if (t && t->GetId() == TASK_SIMPLE_JETPACK)
+            return true;
+    }
+    for (int s = 0; s < TASK_SECONDARY_MAX; ++s) {
+        CTask* t = tm.m_aSecondaryTasks[s];
+        if (t && t->GetId() == TASK_SIMPLE_JETPACK)
+            return true;
+    }
+    return false;
+}
 
 struct GtaHost : Host {
     // ---- the GTA map
@@ -143,7 +169,48 @@ struct GtaHost : Host {
     void HurtPlayer(float halfHearts) override {
         if (CPlayerPed* ped = FindPlayerPed()) {
             const float maxH = ped->m_fMaxHealth > 1.0f ? ped->m_fMaxHealth : 100.0f;
-            CWeapon::GenerateDamageEvent(ped, nullptr, WEAPONTYPE_FALL, (int)(maxH * halfHearts / 20.0f), (ePedPieceTypes)3, 0);
+            const int dmg = (int)(maxH * halfHearts / 20.0f);
+            if (!PlayerJetpackActive(ped)) {
+                // the standing road, bit-for-bit: a generated fall-type
+                // damage event on the player ped. On foot it lands - the
+                // user has died to this channel, in this build, twice in
+                // one session - and the game's armour never answers a
+                // fall-type event, which is why the core keeps the vest's
+                // books itself (PlayerArmor/WearPlayerArmor below).
+                CWeapon::GenerateDamageEvent(ped, nullptr, WEAPONTYPE_FALL, dmg, (ePedPieceTypes)3, 0);
+                return;
+            }
+            // THE JETPACK GATE (the user's verdicts, 2026-11-07, twice):
+            // on the jetpack the same event never moved his health at
+            // all. The whole path was read before this line was written:
+            // the core's senses, target and pricing are honest 3D for an
+            // airborne man (feet and chest at his true position, the
+            // bullet's gates on the true line since the first act's fix,
+            // proven in sims), and this function is the only application
+            // there is - so the gate is the game's own processing of a
+            // fall-type damage event for a ped whose jetpack task owns
+            // him: fall damage is the one hurt a jetpack flight is built
+            // never to take, and the event is swallowed whole. The
+            // routing follows the channel's own design - the core keeps
+            // the books (it priced this delta, vest and all), so the
+            // bridge pays the same priced delta straight onto his
+            // health. The event is still generated, for whatever
+            // reaction the game gives it; only the shortfall it did not
+            // pay synchronously is written directly, so a game build
+            // whose event DOES land up there is never charged twice.
+            // The line is the conviction instrument, the way boss state:
+            // was: priced, event-paid, direct-paid, health either side.
+            const float before = ped->m_fHealth;
+            CWeapon::GenerateDamageEvent(ped, nullptr, WEAPONTYPE_FALL, dmg, (ePedPieceTypes)3, 0);
+            const float afterEvent = ped->m_fHealth;
+            const float eventPaid = std::max(0.0f, before - afterEvent);
+            float direct = 0.0f;
+            if (eventPaid < (float)dmg - 0.01f) {
+                direct = (float)dmg - eventPaid;
+                ped->m_fHealth = std::max(0.0f, afterEvent - direct);
+            }
+            Log("boss dmg: jetpack application - priced %.1f hh (event %d), health %.1f -> %.1f (event paid %.1f, direct %.1f)",
+                halfHearts, dmg, before, ped->m_fHealth, eventPaid, direct);
         }
     }
     // the player's vest, for the core's kevlar books: the channel above is a

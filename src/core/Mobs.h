@@ -233,6 +233,20 @@ struct Mob {
     int drvObjCount = 0;        // material objective issues so far (tests read it)
     float drvLogT = 0.0f;       // the objective log's throttle clock
     const char* drvWhy = nullptr; // the reason the last material issue carried
+    // ---- the single-soldier door and the hop (2026-11-07)
+    bool reanchor = false;      // a summon re-anchored him to a new point (the
+                                // single-soldier invariant in SpawnMob): the
+                                // bridge must place his body at his feet again -
+                                // the driver's mode entry - and clears this word
+                                // when it has. The legacy glue needs no word: it
+                                // re-glues him the same frame by construction.
+    bool drvHop = false;        // one hop ordered for his driver body: his feet
+                                // stalled against a live objective with a
+                                // jumpable obstacle ahead (the legacy probe's
+                                // own reading). The bridge executes it on the
+                                // body (the game's own jump task) and clears it.
+    float drvStallT = 0.0f;     // seconds his body has honestly stalled against
+                                // a live move objective (the hop's trigger clock)
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

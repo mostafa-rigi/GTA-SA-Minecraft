@@ -8367,6 +8367,212 @@ static void TestBossJetpack() {
     }
 }
 
+// ------------------------------------------------------------------
+// The single-soldier invariant (the user's eye verdict, 2026-11-07): he
+// died at Grove, respawned at the hospital, summoned again beside
+// himself - and the new man was a GHOST: aiming did nothing, shooting
+// did nothing, he just wandered, because the perception/driver body
+// serves the FIRST soldier it finds and the original still lived at
+// Grove with it. The invariant: a soldier spawn that finds him living
+// never creates a second - it re-anchors the same man (same mob id, so
+// the bridge's body never changes hands) to the summon point, reborn
+// fresh: calm, the board cleared, health and kevlar whole.
+static void TestBossReanchor() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // (a) two summons: one man, at the second point, fresh and whole,
+    // under the id the first summon gave him
+    {
+        WideStage();
+        const int s1 = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        CHECK(s1 >= 0, "the first summon stands");
+        const uint32_t id1 = gMobs[s1].id;
+        gMobs[s1].health = 500.0f; // a fought man: wounds the re-anchor must wipe
+        gMobs[s1].armor = 100.0f;
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(400.5f, 400.5f, 10.0f), true);
+        CHECK(s2 == s1, "the second summon returns the same man, not a new slot");
+        int soldiers = 0;
+        for (const Mob& mm : gMobs)
+            if (mm.kind == MOB_SOLDIER && mm.death < 0.0f)
+                ++soldiers;
+        CHECK(soldiers == 1, "exactly one living soldier exists after two summons");
+        const Mob& m = gMobs[s2];
+        CHECK(m.id == id1, "under the same mob id - the bridge's body never changes hands");
+        CHECK(std::fabs(m.pos.x - 400.5f) < 0.01f && std::fabs(m.pos.y - 400.5f) < 0.01f,
+              "he stands at the second summon point");
+        CHECK(m.health >= 3999.0f && m.armor >= 1199.0f, "health and kevlar are whole again");
+        CHECK(m.bossState == 0 && !m.aggro && m.fightWarmT == 0.0f && !m.fightStarted,
+              "the slate is clean: calm, unprovoked, no warm trail, no fight remembered");
+        CHECK(m.reanchor, "the re-anchor word is set for the bridge to place his body");
+        CHECK(std::fabs(m.anchor.x - 400.5f) < 0.01f && std::fabs(m.anchor.y - 400.5f) < 0.01f,
+              "his post moved with him");
+    }
+
+    // (b) the relay serves the re-anchored man at his NEW ground: a shot
+    // through his body there starts the fight there (aggro + combat, the
+    // perception-body road of MobHurt), and his health pays for it
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        RunDriven(drv, s, 0.3f, Vec3(0.5f, 25.5f, 11.0f), none);
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(300.5f, 0.5f, 10.0f), true);
+        CHECK(s2 == s, "still the same man after the driven frames");
+        drv.pos = gMobs[s].pos;   // the bridge's re-placement: the body at his feet again
+        gMobs[s].reanchor = false; // ...and the word is spent, as the bridge spends it
+        drv.Report(s, 0.05f);
+        MobsTick(0.05f, Vec3(300.5f, 25.5f, 11.0f), 0, true, none);
+        CHECK(std::fabs(gMobs[s].pos.x - 300.5f) < 0.01f,
+              "the reported body holds him at the new ground, not back at Grove");
+        const float hp0 = gMobs[s].health;
+        MobProxyDamage(s, 200.0f, Vec3(300.5f, 25.5f, 11.0f), -2); // the player's shot, through the body
+        CHECK(gMobs[s].aggro && gMobs[s].bossState == 2,
+              "a shot at the re-anchored man makes the player his enemy - the relay is his");
+        CHECK(gMobs[s].health < hp0, "and the relay priced the hit on his real health");
+    }
+
+    // (c) a summon in the middle of a fight clears the board
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        MobProxyDamage(s, 200.0f, Vec3(0.5f, 25.5f, 11.0f), -2);
+        CHECK(gMobs[s].bossState == 2 && gMobs[s].aggro, "the fight is on before the summon");
+        const int s2 = SpawnMob(MOB_SOLDIER, Vec3(50.5f, 50.5f, 10.0f), true);
+        CHECK(s2 == s && gMobs[s].bossState == 0 && !gMobs[s].aggro &&
+                  gMobs[s].fightWarmT == 0.0f && gMobs[s].health >= 3999.0f,
+              "the mid-fight summon stands him down: calm, the board cleared, whole again");
+    }
+}
+
+// ------------------------------------------------------------------
+// The driver's hop (the user's own idea, 2026-11-07: «پرش کردن مثل سی
+// جی»): the game's feet walk AROUND fences the legacy legs hopped, so
+// the commander orders the hop itself - when the body has honestly
+// stalled against a live objective AND the legacy probe reads a
+// jumpable obstacle ahead (blocked at the shin, open at the head).
+// The harness has no game to jump with, so it plays the bridge's part:
+// it watches the order word (drvHop), clears it as the bridge would,
+// and counts the orders. What the sims pin is the ORDERING law: a
+// stalled body against a fence earns hops on the cooldown's cadence; a
+// tall wall earns none (the head probe fails: reroute country); a stall
+// against nothing earns none; and a body that walks when ordered is
+// never hop-ordered at all.
+static void TestBossDriverHop() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // one driven fight against a frozen body; returns the hop order
+    // times and how many movement objectives the commander issued (the
+    // proof the stall machinery was live). The tall-wall case provokes
+    // by a relayed shot instead of an aim: the wall blocks his sight
+    // entirely, so the aim provocation alone never opens the fight
+    // there - the perception body's road needs no eyes.
+    auto FightFrozen = [&](float wallZ, bool wallOn, bool viaShot, std::vector<float>& orders,
+                           int& stateOut, int& objCount) {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        drv.frozen = true;
+        host.wall = wallOn;
+        host.wallC = Vec3(0.5f, 1.6f, wallZ); // a step north of him, across his road
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 6.0f;
+        host.aimingAtHim = true;
+        const Vec3 man(0.5f, 35.5f, 11.0f);
+        float t = 0.0f;
+        for (int i = 0; i < 160; ++i) { // 8 s
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            t += 0.05f;
+            if (i == 20) {
+                host.aimingAtHim = false; // the provocation has landed by now
+                if (viaShot)
+                    MobProxyDamage(s, 100.0f, man, -2); // one relayed shot: the fight is on
+            }
+            if (gMobs[s].drvHop) {
+                orders.push_back(t);
+                gMobs[s].drvHop = false; // the bridge executes it and clears the word
+            }
+        }
+        host.wall = false;
+        stateOut = gMobs[s].bossState;
+        objCount = gMobs[s].drvObjCount;
+    };
+
+    // (a) a low, fence-height wall (its top at z 11: the shin probe at
+    // +0.35 meets it, the head probe at +1.35 passes over it)
+    {
+        std::vector<float> orders;
+        int state = -1, objs = 0;
+        FightFrozen(8.0f, true, false, orders, state, objs);
+        CHECK(state == 2, "the fight opened - his orders run at the man, into the fence");
+        CHECK(!orders.empty(), "a stalled body against a fence earns a hop order");
+        for (size_t i = 1; i < orders.size(); ++i)
+            CHECK(orders[i] - orders[i - 1] >= 1.5f,
+                  "hop orders keep the cooldown's cadence - never a pogo stick");
+    }
+
+    // (b) a tall wall (its top at z 13: the head probe meets it too) -
+    // no hop is ever the answer to a building
+    {
+        std::vector<float> orders;
+        int state = -1, objs = 0;
+        FightFrozen(10.0f, true, true, orders, state, objs);
+        CHECK(objs > 0, "his orders streamed at the man behind the tall wall (the stall was live)");
+        CHECK(orders.empty(), "a tall wall earns no hop order - the reroute stays the answer");
+    }
+
+    // (c) no wall at all: a body stalled against thin air (wedged on
+    // something the probe cannot see) earns no hop either - the order
+    // needs the probe's reading, not just the stall
+    {
+        std::vector<float> orders;
+        int state = -1, objs = 0;
+        FightFrozen(8.0f, false, false, orders, state, objs);
+        CHECK(state == 2, "the fight opened in the open");
+        CHECK(orders.empty(), "a stall with no obstacle ahead earns no hop order");
+    }
+
+    // (d) a body that WALKS when ordered: the same fight, the feet
+    // flowing - his reported velocity never reads as a stall, so no hop
+    // is ever ordered underneath a moving man
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 1.6f, 8.0f);
+        host.wallDir = Vec3(1, 0, 0);
+        host.wallHalf = 6.0f;
+        host.aimingAtHim = true;
+        int hops = 0;
+        for (int i = 0; i < 160; ++i) { // 8 s
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, Vec3(0.5f, 35.5f, 11.0f), 0, true, none);
+            drv.Walk(s, 0.05f);
+            if (i == 20)
+                host.aimingAtHim = false;
+            if (gMobs[s].drvHop) {
+                ++hops;
+                gMobs[s].drvHop = false;
+            }
+        }
+        host.wall = false;
+        CHECK(gMobs[s].bossState == 2, "the fight ran with a walking body");
+        CHECK(hops == 0, "a walking body is never hop-ordered");
+    }
+}
+
 // =====================================================================
 // THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
 // the POI database, the zone/gang map and the interior door families
@@ -8725,6 +8931,8 @@ int main(int argc, char** argv) {
     TestBossStateChurn();
     TestBossDriver();
     TestBossJetpack();
+    TestBossReanchor();
+    TestBossDriverHop();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

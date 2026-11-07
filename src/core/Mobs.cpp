@@ -1288,6 +1288,18 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
     }
     if (noDamage)
         return; // suppressive fire: noise and tracers on a corner, never damage - the standing label
+    // ---- the airborne record (the jetpack's second act, 2026-11-07): the
+    // core fix of the first act made the line honest 3D and its sims prove
+    // the price is computed - yet in the game his health still did not
+    // move on the jetpack, while on foot the same channel killed him
+    // twice in one session. So the gate that remains is not in the
+    // pricing: a shot at a player whose feet are off the ground leaves
+    // its outcome and its price here, under the boss dmg: prefix, and
+    // the bridge's own boss dmg: line (its HurtPlayer) records the
+    // application and his health either side of it. The next eye verdict
+    // reads the two together and the split - priced here, landed or not
+    // landed there - convicts without another bisect.
+    const bool airTarget = t.being < 0 && !t.inVehicle && !TheHost().PlayerOnGround();
     if (hit) {
         // Counter-Strike prices the bullet now, whole (CsRules): the weapon's
         // base damage, the range modifier over the true distance, the zone
@@ -1315,6 +1327,9 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
             BossStrike(m, t, fwd, dmg);
             if (wear > 0.0f)
                 TheHost().WearPlayerArmor(wear);
+            if (airTarget)
+                Log("boss dmg: airborne player - the line reached his body, priced %.1f hh over %.1f m",
+                    dmg, dist3);
         }
     } else if (resVeh >= 0) {
         // his fire genuinely works the vehicle over: zoned damage through the
@@ -1339,6 +1354,13 @@ void BossShoot(Mob& m, const BossTarget& t, bool pistol, const Vec3* aimOverride
             if (z.tyre)
                 TheHost().VehicleShotEffect(resVeh, resPoint, 1);
         }
+    } else if (airTarget) {
+        // no strike happened: the round died on the world in front of the
+        // flying man, or it missed him clean - either way the record says
+        // which, so a "no effect" verdict is never read as a pricing fault
+        // when the line itself never arrived
+        Log("boss dmg: airborne player - %s, no strike",
+            resWall ? "the line died on the world first (wall veto)" : "the line missed him");
     }
 }
 
@@ -2980,6 +3002,47 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     if (m.drvOn && !m.drvMoved)
         BossDriveObjective(m, m.pos, 0.0f, "hold position");
 
+    // ---- the driver's hop (the hybrid's one native lack, and the user's
+    // own idea, 2026-11-07: «پرش کردن مثل سی جی»). The game's feet flow
+    // around a fence the legacy legs hopped without thinking - a seek task
+    // walks the street's node flow, and a fence is not on it, so under the
+    // driver he detoured around fences he used to clear. The commander
+    // supplies the missing order the way it supplies every movement wish:
+    // when the body's reported velocity says he has honestly stalled
+    // against a live objective (a real order stands, he is on the ground,
+    // and he is barely moving), the legacy probe reads the strip ahead
+    // toward the objective exactly as BossWalkToward reads it - blocked
+    // at shin height, open at head height: a fence, a low wall, a car
+    // bonnet, jumpClear's class - and ONE hop is ordered (drvHop) for the
+    // bridge to execute on the body with the game's own jump task. A tall
+    // wall fails the head probe and orders nothing: the graph reroute and
+    // the exit camp stay the answer there, as they were under legacy
+    // legs. One order per stall, on a cooldown past the legacy jump's -
+    // never a pogo stick, never under a stand order, never mid-air. While
+    // he is airborne the report's ground state says so (onGround), and
+    // the fire and pose logic above already price off it; the seek
+    // resumes by itself when he lands.
+    if (m.drvOn) {
+        const float hvBody = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+        const bool stalled = m.drvObjValid && m.drvObjSpeed > 0.01f && m.onGround && hvBody < 0.6f;
+        m.drvStallT = stalled ? m.drvStallT + dt : 0.0f;
+        if (m.drvStallT >= 0.45f && m.jumpCd <= 0.0f && !m.drvHop) {
+            Vec3 to = m.drvObj - m.pos;
+            to.z = 0.0f;
+            if (to.Length() > 0.3f) {
+                const Vec3 dir = Flat(to);
+                const Vec3 shin = m.pos + Vec3(0, 0, 0.35f);
+                const Vec3 head = m.pos + Vec3(0, 0, 1.35f);
+                if (TheHost().LineBlocked(shin, shin + dir * 1.7f) &&
+                    !TheHost().LineBlocked(head, head + dir * 1.7f)) {
+                    m.drvHop = true;
+                    m.jumpCd = 1.2f;
+                    m.drvStallT = 0.0f;
+                }
+            }
+        }
+    }
+
     // ================================================================ his body
     // The aim: in a fight his eyes are on the target at a professional's turn
     // rate; elsewhere the states above left their wish in aimGoal.
@@ -3525,20 +3588,15 @@ void MobsClear() {
     gBossNades.clear();
 }
 
-int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
-    if (kind < 0 || kind >= MOB_KIND_COUNT || gMobs.size() >= 96)
-        return -1;
-    // CleanSA: San Andreas has no Minecraft mobs in it - every spawn path in the
-    // core (natural spawns, eggs, breeding, zombie reinforcements) funnels
-    // through this one door, and only the soldier may pass.
-    if (gRules.cleanSA && kind != MOB_SOLDIER)
-        return -1;
-    if (kind == MOB_SOLDIER && !SoldierModelReady()) {
-        // The user's law for this soldier: Counter-Strike's real model or nothing -
-        // no box stand-in wearing his name. The loader already said why in the log.
-        Log("summon soldier refused: cs_soldier.bin is not loaded, and a fake soldier is not an option");
-        return -1;
-    }
+// What a fresh spawn of a kind is, whole: the generic mob every kind starts
+// as, plus the soldier's posting when the kind is his. SpawnMob builds one
+// and pushes it; the single-soldier re-anchor (below) builds one and lays it
+// over the living man's slot - one birth for both, so a re-summoned soldier
+// is a fresh soldier in every field a spawn sets (state, slate, health,
+// kevlar), never a hand-reset approximation of one. The id is NOT set here:
+// the caller owns it (a fresh counter value for a new mob, the living man's
+// own id for a re-anchor).
+static Mob MakeSpawnedMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     Mob m;
     m.kind = kind;
     m.pos = feet;
@@ -3567,6 +3625,66 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
         m.draw.legYaw = m.yaw;
         m.bossState = BS_CALM;
     }
+    return m;
+}
+
+// THE SINGLE-SOLDIER INVARIANT (the user's eye verdict, 2026-11-07): the
+// perception/driver body serves ONE soldier - the first the bridge finds -
+// so a second soldier in the world is a ghost: no body stands under him, no
+// relay prices the shots that meet him, no duties watch him; he just
+// wanders. (The user died at Grove, respawned at the hospital, summoned -
+// and the new man beside him was exactly that ghost, while the original
+// still stood at Grove with the body.) The user's intent on /summon is
+// never "a second one": it is THE soldier, here, now. So a soldier spawn
+// that finds him already living does not create - it re-anchors: the
+// living slot is reborn as a fresh spawn at the summon point (the same
+// construction as any spawn, so his fight state resets to calm with the
+// board cleared - aggro law, hunt, heat - and health and kevlar are whole
+// again), under the SAME mob id, because the bridge's body is keyed to
+// that id and keeps serving him with no rebuild and no orphan. The
+// reanchor word tells the bridge to place that body at his feet again
+// (the driver's mode entry); the legacy glue needs no word. Every soldier
+// door is this one door - the audit: eggs (MobKindForEgg has no soldier),
+// natural spawns (monster and animal tables name no soldier), breeding
+// (same-kind pairs; he has no pair and never loves), zombie
+// reinforcements (zombies only), save/load (constructs no soldier). A
+// corpse does not count: he is not living, and a summon over one is an
+// ordinary fresh spawn whose new id retires the old body by the bridge's
+// own mobId discipline.
+static int ReanchorSoldier(int idx, const Vec3& feet, bool persistent) {
+    const uint32_t id = gMobs[idx].id;
+    Mob m = MakeSpawnedMob(MOB_SOLDIER, feet, persistent, false);
+    m.id = id;
+    m.reanchor = true;
+    gMobs[idx] = m;
+    Log("summon soldier: he already lives - re-anchored to the summon point, fresh and whole, the slate clean");
+    return idx;
+}
+
+int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
+    if (kind < 0 || kind >= MOB_KIND_COUNT)
+        return -1;
+    // CleanSA: San Andreas has no Minecraft mobs in it - every spawn path in the
+    // core (natural spawns, eggs, breeding, zombie reinforcements) funnels
+    // through this one door, and only the soldier may pass.
+    if (gRules.cleanSA && kind != MOB_SOLDIER)
+        return -1;
+    if (kind == MOB_SOLDIER && !SoldierModelReady()) {
+        // The user's law for this soldier: Counter-Strike's real model or nothing -
+        // no box stand-in wearing his name. The loader already said why in the log.
+        Log("summon soldier refused: cs_soldier.bin is not loaded, and a fake soldier is not an option");
+        return -1;
+    }
+    if (kind == MOB_SOLDIER) {
+        // the single-soldier invariant: a second living soldier must never
+        // exist - the summon re-anchors the one who lives (ReanchorSoldier)
+        for (size_t i = 0; i < gMobs.size(); ++i)
+            if (gMobs[i].kind == MOB_SOLDIER && gMobs[i].death < 0.0f)
+                return ReanchorSoldier((int)i, feet, persistent);
+    }
+    if (gMobs.size() >= 96)
+        return -1;
+    Mob m = MakeSpawnedMob(kind, feet, persistent, baby);
     m.id = gNextMobId++;
     gMobs.push_back(m);
     return (int)gMobs.size() - 1;
@@ -3878,6 +3996,12 @@ void MobDriverGone(int index) {
     Mob& m = gMobs[index];
     m.drvOn = false;
     m.drvPrevInit = false;
+    // words spoken to a body that is gone die with it: a hop order must not
+    // fire on a later body, and a re-anchor the legacy glue (which takes
+    // him over from here) will perform by construction needs no flag
+    m.drvHop = false;
+    m.drvStallT = 0.0f;
+    m.reanchor = false;
 }
 
 void MobVehicleHit(int index, float speed, const Vec3& from, bool driverIsPlayer) {
