@@ -231,6 +231,7 @@ struct BossDriverState {
     int anchorModel = -1;         // the synthetic model id (process-lifetime registration)
     CTask* seekTask = nullptr;    // the task we issued - an identity to compare, NEVER to dereference
     CTask* jumpTask = nullptr;    // the hop we issued, same discipline: an identity, never a pointer to read
+    float jumpHoldT = 0.0f;       // seconds our jump has held the primary slot: its deadline clock (a jump waited out without one held the statue's feet forever)
     eMoveState appliedMove = PEDMOVE_STILL; // the speed class the feet currently walk under
     Vec3 appliedObj{ 0, 0, 0 };   // the objective point the anchor currently sits at
     bool appliedValid = false;
@@ -250,6 +251,7 @@ void BossDriverTeardown() {
     }
     gBossDriver.seekTask = nullptr;
     gBossDriver.jumpTask = nullptr;
+    gBossDriver.jumpHoldT = 0.0f;
     gBossDriver.active = false;
     gBossDriver.anchored = false;
     gBossDriver.appliedValid = false;
@@ -402,6 +404,7 @@ bool BossProxyCreate(const Mob& m) {
     gBossDriver.seekTask = nullptr; // ...and it carries no seek of ours: the old body's
                                     // task pointer is a stale identity from here on
     gBossDriver.jumpTask = nullptr; // ...nor a hop of ours, for the same reason
+    gBossDriver.jumpHoldT = 0.0f;
     gBossDriver.appliedValid = false;
     gBossProxy.ped = ped;
     gBossProxy.ref = pool->GetRef(ped);
@@ -701,14 +704,37 @@ void BossDriverApply(float dt) {
         auto* jump = new CTaskComplexJump(0);
         tm.SetTask(jump, TASK_PRIMARY_PRIMARY, false);
         gBossDriver.jumpTask = jump;
+        gBossDriver.jumpHoldT = 0.0f;
         gBossDriver.watchT = 0.0f;
         Log("boss driver: hop - the commander ordered a jump at (%.0f, %.0f)", m.pos.x, m.pos.y);
     }
     CTask* cur = tm.m_aPrimaryTasks[TASK_PRIMARY_PRIMARY];
-    if (gBossDriver.jumpTask && cur != gBossDriver.jumpTask)
+    if (gBossDriver.jumpTask && cur != gBossDriver.jumpTask) {
         gBossDriver.jumpTask = nullptr; // the jump ran its course and left the slot
+        gBossDriver.jumpHoldT = 0.0f;
+    }
     if (cur && cur == gBossDriver.jumpTask) {
-        gBossDriver.watchT = 0.0f; // our own jump owns his feet: wait it out like a seek
+        // our own jump owns his feet: wait it out like a seek - but under
+        // a deadline. A jump is a second of physics; the foreign-task
+        // reclaim below never applied to it, so a jump that is slow to
+        // leave (or never leaves) this body would hold the slot - and
+        // his feet - for the rest of the session: the statue of
+        // 2026-11-07 stood exactly in this wait, the brain ordering and
+        // shooting over a body that never walked. Past the deadline the
+        // seek is issued over it, the same reclaim foreign tasks get,
+        // and his feet are his again whatever the jump was doing.
+        gBossDriver.jumpHoldT += dt;
+        if (gBossDriver.jumpHoldT > 2.5f) {
+            auto* seek = new CTaskComplexSeekEntityMove(gBossDriver.anchorObj,
+                600000, 250, 1.0f, 7.0f, 3.0f, false, false);
+            seek->m_moveState = ms;
+            tm.SetTask(seek, TASK_PRIMARY_PRIMARY, false);
+            gBossDriver.seekTask = seek;
+            gBossDriver.jumpTask = nullptr;
+            gBossDriver.jumpHoldT = 0.0f;
+            Log("boss driver: the jump overstayed its welcome - the seek is re-issued over it");
+        }
+        gBossDriver.watchT = 0.0f;
     } else if (cur && cur == gBossDriver.seekTask) {
         if (classChanged)
             ((CTaskComplexSeekEntityMove*)cur)->m_moveState = ms;
@@ -826,6 +852,7 @@ void BossProxySessionReset() {
     gBossDriver.anchorRef = 0;
     gBossDriver.seekTask = nullptr;
     gBossDriver.jumpTask = nullptr;
+    gBossDriver.jumpHoldT = 0.0f;
     gBossDriver.active = false;
     gBossDriver.anchored = false;
     gBossDriver.appliedValid = false;

@@ -1470,6 +1470,33 @@ float BossVisibleFraction(Mob& m, const Vec3& feet, bool inVehicle, const Vec3& 
 // flood the log this line exists to serve. The log line is the conviction
 // instrument for the next dumbness verdict - point, class, reason -
 // throttled to a line a second, with class changes always told.
+//
+// The hop's clocks (the hop block in BossTick reads them): the FAIR START
+// - the window a fresh seek owns to turn and accelerate before any stall
+// may be read against it - belongs to the FEET, not to the order stream.
+// It restarts only where a seek truly begins: the first order ever, the
+// seek that follows a spent hop (watched through drvHopOut), and a
+// rebuilt body (MobDriverGone). An order-stream event restarts nothing:
+// the bridge does not re-issue the seek for a re-issue either - it moves
+// the anchor and writes the speed class on the living task, so a burst
+// plant and the advance after it are one seek flowing, standing, and
+// flowing again, and keying the grace to them was tried and convicted
+// in sim: a fighting boss alternates advance and plant every second or
+// so, the grace never expired, and a truly wedged body earned no hop at
+// all. Two more laws keep the stall honest across that same dance: the
+// stall clock FREEZES under a stand order instead of zeroing (a wedged
+// fighter's plants must not pardon him - his advances accumulate across
+// them), and every material issue re-bases the progress reference on
+// the new point. After the fair start, a stall is only a stall when the
+// objective has stopped getting closer for the stall window: progress,
+// measured against the best distance the window has seen, is the only
+// witness. Raw speed never convicts again - the first hop's clock read
+// it, and a seek's honest start-up (turn at zero speed, then the ramp)
+// tripped it at 0.45 s every single time (the statue, 2026-11-07).
+static constexpr float kDrvFairStart = 1.6f;   // seconds a fresh seek owns before a stall may be read
+static constexpr float kDrvStallWindow = 1.1f; // seconds of no approach progress that make a stall
+static constexpr float kDrvProgressEps = 0.10f; // metres of approach that count as progress
+
 void BossDriveObjective(Mob& m, const Vec3& point, float speed, const char* why) {
     m.drvMoved = true;
     const bool stand = speed <= 0.01f;
@@ -1480,11 +1507,21 @@ void BossDriveObjective(Mob& m, const Vec3& point, float speed, const char* why)
                              (!stand && !wasStand && ((speed > 2.6f) != (m.drvObjSpeed > 2.6f)));
     if (m.drvObjValid && !classChange && d.Length() < 1.5f)
         return; // the wish he already walks under
+    const bool firstOrder = !m.drvObjValid;
     m.drvObj = point;
     m.drvObjSpeed = speed;
     m.drvObjValid = true;
     m.drvWhy = why;
     ++m.drvObjCount;
+    // the progress reference re-bases on the new point with every material
+    // issue; the fair start restarts only for the first order ever - the
+    // other true seek births (after a spent hop, on a rebuilt body) are
+    // granted where they happen, in the hop block and in MobDriverGone
+    { Vec3 dd = point - m.pos; dd.z = 0.0f; m.drvProgDist = dd.Length(); }
+    if (firstOrder && !stand) {
+        m.drvGraceT = kDrvFairStart;
+        m.drvStallT = 0.0f;
+    }
     if (classChange || m.drvLogT <= 0.0f) {
         m.drvLogT = 1.0f;
         Log("boss driver: objective (%.0f, %.0f) %s - %s", point.x, point.y,
@@ -3008,34 +3045,78 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     // walks the street's node flow, and a fence is not on it, so under the
     // driver he detoured around fences he used to clear. The commander
     // supplies the missing order the way it supplies every movement wish:
-    // when the body's reported velocity says he has honestly stalled
-    // against a live objective (a real order stands, he is on the ground,
-    // and he is barely moving), the legacy probe reads the strip ahead
-    // toward the objective exactly as BossWalkToward reads it - blocked
-    // at shin height, open at head height: a fence, a low wall, a car
-    // bonnet, jumpClear's class - and ONE hop is ordered (drvHop) for the
-    // bridge to execute on the body with the game's own jump task. A tall
-    // wall fails the head probe and orders nothing: the graph reroute and
-    // the exit camp stay the answer there, as they were under legacy
-    // legs. One order per stall, on a cooldown past the legacy jump's -
-    // never a pogo stick, never under a stand order, never mid-air. While
-    // he is airborne the report's ground state says so (onGround), and
-    // the fire and pose logic above already price off it; the seek
-    // resumes by itself when he lands.
+    // when he has honestly stalled against a live objective, the legacy
+    // probe reads the strip ahead toward the objective exactly as
+    // BossWalkToward reads it - blocked at shin height, open at head
+    // height: a fence, a low wall, a car bonnet, jumpClear's class - and
+    // ONE hop is ordered (drvHop) for the bridge to execute on the body
+    // with the game's own jump task. A tall wall fails the head probe and
+    // orders nothing: the graph reroute and the exit camp stay the answer
+    // there, as they were under legacy legs. One order per stall, on a
+    // cooldown past the legacy jump's - never a pogo stick, never under a
+    // stand order, never mid-air. While he is airborne the report's
+    // ground state says so (onGround), and the fire and pose logic above
+    // already price off it; the seek resumes by itself when he lands.
+    //
+    // The stall's law (rewritten the same day, on the statue's evidence:
+    // «مثل مجسمه ایستاده تکون نمی‌خوره»): the first version read RAW
+    // reported speed - under 0.6 m/s for 0.45 s was called a stall. But a
+    // native seek starting from standstill spends its first ~0.9 s below
+    // 0.6 m/s honestly: the face-the-target turn has zero horizontal
+    // speed at all, and the pace ramps after it. The clock was never
+    // reset by a fresh order either, so it ran straight through every
+    // start-up; wherever the probe read a fence, a hop was ordered at
+    // 0.45 s, the hop task took the primary slot away from the seek
+    // before the feet had stepped once, and the issue-start-stall-hop
+    // cycle repeated forever - the brain ordering, the gun firing, the
+    // body never walking a step. A stall is now made of PROGRESS only:
+    // a true seek birth owns a fair start (kDrvFairStart - the first
+    // order, the seek after a spent hop, a rebuilt body), and after it
+    // the window must see the objective stop getting closer for
+    // kDrvStallWindow before a hop may be ordered - so a start-up can
+    // never be convicted, a creeping man is never convicted, and no hop
+    // can be re-ordered until the seek after it has had its own fair
+    // start and its own window.
     if (m.drvOn) {
-        const float hvBody = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
-        const bool stalled = m.drvObjValid && m.drvObjSpeed > 0.01f && m.onGround && hvBody < 0.6f;
-        m.drvStallT = stalled ? m.drvStallT + dt : 0.0f;
-        if (m.drvStallT >= 0.45f && m.jumpCd <= 0.0f && !m.drvHop) {
-            Vec3 to = m.drvObj - m.pos;
-            to.z = 0.0f;
-            if (to.Length() > 0.3f) {
-                const Vec3 dir = Flat(to);
+        // the bridge spends the hop word when it executes the order: the
+        // seek that follows the landing starts from standstill again and
+        // owns a fair start of its own, watched through drvHopOut
+        if (m.drvHopOut && !m.drvHop) {
+            m.drvHopOut = false;
+            m.drvGraceT = kDrvFairStart;
+            m.drvStallT = 0.0f;
+            Vec3 dd = m.drvObj - m.pos;
+            dd.z = 0.0f;
+            m.drvProgDist = dd.Length();
+        }
+        m.drvGraceT = std::max(0.0f, m.drvGraceT - dt);
+        const bool liveOrder = m.drvObjValid && m.drvObjSpeed > 0.01f;
+        Vec3 toObj = m.drvObj - m.pos;
+        toObj.z = 0.0f;
+        const float dObj = toObj.Length();
+        if (!liveOrder) {
+            // under a stand order the stall clock FREEZES, it does not
+            // zero: a fighter wedged on a fence plants between bursts,
+            // and zeroing there would pardon him on every plant - his
+            // no-progress advances must accumulate across them
+            m.drvProgDist = dObj;
+        } else if (dObj < m.drvProgDist - kDrvProgressEps) {
+            m.drvProgDist = dObj; // he is closing: the window restarts from here
+            m.drvStallT = 0.0f;
+        } else if (m.onGround && m.drvGraceT <= 0.0f) {
+            m.drvStallT += dt; // grounded, past the fair start, and the
+                               // objective is not getting closer: a stall
+                               // is honestly accumulating
+        }
+        if (m.drvStallT >= kDrvStallWindow && m.jumpCd <= 0.0f && !m.drvHop) {
+            if (dObj > 0.3f) {
+                const Vec3 dir = Flat(toObj);
                 const Vec3 shin = m.pos + Vec3(0, 0, 0.35f);
                 const Vec3 head = m.pos + Vec3(0, 0, 1.35f);
                 if (TheHost().LineBlocked(shin, shin + dir * 1.7f) &&
                     !TheHost().LineBlocked(head, head + dir * 1.7f)) {
                     m.drvHop = true;
+                    m.drvHopOut = true;
                     m.jumpCd = 1.2f;
                     m.drvStallT = 0.0f;
                 }
@@ -4000,7 +4081,11 @@ void MobDriverGone(int index) {
     // fire on a later body, and a re-anchor the legacy glue (which takes
     // him over from here) will perform by construction needs no flag
     m.drvHop = false;
+    m.drvHopOut = false;
     m.drvStallT = 0.0f;
+    // a later body starts from standstill like any other: it owns a fair
+    // start before any stall may be read against it
+    m.drvGraceT = kDrvFairStart;
     m.reanchor = false;
 }
 

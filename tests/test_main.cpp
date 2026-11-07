@@ -8146,21 +8146,60 @@ static void TestBossStateChurn() {
 struct FakeDriverBody {
     Vec3 pos;
     bool frozen = false; // the body reports but does not walk (a wedged body)
+    // the native start-up (ramp): the game's seek does not teleport the
+    // feet to full pace - a man starting FROM STANDSTILL first turns in
+    // place (at zero horizontal speed, the seek's face-the-target
+    // phase; the turn he owes is the heading he must change - a full
+    // about-face costs 0.7 s, facing the order already costs almost
+    // none), then accelerates from a stand over 0.8 s. (A new order
+    // while the feet already flow is not a start-up: the bridge moves
+    // the anchor and writes the speed class on the living seek.) The
+    // instant Walk above could never model any of this, which is
+    // exactly the blind spot the statue regression walked through
+    // (2026-11-07).
+    bool ramp = false;
+    bool rampUp = false;   // a start-up is currently spinning up
+    float rampT = 0.0f;    // seconds since the feet left standstill
+    float rampTurn = 0.0f; // the turn this start-up owes (by heading change)
+    float rampSpeed = 0.0f; // the start-up's current pace
+    float facing = 0.0f;   // his heading (the codebase's yaw: dir = (-sin, cos))
     void Report(int s, float dt) const { MobDriverReport(s, pos, true, dt); }
     void Walk(int s, float dt) {
         if (frozen)
             return;
         const Mob& m = gMobs[s];
-        if (!m.drvObjValid || m.drvObjSpeed <= 0.01f)
+        if (!m.drvObjValid || m.drvObjSpeed <= 0.01f) {
+            rampUp = false; // under a stand order the feet stop: the next
+            rampSpeed = 0.0f; // move order starts from standstill again
             return;
+        }
         Vec3 to = m.drvObj - pos;
         to.z = 0.0f;
         const float d = to.Length();
         if (d < 0.05f)
             return;
-        const float step = std::min(d, m.drvObjSpeed * dt);
+        float pace = m.drvObjSpeed;
+        if (ramp) {
+            if (!rampUp) {
+                rampUp = true;
+                rampT = 0.0f;
+                rampSpeed = 0.0f;
+                const Vec3 want = to * (1.0f / d);
+                const Vec3 fwd(-std::sin(facing), std::cos(facing), 0.0f);
+                const float dot = std::max(-1.0f, std::min(1.0f, fwd.x * want.x + fwd.y * want.y));
+                rampTurn = 0.35f * (1.0f - dot); // 0 facing it, 0.7 s back-to-front
+            }
+            rampT += dt;
+            if (rampT < rampTurn)
+                return; // turning to face the order: the feet have not started
+            rampSpeed = std::min(m.drvObjSpeed, rampSpeed + m.drvObjSpeed * dt / 0.8f);
+            pace = rampSpeed;
+        }
+        const float step = std::min(d, pace * dt);
         pos = pos + to * (step / d);
         pos.z = m.drvObj.z;
+        if (step > 0.0f)
+            facing = std::atan2(-to.x, to.y); // walking turns him onto his road
     }
 };
 
@@ -8573,6 +8612,135 @@ static void TestBossDriverHop() {
     }
 }
 
+// ------------------------------------------------------------------
+// The statue (the user's eye verdict on the repair build, 2026-11-07:
+// «مثل مجسمه ایستاده تکون نمی‌خوره فقط تیر میزنه») - the regression
+// this sim exists to keep dead. The hop's stall clock read RAW reported
+// speed: under 0.6 m/s for 0.45 s against a live objective was called a
+// stall. But a native seek starting from standstill spends its first
+// moments below 0.6 m/s HONESTLY - the turn-to-face phase has zero
+// horizontal speed, then the pace ramps up - so a seek start-up with a
+// fence in the probe line earned a hop order at 0.45 s, the hop task
+// took the primary slot away from the seek before the feet ever
+// stepped, and the cycle repeated forever: a statue that only shoots.
+// The harness's instant Walk could never see it (full pace from the
+// first step); the ramp body can. The law: a start-up is never a
+// stall, and a start-up ends in real movement.
+static void TestBossDriverStartup() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+    const std::vector<BeingInfo> noBeings;
+    const std::vector<BeingInfo>* none = &noBeings;
+
+    // (a) the calm patrol start-up - where the statue froze first. Leg
+    // one runs clean and completes. The moment leg two's objective
+    // lands, the fence is stood squarely across that leg, inside the
+    // probe's reach, and he is faced AWAY from the post (at a post he
+    // scans; the worst facing is the honest test): an about-face
+    // (zero-speed turn) plus the walk ramp keeps him under the old
+    // law's 0.6 m/s line for ~0.8 s with a jumpable fence in the
+    // probe's strip. The old clock ordered a hop inside that window;
+    // the new law must not - and the leg must still complete.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        drv.ramp = true;
+        const Vec3 man(0.5f, 25.5f, 11.0f); // a bystander who never provokes
+        int hops = 0;
+        bool waited = false, fenced = false;
+        Vec3 post2;
+        float post2Dist = 1e9f;
+        int seenCount = -1;
+        for (int i = 0; i < 400; ++i) { // 20 s of calm patrol
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            drv.Walk(s, 0.05f);
+            if (gMobs[s].patrolWait > 0.0f)
+                waited = true; // a leg completed under him
+            if (waited && !fenced && gMobs[s].drvObjValid && gMobs[s].drvObjSpeed > 0.01f &&
+                gMobs[s].drvObjCount != seenCount) {
+                Vec3 leg = gMobs[s].drvObj - drv.pos;
+                leg.z = 0.0f;
+                if (leg.Length() > 4.0f) {
+                    // leg two has just been ordered: fence it, face him away
+                    const Vec3 legDir = leg * (1.0f / leg.Length());
+                    post2 = gMobs[s].drvObj;
+                    host.wall = true;
+                    host.wallC = drv.pos + legDir * 1.2f + Vec3(0, 0, -2.0f);
+                    host.wallDir = Vec3(-legDir.y, legDir.x, 0);
+                    host.wallHalf = 3.0f;
+                    drv.facing = std::atan2(legDir.x, -legDir.y); // facing exactly away
+                    fenced = true;
+                }
+            }
+            if (gMobs[s].drvObjCount != seenCount)
+                seenCount = gMobs[s].drvObjCount;
+            if (fenced) {
+                Vec3 d = post2 - drv.pos;
+                d.z = 0.0f;
+                post2Dist = std::min(post2Dist, d.Length());
+            }
+            if (gMobs[s].drvHop) {
+                ++hops;
+                gMobs[s].drvHop = false; // the bridge executes it and clears the word
+            }
+        }
+        host.wall = false;
+        CHECK(waited && fenced, "the patrol ran: a leg completed and the second leg was fenced mid-start-up");
+        CHECK(hops == 0,
+              "a patrol start-up (about-face, then the walk ramp) is never read as a stall - no hop is ordered while his feet are still spinning up");
+        CHECK(post2Dist < 2.0f,
+              "and the fenced leg completes: he reaches the second post on his own feet");
+    }
+
+    // (b) the same law under fire: the fight opens, he advances in his
+    // burst rhythm (advance, plant, burst) through repeated start-ups,
+    // and none of them is read as a stall either.
+    {
+        WideStage();
+        const int s = SpawnMob(MOB_SOLDIER, Vec3(0.5f, 0.5f, 10.0f), true);
+        FaceMob(s, 0.0f);
+        FakeDriverBody drv{ gMobs[s].pos };
+        drv.ramp = true; // his feet spin up the way the game's feet do
+        host.wall = true;
+        host.wallC = Vec3(0.5f, 1.6f, 8.0f); // the hop test's fence: shin-high, head-clear,
+        host.wallDir = Vec3(1, 0, 0);        // a step north of him, across the road to the man
+        host.wallHalf = 6.0f;
+        host.aimingAtHim = true;
+        const Vec3 man(0.5f, 35.5f, 11.0f);
+        int hops = 0;
+        float closest = 1e9f;
+        for (int i = 0; i < 200; ++i) { // 10 s
+            drv.Report(s, 0.05f);
+            MobsTick(0.05f, man, 0, true, none);
+            drv.Walk(s, 0.05f);
+            if (i == 20)
+                host.aimingAtHim = false; // the provocation has landed by now
+            if (gMobs[s].drvHop) {
+                ++hops;
+                gMobs[s].drvHop = false; // the bridge executes it and clears the word
+            }
+            Vec3 d = man - drv.pos;
+            d.z = 0.0f;
+            closest = std::min(closest, d.Length());
+        }
+        host.wall = false;
+        CHECK(gMobs[s].bossState == 2, "the fight opened under the start-up body");
+        CHECK(hops == 0,
+              "no hop is ordered under fire either - his burst-rhythm start-ups are not stalls");
+        // his combat rhythm closes in bounds - advance, plant, burst - so
+        // the floor is the statue's own negation, not a sprint time: the
+        // statue never left its spawn point at all, while a living boss
+        // walks out of the spawn strip and closes a solid share of the
+        // road on his own feet
+        CHECK(closest < 30.0f && drv.pos.y > 4.0f,
+              "and the start-ups end in real approach: he leaves the spawn strip and closes a solid share of the road to the man");
+    }
+}
+
 // =====================================================================
 // THE ATLAS (2026-11-07): the whole of San Andreas as data in his head -
 // the POI database, the zone/gang map and the interior door families
@@ -8933,6 +9101,7 @@ int main(int argc, char** argv) {
     TestBossJetpack();
     TestBossReanchor();
     TestBossDriverHop();
+    TestBossDriverStartup();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();

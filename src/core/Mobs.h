@@ -245,8 +245,21 @@ struct Mob {
                                 // jumpable obstacle ahead (the legacy probe's
                                 // own reading). The bridge executes it on the
                                 // body (the game's own jump task) and clears it.
-    float drvStallT = 0.0f;     // seconds his body has honestly stalled against
-                                // a live move objective (the hop's trigger clock)
+    bool drvHopOut = false;     // the order stands with the bridge (set when
+                                // ordered, cleared when the bridge spends the
+                                // word): the seek after the landing owns a
+                                // fresh fair start, watched through this flag.
+    float drvStallT = 0.0f;     // seconds with no approach progress against a
+                                // live move objective, AFTER the fair start
+                                // (the hop's trigger clock; raw speed is never
+                                // its witness - see the hop block in BossTick)
+    float drvGraceT = 0.0f;     // the fair start the current seek still owns:
+                                // a seek from standstill turns and accelerates
+                                // before it flows, and none of that may be
+                                // read as a stall while this runs down
+    float drvProgDist = 1e9f;   // the closest distance to the objective this
+                                // stall window has seen: progress is measured
+                                // against it, never against last tick alone
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
