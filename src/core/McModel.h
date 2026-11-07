@@ -12,7 +12,7 @@
 namespace mc {
 
 // The host draws the models' quads, textured from entity.png (the ENT_* rectangles) or the block / item atlas.
-enum ModelTexture { MT_ENTITY = 0, MT_ATLAS, MT_SOLDIER }; // MT_SOLDIER + n: the CS soldier's own texture files
+enum ModelTexture { MT_ENTITY = 0, MT_ATLAS, MT_SOLDIER, MT_COP = MT_SOLDIER + 3 }; // MT_SOLDIER + n: the CS soldier's own texture files (3 of them); MT_COP + n: the Driver 2 cop's own texture files
 struct ModelSink {
     virtual ~ModelSink() = default;
     virtual void Texture(int tex) = 0; // the next quads use this ModelTexture

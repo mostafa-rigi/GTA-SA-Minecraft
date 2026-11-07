@@ -24,6 +24,7 @@
 #include "McModel.h"
 #include "Mobs.h"
 #include "Cop.h"
+#include "CopCarModel.h"
 #include "Atlas.h"
 #include "NavGraph.h"
 #include "SoldierModel.h"
@@ -10825,6 +10826,116 @@ static void TestCopForce() {
     }
 }
 
+// piece 3, stage 2: the cop's OWN body - the converter's real output in
+// the repo (driver2/cop_car.bin, baked from the user's disc by
+// tools/convert_driver2_cop.py - never a synthetic bin) must load whole
+// in the core loader, measure out to his own dimensions, refuse broken
+// files, and draw his body + four wheels through the sink. The pins are
+// his data: 128 verts / 252 tris off CHICAGO.LEV's model 0, the bbox the
+// LCF's colBox (129, 88, 382) foretold, the wheel centres his LCF
+// placements give through the draw law.
+static const char* CopCarBinPath() {
+    static const char* paths[] = { "driver2/cop_car.bin", "../driver2/cop_car.bin",
+                                   "../../driver2/cop_car.bin", "../../../driver2/cop_car.bin" };
+    for (const char* p : paths) {
+        FILE* f = std::fopen(p, "rb");
+        if (f) {
+            std::fclose(f);
+            return p;
+        }
+    }
+    return nullptr;
+}
+
+static std::vector<unsigned char> ReadWholeFile(const char* p) {
+    FILE* f = std::fopen(p, "rb");
+    if (!f)
+        return {};
+    std::fseek(f, 0, SEEK_END);
+    const long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes((size_t)std::max<long>(n, 0));
+    const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    std::fclose(f);
+    return ok ? bytes : std::vector<unsigned char>();
+}
+
+static void TestCopCarModel() {
+    TestHost host;
+    SetHost(&host);
+    const char* path = CopCarBinPath();
+    CHECK(path != nullptr, "driver2/cop_car.bin is in the repo");
+    if (!path)
+        return;
+    std::vector<unsigned char> bytes = ReadWholeFile(path);
+    CHECK(bytes.size() == 16488, "the shipped cop_car.bin is the converter's 16488 bytes (got %d)",
+          (int)bytes.size());
+
+    UnloadCopCarModel();
+    CHECK(LoadCopCarModel(bytes.data(), bytes.size()), "the real cop_car.bin loads in the core loader");
+    CHECK(CopCarModelReady(), "and the cop body reports itself ready");
+    CHECK(CopCarTextureCount() == 16, "his body names 16 textures incl. the flat card (got %d)",
+          CopCarTextureCount());
+    CHECK(CopCarBodyTris() == 252, "his body is 252 triangles (got %d)", CopCarBodyTris());
+    Vec3 lo, hi;
+    CHECK(CopCarBodyExtents(&lo, &hi), "the body measures out");
+    CHECK(std::fabs(lo.x + 0.5156f) < 0.01f && std::fabs(hi.x - 0.5156f) < 0.01f &&
+              std::fabs(lo.y + 1.4727f) < 0.01f && std::fabs(hi.y - 1.4727f) < 0.01f &&
+              std::fabs(lo.z + 0.3438f) < 0.01f && std::fabs(hi.z - 0.3438f) < 0.01f,
+          "his dimensions are the disc's own: x +-0.516, y +-1.473, z +-0.344 (got %.3f..%.3f, %.3f..%.3f, %.3f..%.3f)",
+          lo.x, hi.x, lo.y, hi.y, lo.z, hi.z);
+
+    // broken files are refused, whole and loudly
+    CHECK(!LoadCopCarModel(bytes.data(), bytes.size() / 2), "a truncated bin is refused");
+    CHECK(!CopCarModelReady(), "and leaves the body unloaded");
+    std::vector<unsigned char> bad = bytes;
+    bad[0] = 'X';
+    CHECK(!LoadCopCarModel(bad.data(), bad.size()), "a foreign bin is refused");
+    CHECK(LoadCopCarModel(bytes.data(), bytes.size()), "the real bin loads back");
+
+    // his wheel centres, from his own LCF through the draw law
+    Vec3 centers[4];
+    CopWheelCenters(centers);
+    CHECK(std::fabs(centers[0].x + 0.4766f) < 0.005f && std::fabs(centers[0].y - 0.8672f) < 0.005f &&
+              std::fabs(centers[2].x - 0.4805f) < 0.005f && std::fabs(centers[2].y - 0.8672f) < 0.005f,
+          "the front axle sits at his LCF placements (got %.3f/%.3f and %.3f/%.3f)",
+          centers[0].x, centers[0].y, centers[2].x, centers[2].y);
+    CHECK(std::fabs(centers[1].y + 0.8086f) < 0.005f && std::fabs(centers[3].y + 0.8086f) < 0.005f,
+          "the rear axle sits at his LCF placements (got %.3f, %.3f)", centers[1].y, centers[3].y);
+    CHECK(centers[0].z == centers[1].z && centers[1].z == centers[2].z && centers[2].z == centers[3].z,
+          "all four centres share the measured arch height");
+
+    // the draw: body + four wheels through the sink, at the identity pose
+    RecordSink sink;
+    SetModelSink(&sink);
+    Pose pose; // identity: X right, Y forward, Z up, origin at his origin
+    sink.Reset();
+    DrawCopCar(pose, 0.0f, centers, 0.0f, 0.0f, false, 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.quads[0] == 252 + 4 * 16, "the draw emits his 252 body tris + 4x16 wheel tris (%d)",
+          sink.quads[0]);
+    CHECK(sink.lo.z < -0.50f && sink.lo.z > -0.56f,
+          "the wheels reach the ground line his arch measures (lo z %.3f)", sink.lo.z);
+    CHECK(std::fabs(sink.hi.z - 0.3438f) < 0.01f, "the light bar is the highest point (hi z %.3f)", sink.hi.z);
+    CHECK(std::fabs(sink.hi.y - 1.4727f) < 0.01f && std::fabs(sink.lo.y + 1.4727f) < 0.01f,
+          "nose and tail are his own length (y %.3f..%.3f)", sink.lo.y, sink.hi.y);
+
+    // dented to his book's end and spun a quarter turn: same count, sane box
+    sink.Reset();
+    DrawCopCar(pose, 1.0f, centers, 0.3f, 1.5708f, true, 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.quads[0] == 252 + 4 * 16, "dent + steer + spin + fast wheels draw the same count (%d)",
+          sink.quads[0]);
+    CHECK(sink.lo.x > -0.85f && sink.hi.x < 0.85f && sink.lo.z > -0.60f && sink.hi.z < 0.60f,
+          "the dented, spun draw stays inside his own envelope (x %.2f..%.2f, z %.2f..%.2f)",
+          sink.lo.x, sink.hi.x, sink.lo.z, sink.hi.z);
+
+    // unloaded: nothing is drawn - there is no fallback body in the core
+    UnloadCopCarModel();
+    sink.Reset();
+    DrawCopCar(pose, 0.0f, centers, 0.0f, 0.0f, false, 1.0f, 1.0f, 1.0f, 1.0f);
+    CHECK(sink.quads[0] == 0, "without cop_car.bin nothing of him is drawn (%d)", sink.quads[0]);
+    CHECK(LoadCopCarModel(bytes.data(), bytes.size()), "the body loads back for the bridge");
+}
+
 int main(int argc, char** argv) {
     if (argc > 1)
         return InspectWorldFile(argv[1]);
@@ -10987,6 +11098,7 @@ int main(int argc, char** argv) {
     TestBossCoreJump();
     TestCop();
     TestCopForce();
+    TestCopCarModel();
     TestAtlas();
     TestSoldierPoseBounds();
     TestSoldierTransitionFuzz();
