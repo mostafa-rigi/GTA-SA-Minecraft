@@ -422,6 +422,62 @@ void StandDrive(CopState& c) {
         Drive(c, 0.0f, 0.0f, 0.0f, false);
 }
 
+// Route capture, the complete update's route law: a waypoint counts
+// as taken when the car comes within 7 m of it OR has drawn level
+// with it (the next waypoint is nearer than it is). The second clause
+// is new and the mirror channel is why: a pedal-era body steered AT
+// the current waypoint and passed through its circle; a body driven
+// by the autopilot feed beelines at the look-ahead point tens of
+// metres down the road, and on a bend its chord can pass a waypoint
+// 8-10 m wide without ever entering the circle - the index then never
+// advances, the look-ahead stays anchored behind the car, and the
+// route stalls (the complete update's sims convicted exactly this in
+// both route drivers: the spike never finished, and stood-down units
+// orbited at ~47 m and never pinged out).
+void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos) {
+    // reseed first: if a point a little further along the route is
+    // already within capture distance, the car has drawn level with
+    // THAT stretch of road - a hairpin can put a later point at his
+    // feet while the head sits uncaptured around the bend, and the
+    // one-step drawn-level clause below cannot see past the local
+    // minimum between them (the complete update's sims: a stood-down
+    // unit parked forever 7.3 m wide of its first waypoint, its feed
+    // satisfied by the stretch of route that passed over his spot)
+    {
+        size_t best = idx;
+        float bestD = 7.0f;
+        for (size_t j = idx; j < route.size() && j < idx + 12; ++j) {
+            Vec3 to = route[j] - pos;
+            to.z = 0.0f;
+            const float d = to.Length();
+            if (d < bestD) {
+                bestD = d;
+                best = j;
+            }
+        }
+        if (best > idx)
+            idx = best;
+    }
+    while (idx < route.size()) {
+        Vec3 to = route[idx] - pos;
+        to.z = 0.0f;
+        const float d = to.Length();
+        if (d < 7.0f) {
+            ++idx;
+            continue;
+        }
+        if (idx + 1 < route.size()) {
+            Vec3 tn = route[idx + 1] - pos;
+            tn.z = 0.0f;
+            if (tn.Length() < d) {
+                ++idx;
+                continue;
+            }
+        }
+        break;
+    }
+}
+
 // The autopilot feed's look-ahead along a route (fix round 5): the
 // first route point at least `ahead` metres of road past the car's
 // position, walking from `idx` - the last point when the road runs
@@ -495,14 +551,13 @@ void SpikeDrive(float dt) {
         }
         return;
     }
+    RouteAdvance(c.spikeRoute, c.spikeIdx, c.pos);
+    if (c.spikeIdx >= c.spikeRoute.size())
+        return; // the finish branch at the top takes the next tick
     const Vec3 wp = c.spikeRoute[c.spikeIdx];
     Vec3 to = wp - c.pos;
     to.z = 0.0f;
     const float dist = to.Length();
-    if (dist < 7.0f) {
-        ++c.spikeIdx;
-        return;
-    }
     to = to * (1.0f / dist);
     const float cross = c.fwd.x * to.y - c.fwd.y * to.x;
     const float dot = c.fwd.x * to.x + c.fwd.y * to.y;
@@ -598,14 +653,13 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
         }
         c.leaveIdx = 0;
     }
+    RouteAdvance(c.leaveRoute, c.leaveIdx, c.pos);
+    if (c.leaveIdx >= c.leaveRoute.size())
+        return; // the re-lay branch at the top takes the next tick
     const Vec3 wp = c.leaveRoute[c.leaveIdx];
     Vec3 to = wp - c.pos;
     to.z = 0.0f;
     const float dist = to.Length();
-    if (dist < 7.0f) {
-        ++c.leaveIdx;
-        return;
-    }
     to = to * (1.0f / dist);
     const float cross = c.fwd.x * to.y - c.fwd.y * to.x;
     const float dot = c.fwd.x * to.x + c.fwd.y * to.y;
