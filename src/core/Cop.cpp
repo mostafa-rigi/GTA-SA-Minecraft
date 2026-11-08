@@ -654,26 +654,23 @@ float WheelToward(float wheel, float desired, float dt) {
 constexpr float kSteerScale = 0.6f;
 void Drive(CopState& c, float gas, float brake, float wheelNorm, bool siren) {
     const float steer = (Page().steerFlip ? -wheelNorm : wheelNorm) * kSteerScale;
+    c.cmdSteer = steer; // the word as sent - the unit line's half of
+                        // the commanded-vs-landed pair
     TheHost().CopBodyDrive(c.veh, gas, brake, steer, siren);
-    // the intent rides beside the pedals (fix round 4): a driving point
-    // and the speed wanted on the way - the bridge mirrors them into
-    // the car's own autopilot, the channel this host's AI cars are
-    // actually driven through. Fix round 5: what is fed is the unit's
-    // FEED point, not the brain's target - the host's ProcessAI brakes
-    // to arrive at its destination, so a destination is a point the car
-    // should be driving TOWARD, never the point it should stop at:
-    // route drivers feed a look-ahead down their route, the far pursuit
-    // feeds its descent point (floored, see CopControl), close pursuit
-    // feeds by the complete update's PursuitFeed law, and a recovery
-    // feeds its reverse point behind the car - the autopilot is the
-    // ONLY channel that moves this car, so every motion the brain
-    // orders, recovery included, is served through it (round 5's
-    // exception for recovery is overturned; see the recovery branch).
-    // A driver with no live feed names his own position at zero pace,
-    // which disarms the mirror: a unit the brain has told to stand is
-    // never driven by a stale order.
-    TheHost().CopBodyDriveTarget(c.veh, c.feedLive ? c.feedPoint : c.pos,
-                                 c.feedLive ? c.feedCruise : 0.0f);
+    // THE ROOT STEP (2026-11-08): nothing rides beside the pedals any
+    // more. Every round's convicted defect - the crawl, the
+    // BLOCKPLAYER missions, the negative wants, the orbiting, the
+    // ring that never settled - was born in the translation between
+    // this brain and the host's traffic autopilot, which took the
+    // feed's destination+pace and drove it the way a traffic driver
+    // drives: arrive, stop, loop, re-approach. The feed verb
+    // (CopBodyDriveTarget) is retired for cops; the bridge writes
+    // these pedal/steer words onto the car itself, with no autopilot
+    // mission and no driver drive-task, after the game's own
+    // processing (the frame's last word - see GtaCop.cpp). The brain
+    // always computed real wheel/pedal words (CopControl's wheel and
+    // thrust); until this step they were thrown away in favour of a
+    // destination. Now they are the drive.
     c.gas = gas;
     c.brake = brake;
 }
@@ -682,25 +679,22 @@ void Drive(CopState& c, float gas, float brake, float wheelNorm, bool siren) {
 // a standstill is a reverse gear, not a handbrake - he brakes only while
 // he is still rolling.
 void StandDrive(CopState& c) {
-    c.feedLive = false;
     if (std::fabs(c.speed) > 1.0f)
         Drive(c, 0.0f, 0.7f, 0.0f, false);
     else
         Drive(c, 0.0f, 0.0f, 0.0f, false);
 }
 
-// THE 5x UPDATE's feed law: every distance a feed is given grows with
-// the speed it is fed at. The law is 25 m of base (round 5's floor -
-// the crawl that fed itself at 2.7 m is the conviction under it) plus
-// 0.9 s of travel, capped at 180 m: inside the host's ~300 m body
-// streaming radius, with the route machinery keeping longer roads
-// honest past it. A braking-distance law (v^2 / 2a) was considered
-// and rejected on its face: at the paper top speed it asks for
-// kilometres of look-ahead on a city map. Nine-tenths of a second of
-// travel is what a driver actually looks ahead, and at the old 1x
-// paces it lands within a few metres of the numbers the earlier
-// rounds shipped (25 m at a crawl, ~60 m at the old straight pace) -
-// the law is the old shape, extended honestly to the new rows.
+// The far pursuit's steering-aim walk length. Born as the 5x feed
+// law (the distance the mirror was fed at); the root step keeps the
+// numbers and changes their job: the far mode aims its WHEEL at the
+// road field's descent point, and how far down the road that point
+// stands is what this law still decides - 25 m of base plus 0.9 s of
+// travel, capped at 180 m. The old floor's reason (a nearer point
+// made the autopilot brake to arrive, and the crawl fed itself) died
+// with the middleman; at the old 1x paces the law still lands within
+// a few metres of the original's own |v|*0.216 + 2.66 m, extended to
+// the 5x rows the same way it was then.
 float FeedLookAhead(float speed) {
     return Clamp(25.0f + 0.9f * std::fabs(speed), 30.0f, 180.0f);
 }
@@ -771,31 +765,11 @@ void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos,
     }
 }
 
-// The autopilot feed's look-ahead along a route (fix round 5): the
-// first route point at least `ahead` metres of road past the car's
-// position, walking from `idx` - the last point when the road runs
-// out first. The brain's own capture logic keeps walking its own
-// index a waypoint at a time; this point exists only so the host's
-// destination is always one the car has NOT reached, tens of metres
-// out, the way a driver looks down the road instead of at his bumper.
-Vec3 RouteLookAhead(const std::vector<Vec3>& route, size_t idx,
-                    const Vec3& pos, float ahead) {
-    if (route.empty())
-        return pos;
-    if (idx >= route.size())
-        idx = route.size() - 1;
-    Vec3 prev = pos;
-    float covered = 0.0f;
-    for (size_t i = idx; i < route.size(); ++i) {
-        Vec3 seg = route[i] - prev;
-        seg.z = 0.0f;
-        covered += seg.Length();
-        if (covered >= ahead)
-            return route[i];
-        prev = route[i];
-    }
-    return route.back();
-}
+// (The autopilot feed's route look-ahead stood here until the root
+// step: it existed only so the host's destination was always a point
+// the car had NOT reached. With no middleman, the route drivers steer
+// at their own waypoint - the pedal-era design the capture law above
+// was written for - and the function has no consumer left.)
 
 // The momentum channel's arithmetic (the constants and the whole law
 // stand at kKickBandCar above): pure geometry on the two velocities
@@ -857,9 +831,12 @@ void SpikeDrive(float dt) {
         c.calT += dt;
         const float gas = c.speed < 3.0f ? 0.5f : 0.0f;
         TheHost().CopBodyDrive(c.veh, gas, 0.0f, 0.6f * kSteerScale, false);
-        // the calibration drives straight ahead under power: its intent
-        // is a point down its own nose at a crawl (fix round 4)
-        TheHost().CopBodyDriveTarget(c.veh, c.pos + c.fwd * 40.0f, 3.0f);
+        // THE ROOT STEP: the calibration finally measures what it was
+        // always staged to measure - the pedal channel itself. Under
+        // the mirror it drove a feed and concluded NOT MEASURABLY
+        // about its own sign; now the commanded +0.6 turns the BODY or
+        // it does not, and the cross product below is the channel's
+        // first live receipt (graded again in every session's log).
         c.gas = gas;
         // the cross product of the nose then and now is sin(yawThen -
         // yawNow): NEGATIVE when the car turned RIGHT on the map (yaw
@@ -877,7 +854,6 @@ void SpikeDrive(float dt) {
         return;
     }
     if (c.spikeIdx >= c.spikeRoute.size()) {
-        c.feedLive = false;
         Drive(c, 0.0f, c.speed > 1.0f ? 1.0f : 0.0f, 0.0f, false); // brake while
             // rolling only - a held brake at rest is reverse on this host
         if (!c.spikeDone) {
@@ -922,8 +898,12 @@ void SpikeDrive(float dt) {
     // UPDATE scales this pace with the rest of him (55 / 30 - these
     // two numbers were always OUR stand-in for a city pace, not one
     // of his rows, and the order was 5x in all respects); the capture
-    // radius and the look-ahead grow with the speed by the feed law,
-    // which is what keeps the faster spike from orbiting its points.
+    // radius grows with the speed by the same shape, which is what
+    // keeps the faster spike from orbiting its points. THE ROOT STEP:
+    // the spike steers at its own waypoint now, exactly the pedal-era
+    // design - the round-5 look-ahead feed existed only because the
+    // middleman braked to arrive at a near destination, and with no
+    // middleman the look-ahead has no reader left.
     float want = 55.0f;
     if (dist < 25.0f || std::fabs(err) > 0.7f)
         want = 30.0f;
@@ -932,17 +912,8 @@ void SpikeDrive(float dt) {
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
-    // the intent the autopilot mirror reads: the brain's own word is
-    // this waypoint at this pace - but the feed is the look-ahead
-    // (fix round 5): the graph's waypoints can stand a few metres
-    // apart, and a destination a few metres ahead is a car braking to
-    // arrive, forever. The feed walks the feed law's distance of road
-    // down the route (25 m at the old paces; speed-shaped now).
     c.target = wp;
     c.desiredSpeed = want;
-    c.feedPoint = RouteLookAhead(c.spikeRoute, c.spikeIdx, c.pos, FeedLookAhead(c.speed));
-    c.feedCruise = want;
-    c.feedLive = true;
     Drive(c, gas, brake, steer, false);
     c.spikeLogT -= dt;
     if (c.spikeLogT <= 0.0f) {
@@ -1019,83 +990,30 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
-    // the intent the autopilot mirror reads: the leave waypoint at
-    // the leave pace, fed as the look-ahead down the leave route
-    // (fix round 5 - same arrival-braking law as the spike, the
-    // distance speed-shaped by the 5x feed law) - named before the
-    // drive, as in the spike, so the mirror never reads last tick's
-    // word
+    // THE ROOT STEP: the leave steers at its own waypoint by pedals,
+    // like the spike - the round-5 look-ahead feed has no reader left
     c.target = wp;
     c.desiredSpeed = want;
-    c.feedPoint = RouteLookAhead(c.leaveRoute, c.leaveIdx, c.pos, FeedLookAhead(c.speed));
-    c.feedCruise = want;
-    c.feedLive = true;
     Drive(c, gas, brake, steer, false);
 }
 
 // ---------------------------------------------------------------------------
-// THE COMPLETE UPDATE's feed law, one helper for every close-pursuit
-// tick. The brain's desire is SIGNED in the original (reverse is a real
-// manoeuvre there: the back zone's -12.7, the blocked branch's -21.7),
-// and his own physics honours the sign. The host's autopilot channel
-// does not take signed pace at all - it takes a point and a positive
-// cruise - so the sign must live in the POINT, never in the pace:
-//  - desire >= 0: the round-5 law stands - the aim projected 5 m
-//    THROUGH the prey, pace the desire (floored at a crawl, never 0:
-//    a live feed with cruise <= the bridge's crawl disarms the mirror,
-//    and a pursuing unit must never hand the bridge a dead feed);
-//  - desire < 0: the manoeuvre is a REVERSE toward (or away past) the
-//    aim. The feed point is the aim itself when it lies behind him,
-//    else a point 10 m straight behind him, at a positive pace of
-//    |desire| - ProcessAI answers a destination behind the car the way
-//    a driver does: it backs toward it. Before this update the close
-//    branch fed the signed desire straight into the cruise slot
-//    (c.feedCruise = c.desiredSpeed, negative): the bridge printed
-//    |cruise| from a negative feed while its BLOCKPLAYER behaviour did
-//    the actual driving, and the back/blocked zones' feeds were dead
-//    on arrival. The unit line's `want -21.7 at every range` was this
-//    line's signature (with the corner probes' own-shell block making
-//    the blocked branch fire from everywhere - see the probe comment).
-void PursuitFeed(CopState& c, const Vec3& target) {
-    if (c.desiredSpeed >= 0.0f) {
-        Vec3 dir = target - c.pos;
-        dir.z = 0.0f;
-        const float dl = dir.Length();
-        dir = dl > 0.01f ? dir * (1.0f / dl) : c.fwd;
-        // THE 5x UPDATE: the through-projection grows with his speed
-        // (5 m at the old paces, +0.35 s of travel, capped at 60 m) -
-        // a destination 5 m past the prey is an arrival order to a car
-        // covering that in a tenth of a second, and the batter's whole
-        // geometry is driving THROUGH the man, not stopping on him.
-        // THE ZERO-MERCY AMENDMENT adds the floor for the man on foot
-        // at batter: the projection never drops under 25 m there, so
-        // no arrival brake in the host's driving can park the unit
-        // beside him - the fed point is always well THROUGH his exact
-        // position, and after the pass the zone law turns the unit and
-        // feeds it through him again.
-        float proj = Clamp(5.0f + 0.35f * std::fabs(c.speed), 5.0f, 60.0f);
-        if (!gThreat.playerInVehicle && c.batter)
-            proj = std::fmax(proj, 25.0f);
-        c.feedPoint = target + dir * proj;
-        c.feedCruise = std::fmax(c.desiredSpeed, 2.0f);
-        // at batter the fed pace never drops below the batter pace:
-        // the pacing blend is dead there (CopControl's front zone),
-        // and the feed says the same law in its own channel - a side
-        // zone's manoeuvre desire does not get to feed a crawl while
-        // the felony stands at the ladder's top. THE 39-PACKAGE: the
-        // crash window (item 31) buys the same floor - a crashed prey
-        // is fed at batter pace for as long as the window stands
-        if (c.batter || sCrashT > 0.0f)
-            c.feedCruise = std::fmax(c.feedCruise, kSpeed1[kDifficulty] * PaceMul(c));
-    } else {
-        Vec3 to = target - c.pos;
-        to.z = 0.0f;
-        const float behind = to.x * c.fwd.x + to.y * c.fwd.y;
-        c.feedPoint = behind < 0.0f ? target : c.pos - c.fwd * 10.0f;
-        c.feedCruise = Clamp(-c.desiredSpeed, 4.0f, 22.0f);
-    }
-    c.feedLive = true;
-}
+// THE COMPLETE UPDATE's feed law stood here (PursuitFeed) until the
+// root step deleted it. Its two intents survive in direct form, and
+// the report names both translations:
+//  - the through-drive (a fed point projected through the prey so the
+//    middleman would not brake on him) is NATIVE under direct drive:
+//    the front zone's desire never brakes at the target - its thrust
+//    word brakes only on speed error - and after a pass the back
+//    zone's negative desire and the brake field do the original's own
+//    loop-back. There is no arrival to cancel, so there is nothing to
+//    project.
+//  - its batter/crash pace floor for the SIDE zones (a manoeuvre
+//    desire must not crawl while the felony stands at the ladder's
+//    top) now floors the DESIRE itself, in the side branch of
+//    CopControl below - the front zone never needed it (its desire
+//    is already the row) and the negative desires were always served
+//    by the brake field directly, never by a point behind the car.
 
 // ---------------------------------------------------------------------------
 // CopControl1 (COP_AI.C), ported whole onto metres, one instance per
@@ -1109,11 +1027,20 @@ void PursuitFeed(CopState& c, const Vec3& target) {
 // (the front-zone desire, before the pacing blend).
 // ---------------------------------------------------------------------------
 // The hold controller (the 39-package's post law): a unit with a post
-// drives to it by the feed like any far drive, at a distance-shaped
-// cruise, and stands there when it arrives. Items 2 (the block
+// drives to it and stands there when it arrives. Items 2 (the block
 // creep), 9 (the rear-exit guard), 27 (the door camps), 34 (the
 // dead-end mouth) - and layer C's ring, ambush and shore posts - all
 // spend this one mechanism; a post is a place, not a new brain.
+// THE ROOT STEP rewrites its drive as an explicit BRAKE-TO-POST law:
+// under the feed, the post was an autopilot arrival (the one arrival
+// the middleman was ever FOR - and the ring still never settled,
+// because the units around the man were pursuit units fed THROUGH
+// him, not post units). Now the core owns the whole curve: approach
+// at the distance-shaped pace, brake on the same curve as the post
+// nears, and hold with the standstill law inside the arrival band -
+// reach and STAY is the post's whole definition, and the /coptest
+// machine grades exactly that (the ring's settle witness and the
+// direct act's settle manoeuvre both read this law's outcome).
 void HoldControl(CopState& c, float dt) {
     Vec3 to = c.holdPoint - c.pos;
     to.z = 0.0f;
@@ -1122,7 +1049,6 @@ void HoldControl(CopState& c, float dt) {
     if (dist < 2.2f) {
         c.holdArrived = true;
         c.desiredSpeed = 0.0f;
-        c.feedLive = false;
         if (c.mode == COP_BLOCK)
             c.holding = false; // a crept block car sleeps at its new
                                // slot - the post is spent on arrival
@@ -1131,16 +1057,16 @@ void HoldControl(CopState& c, float dt) {
     }
     c.holdArrived = false;
     // a post is an order, not a life sentence: a unit wedged short of
-    // its post - feed live, speed ~0, still metres out - for over two
-    // seconds gives the post back and returns to the pursuit, whose
-    // own recovery law exists for exactly this. A held post must
-    // never be the reason a wedged unit never recovers (the /coptest
-    // recovery act convicted it: its wedged unit was re-claimed by a
-    // re-forming ring and froze, post-bound, for the whole act). The
-    // still-clock is the post's own: it starts when the post is taken
-    // (a pursuit stuck-clock already hot from the chase must not eat
-    // a fresh post in the tick it lands - the ambush sim convicted
-    // exactly that inheritance).
+    // its post - ordered to move, speed ~0, still metres out - for
+    // over two seconds gives the post back and returns to the
+    // pursuit, whose own recovery law exists for exactly this. A held
+    // post must never be the reason a wedged unit never recovers (the
+    // /coptest recovery act convicted it: its wedged unit was
+    // re-claimed by a re-forming ring and froze, post-bound, for the
+    // whole act). The still-clock is the post's own: it starts when
+    // the post is taken (a pursuit stuck-clock already hot from the
+    // chase must not eat a fresh post in the tick it lands - the
+    // ambush sim convicted exactly that inheritance).
     if (c.holdPoint.x != c.postPoint.x || c.holdPoint.y != c.postPoint.y ||
         c.holdPoint.z != c.postPoint.z) {
         c.postPoint = c.holdPoint;
@@ -1156,14 +1082,15 @@ void HoldControl(CopState& c, float dt) {
         Log("cop: a unit cannot reach his post - the post is given back and the pursuit has him again");
         return;
     }
+    // the brake-to-post curve: the approach pace falls off with the
+    // distance (20 m/s open road, walking pace inside the last few
+    // metres), and the pedal word is proportional on the error
+    // against that pace - gas while under it, brake while over it,
+    // with the brake growing as the band nears so the arrival is a
+    // stop, not a pass. Inside 2.2 m the standstill law above holds
+    // the post.
     const float cruise = Clamp(dist * 0.8f, 3.0f, 20.0f);
     c.desiredSpeed = cruise;
-    c.feedPoint = c.holdPoint; // the post is an arrival, not a
-    c.feedCruise = cruise;     // through-point: no projection past it
-    c.feedLive = true;
-    // the pedal word stays a sane proportional one toward the post -
-    // the mirror host drives by the feed, but no channel is left
-    // saying something the feed does not mean
     Vec3 f = c.fwd;
     f.z = 0.0f;
     float steer = 0.0f;
@@ -1172,8 +1099,11 @@ void HoldControl(CopState& c, float dt) {
         const Vec3 dir = to * (1.0f / dist);
         steer = Clamp((f.x * dir.y - f.y * dir.x) * 2.0f, -1.0f, 1.0f);
     }
-    const float gas = c.speed < cruise ? 0.7f : 0.0f;
-    const float brake = c.speed > cruise + 3.0f ? 0.5f : 0.0f;
+    float gas = 0.0f, brake = 0.0f;
+    if (c.speed < cruise)
+        gas = Clamp((cruise - c.speed) * 0.25f, 0.0f, 0.85f);
+    else
+        brake = Clamp((c.speed - cruise) * 0.3f, 0.0f, 0.85f);
     c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
     Drive(c, gas, brake, steer, c.sirenCmd);
 }
@@ -1288,28 +1218,19 @@ void CopControl(CopState& c, float dt) {
         float pedal = Clamp(err / (50 * kV), -1.0f, 1.0f);
         const float g = pedal > 0.0f ? pedal : 0.0f;
         const float b = pedal < 0.0f ? -pedal : 0.0f;
-        // THE COMPLETE UPDATE overturns round 5's "the autopilot never
-        // shares a recovery", on the round-4 conviction itself: the
-        // pedals DO NOT drive this car - for an AI driver they are
-        // outputs ProcessAI recomputes. A recovery fed only pedals
-        // therefore had NO channel at all: the 02:00 log's tail is
-        // minutes of strategy cycles at speed 0.0, a manoeuvre that
-        // could not execute, ever. The recovery is now SERVED through
-        // the autopilot like every other motion: the feed point stands
-        // 11 m behind him, leaned sideways by the strategy's own wheel
-        // pattern (the same -384..384 swing the pedals carry), at a
-        // firm reverse pace - ProcessAI backs toward a rear point the
-        // way a driver backs out of a wedge. The pedals still carry the
-        // same word beside it, as they do everywhere.
-        {
-            const float lean = Clamp(c.wheel / 512.0f, -1.0f, 1.0f) * 0.6f;
-            const float ca = std::cos(lean), sa = std::sin(lean);
-            const Vec3 back(-c.fwd.x, -c.fwd.y, 0.0f);
-            Vec3 dir(back.x * ca - back.y * sa, back.x * sa + back.y * ca, 0.0f);
-            c.feedPoint = c.pos + dir * 11.0f;
-            c.feedCruise = 12.0f;
-            c.feedLive = true;
-        }
+        // THE ROOT STEP retires the complete update's feed-served
+        // recovery, and its history is kept straight: the complete
+        // update was right ABOUT THE OLD WORLD - under autopilot
+        // ownership the pedals were ProcessAI's outputs and a
+        // pedal-only recovery had no channel. That world is gone.
+        // With no mission and no drive task on the body, the words
+        // above - a reversed desire riding the brake field, the
+        // strategy's wheel swing on the steer field - ARE the channel,
+        // the same words the recovery computed in every era; the
+        // 11 m rear feed point and its leaned geometry have no reader
+        // left and are gone. The manoeuvre is unchanged: direction
+        // chosen once at the start, wheel swung by the strategy's
+        // pattern, 22 ticks of it.
         c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
         Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
         return;
@@ -1481,13 +1402,16 @@ void CopControl(CopState& c, float dt) {
         // - the crawl feeds itself. The walk therefore never goes
         // under 30 m of road (the descent stops at the field's goal on
         // its own, so the floor can never overshoot the man).
-        // THE 5x UPDATE - the walk's length is the feed law's now
-        // (FeedLookAhead above): the original's own term was |v|*0.216
-        // + 2.66 m, which at the new paper rows still names a point
-        // ~60 m out for a car covering that in a quarter second - the
-        // self-feeding crawl at 5x scale. The law's 0.9 s of travel,
-        // capped at 180 m, is the walk. An SA-channel adaptation,
-        // named like the others.
+        // THE 5x UPDATE - the walk's length is FeedLookAhead's law
+        // (its header): the original's own term was |v|*0.216 + 2.66 m,
+        // which at the new paper rows still names a point ~60 m out
+        // for a car covering that in a quarter second. The law's 0.9 s
+        // of travel, capped at 180 m, is the walk: under the middleman
+        // it was the feed's reach (an SA-channel adaptation, named);
+        // THE ROOT STEP keeps it as the steering aim's reach - the
+        // descent point the wheel aims at stands that far down the
+        // road, which is also what keeps a fast approach's steering
+        // calm instead of hunting waypoint to waypoint.
         const float ahead = FeedLookAhead(c.speed);
         Vec3 far, farther;
         bool straight = false;
@@ -1578,12 +1502,10 @@ void CopControl(CopState& c, float dt) {
         float pedal = CopProfilePedal(Clamp(thrust / (0.35f * maxPower), -1.0f, 1.0f));
         const float g = pedal > 0.0f ? pedal : 0.0f;
         const float b = pedal < 0.0f ? -pedal : 0.0f;
-        // the feed is the descent point itself (fix round 5): with the
-        // floor under the walk it is always a genuine drive-to point,
-        // tens of metres of road ahead - never an arrival
-        c.feedPoint = target;
-        c.feedCruise = c.desiredSpeed;
-        c.feedLive = true;
+        // THE ROOT STEP: the far branch's descent point is a STEERING
+        // AIM now, nothing more - the wheel above was always computed
+        // toward it; the round-5 sentence "the feed is the descent
+        // point itself" is retired with the feed.
         c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
         Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
         return;
@@ -1622,8 +1544,10 @@ void CopControl(CopState& c, float dt) {
         // order - a swap or a bail-out cleanses nothing).
         // THE 5x UPDATE makes the batter gate below the whole law, in
         // words: at felony >= 2457 (c.batter) the blend is DEAD - his
-        // speed is never tied to the prey's again, and PursuitFeed
-        // floors the fed cruise at the batter pace to match. Below
+        // speed is never tied to the prey's again, and the side zones
+        // floor their desire at the batter pace to match (the root
+        // step moved that floor from the retired feed onto the desire
+        // itself). Below
         // batter the original's blend stands as it was. THE 39-PACKAGE
         // adds its own two deaths to the blend: a prey mid-turn (item
         // 12) and a prey in his crash window (item 31) are struck at
@@ -1684,6 +1608,14 @@ void CopControl(CopState& c, float dt) {
             c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed1[kDifficulty] * PaceMul(c));
         if (c.lastRamT > 0.0f)
             c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed2[kDifficulty] * PaceMul(c));
+        // THE ROOT STEP's one moved floor: while the felony stands at
+        // batter, a side zone's manoeuvre desire does not crawl - the
+        // complete update enforced this on the FEED's cruise (a side
+        // desire fed a strike pace); with the feed gone the DESIRE
+        // itself carries it, ahead of the blocked override below (a
+        // cornered unit's reverse stays the extraction it always was)
+        if (c.batter)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed1[kDifficulty] * PaceMul(c));
         wantWheel = (zone == ZONE_LEFT ? -512.0f : 512.0f);
         if (((n < 0.0f) != (c.speed < 0.0f)))
             wantWheel = -wantWheel; // the original flips the lock by the
@@ -1708,15 +1640,14 @@ void CopControl(CopState& c, float dt) {
     const float g = pedal > 0.0f ? pedal : 0.0f;
     const float b = pedal < 0.0f ? -pedal : 0.0f;
     c.target = target;
-    // the feed, by the complete update's one law (PursuitFeed above):
-    // round 5's through-the-prey projection for a forward desire, and
-    // for the back/blocked zones' NEGATIVE desires the sign now lives
-    // in the point (a reverse destination behind him) at a positive
-    // pace - round 5 fed the signed desire into the cruise slot
-    // itself and the bridge's gate "disarmed the mirror on its own",
-    // which is a polite name for the reverse never being served at
-    // all on a host whose pedals are outputs.
-    PursuitFeed(c, target);
+    // THE ROOT STEP: no feed follows this Drive - the words computed
+    // above (the zone law's wheel, the thrust law's pedals, the signed
+    // desire honouring itself through the brake field in the back and
+    // blocked zones) ARE the drive. What PursuitFeed used to add on
+    // top of them is accounted for in the stub comment where it stood:
+    // the through-drive is native (nothing here brakes AT the target),
+    // and the side zones' batter floor rides the desire itself (see
+    // the side branch).
     c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
     Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
 }
@@ -3177,9 +3108,18 @@ void CopTick(float dt, const Vec3& playerPos) {
         struckShotU[slot] = rep.struckShot;
         struckDriverU[slot] = rep.struckDriver;
         // the body's own drive-state words, stashed for the per-second
-        // unit line (fix round 5; the 5x update adds the traffic-speed
-        // float beside the narrow cruise char, so the line can print
-        // what each field actually held)
+        // unit line: THE ROOT STEP makes the pedal read-backs the
+        // line's centre - repSteer/repGas/repBrake are the fields as
+        // the BODY answered them, printed beside the commanded words,
+        // so a session convicts the channel itself from numbers. The
+        // mission/cruise pair stays beside them as the middleman's
+        // death certificate: under direct drive a moving unit must
+        // read mission NONE and cruise 0 - the moment a live session's
+        // line shows a mission on a driving cop, something else has
+        // claimed the body and the step's premise is broken on screen
+        c.repSteer = rep.steer;
+        c.repGas = rep.gas;
+        c.repBrake = rep.brake;
         c.repMission = rep.mission;
         c.repCruise = rep.cruise;
         c.repCruiseF = rep.cruiseF;
@@ -4123,28 +4063,29 @@ void CopTick(float dt, const Vec3& playerPos) {
         default:
             break;
         }
-        // the per-second unit line (fix round 5): EVERY living unit,
-        // the brain's intent beside the body's own read-backs, so a
-        // session separates cruise-scale from target-proximity from
-        // refresh churn by numbers alone - and the felony story (the
-        // page's level, the position known, the force seeing) rides
-        // the same line, with the siren flag read off the body itself:
-        // ignition AND duration are provable from the log, not felt
+        // the per-second unit line: EVERY living unit, the brain's
+        // intent beside the body's own read-backs, so a session
+        // separates decision from delivery by numbers alone - and the
+        // felony story (the page's level, the position known, the
+        // force seeing) rides the same line, with the siren flag read
+        // off the body itself. THE ROOT STEP's pair: `cmd` is the word
+        // the core SENT (steer/gas/brake as Drive() last wrote them),
+        // `body` is the word the car ANSWERED with on its last report
+        // - commanded vs landed, every second, beside the mission the
+        // body reports (which must read 0/NONE under direct drive).
+        // The aim distance is the brain's own target again (the feed
+        // point it replaced in round 5 no longer exists).
         c.unitLogT -= dt;
         if (c.unitLogT <= 0.0f) {
             c.unitLogT = 1.0f;
-            const Vec3& aim = c.feedLive ? c.feedPoint : c.target;
-            // the 5x update extends the body's words: cruise prints
-            // as char/float - what the narrow field held, then what
-            // the traffic-speed float held - beside the kicks the
-            // momentum channel has dealt, so a session reads the
-            // clipping and the throws off the same line
-            Log("cop unit %d: mode %d speed %.1f want %.1f | feed %s cruise %.0f aim %.0f m"
-                " | body mission %d cruise %d/%.0f siren %d | felony %.0f known %d seen %d kicks %d",
+            Log("cop unit %d: mode %d speed %.1f want %.1f | cmd steer %.2f gas %.2f brake %.2f"
+                " | body steer %.2f gas %.2f brake %.2f mission %d cruise %d/%.0f siren %d"
+                " | aim %.0f m | felony %.0f known %d seen %d kicks %d",
                 slot, (int)c.mode, c.speed, c.desiredSpeed,
-                c.feedLive ? "on" : "off", c.feedLive ? c.feedCruise : 0.0f,
-                (aim - c.pos).Length(),
+                c.cmdSteer, c.gas, c.brake,
+                c.repSteer, c.repGas, c.repBrake,
                 c.repMission, c.repCruise, c.repCruiseF, c.repSiren ? 1 : 0,
+                (c.target - c.pos).Length(),
                 page.felony, page.known ? 1 : 0, page.seen ? 1 : 0, c.kickCount);
         }
     }

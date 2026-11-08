@@ -169,25 +169,31 @@ struct CopState {
                                // start-up ramp, and a witness that reads
                                // raw stillness inside it convicts a car
                                // that has barely been told to move.
-    // fix round 5: the autopilot feed - the point and pace Drive()
-    // hands the host's drive channel beside the pedals. NOT the brain's
-    // target: the host's ProcessAI brakes to ARRIVE at its destination,
-    // so the feed is a driving point (a route look-ahead, a far descent
-    // point, an overshoot through the prey in close pursuit), while
-    // `target` above stays the brain's own aim for its geometry/tests.
-    Vec3 feedPoint;
-    float feedCruise = 0.0f;
-    bool feedLive = false;
-    // the last report's drive-state read-backs (the autopilot's mission
-    // and cruise as the body itself answered, the siren flag on the
-    // body) - stashed so the per-second unit line can print the body's
-    // own words next to the brain's intent
+    // THE ROOT STEP (2026-11-08): the autopilot feed is RETIRED -
+    // there is no feedPoint/feedCruise/feedLive any more. The brain's
+    // wheel/pedal words (wheel, gas, brake above) are the drive, whole
+    // and alone; Drive() sends nothing beside them. What the feed
+    // carried that was intent rather than translation is re-expressed
+    // in Cop.cpp where it lived (the batter pace floor in the side
+    // zones, the far walk's length as a steering aim, the brake-to-
+    // post hold) and each translation is named in DRIVER2-STEP3-fa.md.
+    float cmdSteer = 0.0f;     // the steer word Drive() last sent, as
+                               // sent (after the session flip and
+                               // kSteerScale) - the unit line prints
+                               // it beside the body's own read-back, so
+                               // a session can convict the CHANNEL
+                               // (commanded vs landed) from numbers
+    // the last report's drive-state read-backs: the pedal fields as
+    // the body itself answered (repSteer/repGas/repBrake - under direct
+    // drive these are the channel's receipt, read back from the car,
+    // never echoed from the command), and the autopilot's mission and
+    // cruise as the body answered them - which under direct drive must
+    // read NONE/0 while the car drives: a moving car on mission 0 is
+    // the no-middleman receipt, printed on the same unit line
+    float repSteer = 0.0f, repGas = 0.0f, repBrake = 0.0f;
     int repMission = -1;
     int repCruise = 0;
-    float repCruiseF = 0.0f;   // the 5x update: the traffic-speed cap
-                               // read back beside the narrow cruise char
-                               // (the char saturates; the float lands
-                               // whole - the unit line prints both)
+    float repCruiseF = 0.0f;
     bool repSiren = false;
     // the momentum channel's bookkeeping (the 5x update): one throw
     // per approach - the latch re-arms only when the centres have

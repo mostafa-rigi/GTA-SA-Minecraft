@@ -27,6 +27,7 @@ namespace {
 enum Phase {
     PH_NONE,
     PH_SPIKE,
+    PH_DIRECT,
     PH_PURSUIT,
     PH_RUNOVER,
     PH_RING,
@@ -52,7 +53,8 @@ Phase sPhase = PH_NONE;
 bool sEntered = false;
 float sPhaseT = 0.0f;
 float sTotalT = 0.0f;
-Result sResults[12];
+Result sResults[14]; // the root step's "direct" act makes thirteen
+                     // graded outcomes; one spare slot stands guard
 int sResultN = 0;
 float sSavedFelony = 0.0f;
 
@@ -64,6 +66,30 @@ size_t sRouteIdx = 0;
 // spike
 Vec3 sSpikeStart;
 float sSpikeSum = 0.0f, sSpikeWt = 0.0f;
+// direct (THE ROOT STEP's channel act: the anchor alone, three
+// manoeuvres on the pedal channel with no middleman anywhere)
+int sDirStage = 0;         // 0 pace, 1 settle, 2 ram-and-pass
+float sDirStageT = 0.0f;
+float sDirPeak = 0.0f;     // the pace manoeuvre's best speed
+bool sDirMissionBad = false; // any tick the anchor's body answered a
+                             // live autopilot mission while driving
+Vec3 sDirPost;             // the settle manoeuvre's post
+float sDirHoldT = 0.0f;    // seconds inside the settled band so far
+float sDirHoldMax = 0.0f;  // the worst excursion from the post during
+                           // the hold window (the orbit witness)
+int sDirEntries = 0;       // entries into the arrival circle during
+                           // the hold (an orbiter re-enters; a settler
+                           // enters once)
+bool sDirInCircle = false;
+Vec3 sDirPedSpot;          // the ram manoeuvre's man, where he stood
+float sDirPedHealth0 = 0.0f;
+float sDirContactT = -1.0f; // when the hit landed (-1: not yet)
+float sDirPassMax = 0.0f;  // the farthest past-the-man reading after
+                           // contact (the no-stall witness)
+float sDirStallT = 0.0f;   // the current standstill inside the ram
+                           // manoeuvre, and its worst (the loop-back
+                           // stall witness)
+float sDirStallWorst = 0.0f;
 // pursuit
 float sStartDist = 0.0f;
 bool sPursuitOpen = false;
@@ -311,7 +337,7 @@ void Cleanup() {
 }
 
 // the last run's sheet, kept for the suite's hook after Finish
-Result sSheet[12];
+Result sSheet[14];
 int sSheetN = 0;
 
 void Finish() {
@@ -335,14 +361,20 @@ void Finish() {
     sPhase = PH_NONE;
 }
 
-// the no-freeze soak, sampled across every phase: a pursuing unit with
-// a live feed sitting under 0.3 m/s - the frozen-unit signature of the
-// 02:00 session - may never hold for more than 5 s
+// the no-freeze soak, sampled across every phase: a pursuing unit
+// ordered to move and sitting under 0.3 m/s - the frozen-unit
+// signature of the 02:00 session - may never hold for more than 5 s.
+// THE ROOT STEP re-words the witness: the feed flag it read is gone
+// with the feed; "ordered to move" is now a live desire or a real gas
+// word on the unit's own book, and a unit mid-recovery is exempt as
+// before (his stillness is a manoeuvre the recovery law owns, judged
+// by the recovery act, not the soak)
 void SoakTick(float dt) {
     for (int i = 0; i < kMaxCopUnits; ++i) {
         const CopState& c = gCops[i];
-        const bool frozen = c.veh >= 0 && c.mode == COP_PURSUE && c.feedLive &&
-                            std::fabs(c.speed) < 0.3f;
+        const bool frozen = c.veh >= 0 && c.mode == COP_PURSUE &&
+                            (std::fabs(c.desiredSpeed) > 3.0f || c.gas > 0.1f) &&
+                            std::fabs(c.speed) < 0.3f && c.recoveryT <= 0.0f;
         if (frozen) {
             sFreeze[i] += dt;
             if (sFreeze[i] > sWorstFreeze) {
@@ -363,7 +395,7 @@ void PhaseSpike(float dt) {
         GuardDismiss();
         if (!GuardSummon(p + Vec3(6, 0, 0), p)) {
             Grade("spike", false, true, "the anchor's body could not be made");
-            GoPhase(PH_PURSUIT);
+            GoPhase(PH_DIRECT);
             return;
         }
         sSpikeStart = gCop.pos;
@@ -388,9 +420,184 @@ void PhaseSpike(float dt) {
         Grade("spike", avg >= 14.0f && disp >= 60.0f, true,
               "avg speed %.1f m/s over %.0f s, displacement %.0f m (bar: >=14 m/s, >=60 m)",
               avg, sSpikeWt, disp);
-        GoPhase(PH_PURSUIT);
+        GoPhase(PH_DIRECT);
     } else if (sPhaseT > 90.0f) {
         Grade("spike", false, true, "the route never finished in 90 s (displacement %.0f m)", disp);
+        GoPhase(PH_DIRECT);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// THE ROOT STEP's channel act. The brain's decisions were never the
+// convicted layer - the middleman was - so this act grades the CHANNEL
+// itself, on the anchor alone, with the body's own report as the only
+// witness: the anchor must drive with NO autopilot mission on his body
+// (mission 0 on every report while he moves - a moving car on mission
+// NONE is the no-middleman receipt), and his pedal words must produce
+// the three motions the live session convicted:
+//   0 PACE: a far hunt at felony 4096 - the anchor's speed passes
+//     25 m/s on the way (the 5x rows through a bare pedal channel; the
+//     live sheet's complaint was that the pace was never FELT);
+//   1 SETTLE: a brake-to-post hold 38 m ahead - reach the post's
+//     circle and STAY: ten seconds inside 4 m of it, never out, one
+//     entry (the orbiting body re-enters; the settler enters once);
+//   2 RAM-AND-PASS: a man standing 28 m ahead of the anchor's nose at
+//     felony 4096 - the hit must land (health lost or the man thrown)
+//     and the anchor must CARRY THROUGH: at least 5 m past the man's
+//     spot within 4 s of contact, and never parked on the body for
+//     more than 1.5 s anywhere in the manoeuvre (the loop-back stall
+//     the user's eye named: "beside us, going around in circles").
+// In the fake the same bars grade the control law against a pedal
+// physics that has no arrival in it; in the game they grade the
+// channel the report's frame-order answer claims.
+void PhaseDirect(float dt) {
+    CopState& a = gCop;
+    if (!sEntered) {
+        sEntered = true;
+        Say("coptest: --- direct: the channel itself - pace, settle, ram-and-pass, no middleman ---");
+        sDirStage = 0;
+        sDirStageT = 0.0f;
+        sDirPeak = 0.0f;
+        sDirMissionBad = false;
+        sDirHoldT = 0.0f;
+        sDirHoldMax = 0.0f;
+        sDirEntries = 0;
+        sDirInCircle = false;
+        sDirContactT = -1.0f;
+        sDirPassMax = 0.0f;
+        sDirStallT = 0.0f;
+        sDirStallWorst = 0.0f;
+        // stage 0: a man standing far down the anchor's own heading,
+        // felony at the ladder's top - the far hunt is the pace order
+        if (sDecoyPed >= 0) {
+            TheHost().RetireDecoyPed(sDecoyPed);
+            sDecoyPed = -1;
+        }
+        Vec3 f = a.fwd;
+        f.z = 0.0f;
+        f = f.Length() > 0.01f ? f * (1.0f / f.Length()) : Vec3(0, 1, 0);
+        sDecoyPed = TheHost().SpawnDecoyPed(a.pos + f * 150.0f);
+        CopPreyOverride(-1, sDecoyPed);
+        CopForceFelony(4096.0f);
+    }
+    sDirStageT += dt;
+    // the channel witness, every tick of every manoeuvre: the anchor's
+    // body must answer mission NONE (0) - repMission is the body's own
+    // report, stashed by the force tick; a body that has never
+    // reported (-1) is not evidence either way
+    if (a.repMission > 0)
+        sDirMissionBad = true;
+    if (sDirStage == 0) {
+        if (std::fabs(a.speed) > sDirPeak)
+            sDirPeak = std::fabs(a.speed);
+        Vec3 pp;
+        float ph = 0.0f;
+        const bool pedUp = sDecoyPed >= 0 && TheHost().DecoyPedReport(sDecoyPed, &pp, &ph);
+        const float d = pedUp ? (pp - a.pos).Length() : 1e9f;
+        if ((sDirPeak >= 25.0f && d < 45.0f) || sDirStageT > 30.0f) {
+            // stage 1: settle. The hunt stands down around him; the
+            // anchor alone takes a post 38 m ahead of his nose and the
+            // brake-to-post law owns him from here
+            CopPreyOverride(-1, -1);
+            CopForceFelony(0.0f);
+            Vec3 f = a.fwd;
+            f.z = 0.0f;
+            f = f.Length() > 0.01f ? f * (1.0f / f.Length()) : Vec3(0, 1, 0);
+            sDirPost = a.pos + f * 38.0f;
+            a.holding = true;
+            a.holdPoint = sDirPost;
+            a.holdArrived = false;
+            sDirStage = 1;
+            sDirStageT = 0.0f;
+            Say("coptest: direct pace read %.1f m/s - now the settle: a post 38 m ahead, reach and STAY",
+                sDirPeak);
+        }
+        return;
+    }
+    if (sDirStage == 1) {
+        Vec3 to = sDirPost - a.pos;
+        to.z = 0.0f;
+        const float d = to.Length();
+        const bool in = d < 2.2f;
+        if (in && !sDirInCircle)
+            ++sDirEntries;
+        sDirInCircle = in;
+        if (a.holdArrived || in) {
+            sDirHoldT += dt;
+            if (d > sDirHoldMax)
+                sDirHoldMax = d;
+        }
+        if (sDirHoldT >= 10.0f || sDirStageT > 40.0f) {
+            Say("coptest: direct settle read: held %.0f s, worst excursion %.1f m, entries %d",
+                sDirHoldT, sDirHoldMax, sDirEntries);
+            // stage 2: ram-and-pass. The post is given back, a fresh
+            // man stands 28 m ahead of the anchor's nose, felony back
+            // at the top and the override on the man
+            a.holding = false;
+            if (sDecoyPed >= 0) {
+                TheHost().RetireDecoyPed(sDecoyPed);
+                sDecoyPed = -1;
+            }
+            Vec3 f = a.fwd;
+            f.z = 0.0f;
+            f = f.Length() > 0.01f ? f * (1.0f / f.Length()) : Vec3(0, 1, 0);
+            sDirPedSpot = a.pos + f * 28.0f;
+            sDecoyPed = TheHost().SpawnDecoyPed(sDirPedSpot);
+            Vec3 pp;
+            sDirPedHealth0 = 100.0f;
+            if (sDecoyPed >= 0 && TheHost().DecoyPedReport(sDecoyPed, &pp, &sDirPedHealth0))
+                sDirPedSpot = pp;
+            CopPreyOverride(-1, sDecoyPed);
+            CopForceFelony(4096.0f);
+            sDirStage = 2;
+            sDirStageT = 0.0f;
+            return;
+        }
+        return;
+    }
+    // stage 2: ram-and-pass
+    Vec3 pp;
+    float ph = sDirPedHealth0;
+    const bool pedUp = sDecoyPed >= 0 && TheHost().DecoyPedReport(sDecoyPed, &pp, &ph);
+    if (pedUp) {
+        Vec3 disp = pp - sDirPedSpot;
+        disp.z = 0.0f;
+        if (sDirContactT < 0.0f && (ph < sDirPedHealth0 - 0.5f || disp.Length() > 1.5f))
+            sDirContactT = sDirStageT;
+        if (sDirContactT >= 0.0f) {
+            Vec3 past = a.pos - sDirPedSpot;
+            past.z = 0.0f;
+            if (past.Length() > sDirPassMax)
+                sDirPassMax = past.Length();
+        }
+    }
+    if (std::fabs(a.speed) < 0.5f) {
+        sDirStallT += dt;
+        if (sDirStallT > sDirStallWorst)
+            sDirStallWorst = sDirStallT;
+    } else {
+        sDirStallT = 0.0f;
+    }
+    const bool contact = sDirContactT >= 0.0f;
+    if ((contact && sDirPassMax >= 5.0f && sDirStageT - sDirContactT >= 4.0f) ||
+        sDirStageT > 45.0f) {
+        const bool pace = sDirPeak >= 25.0f;
+        const bool settled = sDirHoldT >= 10.0f && sDirHoldMax <= 4.0f &&
+                             sDirEntries <= 1;
+        const bool ram = contact && sDirPassMax >= 5.0f && sDirStallWorst <= 1.5f;
+        Grade("direct", pace && settled && ram && !sDirMissionBad, true,
+              "pace %.1f m/s (bar >=25) | settle held %.0f s worst %.1f m entries %d"
+              " (bar: 10 s, <=4 m, 1 entry) | ram contact %s, carried %.1f m past,"
+              " worst stall %.1f s (bar: hit + >=5 m, stall <=1.5 s)"
+              " | body mission %s (bar: NONE throughout)",
+              sDirPeak, sDirHoldT, sDirHoldMax, sDirEntries,
+              contact ? "yes" : "NO", sDirPassMax, sDirStallWorst,
+              sDirMissionBad ? "CLAIMED" : "none");
+        CopPreyOverride(-1, -1);
+        if (sDecoyPed >= 0) {
+            TheHost().RetireDecoyPed(sDecoyPed);
+            sDecoyPed = -1;
+        }
         GoPhase(PH_PURSUIT);
     }
 }
@@ -501,9 +708,17 @@ void PhasePursuit(float dt) {
         // a third of the old 45, and under the 18 s the live 1x
         // sheet itself achieved, so the bar bites the real host too;
         // the fake world arrived in 2 s on the first 5x run, and the
-        // numbers print either way
-        Grade("arrival", sArrived && sArriveT <= 15.0f && sStartDist >= 50.0f, true,
-              "from %.0f m to %.1f m in %.0f s (bar: <4 m within 15 s from >=50 m)",
+        // numbers print either way. THE ROOT STEP fixes the grade's
+        // own setup bug: the old bar demanded a >=50 m start, but the
+        // act stages a fresh summon (the anchor spawns near the man
+        // by design) and measures the nearest unit - the live sheet
+        // arrived in 2 s from 37 m and FAILED on the precondition,
+        // grading its own staging instead of the arrival. The bar now
+        // asks for a real chase distance (>=30 m) and grades the
+        // arrival that was actually set up; the start distance prints
+        // beside the time either way
+        Grade("arrival", sArrived && sArriveT <= 15.0f && sStartDist >= 30.0f, true,
+              "from %.0f m to %.1f m in %.0f s (bar: <4 m within 15 s from >=30 m)",
               sStartDist, sMinDist, sArrived ? sArriveT : sPhaseT);
         Grade("ram", sRam, true,
               "closest centres %.1f m, approach closing %.1f m/s (bar: centres <=3.4 m at >=22 m/s approach)",
@@ -847,9 +1062,9 @@ void PhaseRecovery(float dt) {
     }
     if (sPhaseT > 50.0f) {
         Grade("recovery", false, true,
-              "still wedged after 50 s (moved %.1f m, %d recoveries) - unit %d: mode %d holding %d speed %.1f desire %.0f stuck %.1f feed (%.0f,%.0f) live %d",
+              "still wedged after 50 s (moved %.1f m, %d recoveries) - unit %d: mode %d holding %d speed %.1f desire %.0f stuck %.1f cmd steer %.2f gas %.2f brake %.2f",
               fromWedge, recs, sRecSlot, (int)c.mode, c.holding ? 1 : 0, c.speed,
-              c.desiredSpeed, c.stuckT, c.feedPoint.x, c.feedPoint.y, c.feedLive ? 1 : 0);
+              c.desiredSpeed, c.stuckT, c.cmdSteer, c.gas, c.brake);
         GoPhase(PH_BLOCK);
     }
 }
@@ -1063,7 +1278,7 @@ void CopTestReset() {
         // Finish prints DONE and cleans up as always. The sheet must
         // ALWAYS end in DONE.
         Say("coptest: the world reset under a running test - grading what stands and finishing the sheet");
-        static const char* const kCounted[] = { "spike", "arrival", "ram", "siren",
+        static const char* const kCounted[] = { "spike", "direct", "arrival", "ram", "siren",
                                                 "runover", "ring", "recovery", "player-felony", "bailout",
                                                 "radio" };
         for (const char* name : kCounted)
@@ -1118,6 +1333,7 @@ void CopTestTick(float dt) {
     }
     switch (sPhase) {
     case PH_SPIKE: PhaseSpike(dt); break;
+    case PH_DIRECT: PhaseDirect(dt); break;
     case PH_PURSUIT: PhasePursuit(dt); break;
     case PH_RUNOVER: PhaseRunover(dt); break;
     case PH_RING: PhaseRing(dt); break;

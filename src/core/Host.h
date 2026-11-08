@@ -201,9 +201,12 @@ struct Host {
         int cruise = 0;           // the autopilot's cruise setting, raw
         // the autopilot's traffic-speed cap read back beside it (the
         // 5x update): the cruise char above is a narrow field and
-        // saturates at its width under a 5x feed; this float is the
-        // field that can hold the true ask, and the unit line prints
-        // both landings so the clipping is measured, not guessed
+        // saturates at its width; this float is the field that held
+        // the true ask. THE ROOT STEP retires the feed, but both
+        // fields stay in the report as the middleman's witnesses: a
+        // direct-driven body must answer mission NONE and cruise 0
+        // while it drives, and the unit line prints the pair so a
+        // session can see the claim stay empty
         float cruiseF = 0.0f;
         bool driverInVehicle = false;
         // the 39-package's bail-out (item 38): once the core orders the
@@ -247,28 +250,19 @@ struct Host {
     // gas/brake 0..1, steer -1..1 of full lock. Siren: the host's own siren
     // flag follows `siren` while the body is driven.
     virtual void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {}
-    // The drive's INTENT, named alongside the pedals (fix round 4): the
-    // point the brain is driving at this tick and the speed it wants on
-    // the way (m/s, signed). On this host an AI driver's car takes its
-    // controls from its own autopilot - the pedal fields are that
-    // channel's outputs, recomputed inside the game's processing - so
-    // the bridge mirrors the intent into the autopilot (a straight-line
-    // goto at the brain's point and pace) and the pedals ride beside it:
-    // whichever channel the automobile truly honours, the brain's order
-    // is on it. THE COMPLETE UPDATE's arming law: a named feed with a
-    // cruise above the bridge's crawl arms the autopilot, and nothing
-    // else gates it - the pedal gas is an OUTPUT of this host's AI cars,
-    // so the round-5 contract that also demanded gas > 0 disarmed live
-    // pursuits mid-chase (the pedals read ~0 while the autopilot eases
-    // off, and the mirror fell silent exactly when the brain was
-    // ordering motion). A tick with no feed, or a cruise at or under the
-    // crawl, disarms the autopilot back to its rest state, so a stopped
-    // or stood-down unit is never driven by a stale order. The core's
-    // feed law in turn guarantees: a live feed always carries a positive
-    // cruise - the signed brain desires (reverse for the back and blocked
-    // manoeuvres) are translated into a point and a positive pace before
-    // they ever reach this channel. The full conviction stands in
-    // DRIVER2-STEP3-fa.md.
+    // The drive's INTENT verb - RETIRED by the root step (2026-11-08)
+    // and kept in the interface only so existing hosts still link.
+    // Its history, kept straight: under the middleman design the core
+    // named a destination+pace beside the pedals and the bridge
+    // mirrored it into the car's traffic autopilot, because under
+    // autopilot ownership the pedal fields were that channel's
+    // outputs. Every convicted defect of every round was born in that
+    // translation (the autopilot's native arrive-and-stop against a
+    // through-point is the orbiting the user's eye finally convicted).
+    // No core caller remains: Drive() sends the pedal words alone, and
+    // hosts answer this verb with silence (the bridge's is a no-op).
+    // A future host that re-implements it changes nothing unless the
+    // core calls it again - it does not.
     virtual void CopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) {}
     // His survival law is HIS, not the host's (the user's order): the core
     // keeps his damage book on the original's scale and commands the
@@ -288,8 +282,7 @@ struct Host {
     virtual float PlayerVehicleImpact() { return 0.0f; }
     // Move a cop body outright (test staging only: /coptest wedges a unit
     // nose-to-wall to grade its recovery). The bridge writes the matrix
-    // the way the spawn does and forgets its mirror bookkeeping, so the
-    // next feed re-arms from clean. Nothing in play ever calls this.
+    // the way the spawn does. Nothing in play ever calls this.
     virtual void CopBodyPlace(int veh, const Vec3& at, float headingDeg) {}
     // ---- the momentum channel (the 5x update): the core owns the law
     // (Cop.cpp prices the throw off the contact's closing speed, caps
