@@ -12956,6 +12956,159 @@ static void TestCopForce() {
                       CopBlockCount());
             }
         }
+
+        // (ap) LAYER D+E - the priced disable and the sound law
+        {
+            const Vec3 G(2480, -1660, 13);
+            // (ap1) item 39: every big moment is announced, logged
+            // and counted - the six kinds, staged one by one
+            {
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                host.vehicle = 42;
+                gCop.felony = 700.0f; // the pursuit opens (wanted 1)
+                for (float t = 0.0f; t < 1.5f; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                gCop.felony = 2500.0f; // the rungs climb, units join
+                for (float t = 0.0f; t < 4.0f; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                host.vehicle = -1; // he bails out mid-pursuit
+                for (float t = 0.0f; t < 1.0f; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                host.vehicle = 42;
+                gCop.felony = 1000.0f; // dip and re-arm the block chain
+                CopTick(dt, G);
+                gCop.felony = 2500.0f;
+                for (float t = 0.0f; t < 8.0f && CopBlockCount() == 0; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 15, 0);
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                if (ladderLiving() >= 2)
+                    gCops[1].totalDamage = 200000.0f; // a unit goes down
+                for (float t = 0.0f; t < 1.0f; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(CopRadioLinesFired() >= 5 && CopRadioEventMask() == 63,
+                      "item 39: the radio speaks at every big moment - %d lines, kind mask %d (want 63: open|rung|bail|block|death|join)",
+                      CopRadioLinesFired(), CopRadioEventMask());
+                CHECK(Heard(SND_COP_RADIO_07) + Heard(SND_COP_RADIO_08) >= 1,
+                      "item 39: the opening call is on the recording, not just in the count");
+            }
+            // (ap2) item 39/32: at night the force arrives dark and
+            // announces itself at contact; a settled ring sleeps
+            {
+                host.dark = true;
+                stageAnchor(G + Vec3(0, -60, 0), G);
+                host.vehicle = 42;
+                gCop.felony = 2000.0f;
+                for (float t = 0.0f; t < 0.5f; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                ForceFakeHost::Body* b = host.Find(gCop.veh);
+                CHECK(b && !b->cmdSiren,
+                      "item 39/32: in the dark, closing from 60 m, the siren sleeps");
+                bool heard = false;
+                for (float t = 0.0f; t < 10.0f && !heard; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    b = host.Find(gCop.veh);
+                    if (b && (b->pos - G).Length() < 16.0f) {
+                        // one more breath of ticks at contact range
+                        for (float u = 0.0f; u < 0.4f; u += dt) {
+                            CopTick(dt, G);
+                            host.StepAll(dt);
+                        }
+                        b = host.Find(gCop.veh);
+                        heard = b && b->cmdSiren;
+                    }
+                }
+                CHECK(heard, "item 39/32: at contact the siren wakes - the force announces itself");
+                host.dark = false;
+            }
+            // (ap3) item 10: the disable is priced off the kicks -
+            // a tyre per full-blooded hit, spaced, four in all
+            {
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                host.vehicle = 42;
+                gCop.felony = 2000.0f;
+                host.player = G;
+                host.velocity = Vec3();
+                for (float t = 0.0f; t < 3.0f && gCop.mode != COP_PURSUE; t += dt) {
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(gCop.mode == COP_PURSUE, "item 10 stage: the anchor pursues");
+                const int pops0 = host.tyrePops;
+                const int vehPops0 = host.vehTyrePops[42]; // (ap1)'s
+                    // organic kicks may already have cost him tyres
+                    // on this same host - the pin reads deltas
+                auto parkFar = [&]() {
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = G + Vec3(0, -60, 0);
+                        b->vel = Vec3();
+                    }
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                };
+                auto kickOnce = [&]() {
+                    parkFar(); // the separation re-arms the throw
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = G + Vec3(0, -4, 0);
+                        b->vel = Vec3(0, 20, 0);
+                        b->yaw = 0.0f;
+                    }
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                };
+                auto waitOut = [&](float seconds) {
+                    for (float t = 0.0f; t < seconds; t += dt)
+                        parkFar();
+                };
+                kickOnce();
+                CHECK(host.tyrePops == pops0 + 1,
+                      "item 10: the first full-blooded kick costs him a tyre (%d)",
+                      host.tyrePops - pops0);
+                const int kicksBefore = gCop.kickCount;
+                kickOnce();
+                CHECK(gCop.kickCount > kicksBefore && host.tyrePops == pops0 + 1,
+                      "item 10: a second kick inside six seconds throws him but pops nothing - the stages are spaced");
+                waitOut(6.5f);
+                kickOnce();
+                CHECK(host.tyrePops == pops0 + 2, "item 10: past the spacing, the next kick buys the second tyre");
+                waitOut(6.5f);
+                kickOnce();
+                waitOut(6.5f);
+                kickOnce();
+                CHECK(host.tyrePops == pops0 + 4, "item 10: four spaced kicks, four tyres (%d)",
+                      host.tyrePops - pops0);
+                waitOut(6.5f);
+                kickOnce();
+                CHECK(host.tyrePops == pops0 + 4 && host.vehTyrePops[42] - vehPops0 == host.tyrePops - pops0,
+                      "item 10: a fifth stage does not exist - and every pop was on HIS car (pops %d, on-42 %d)",
+                      host.tyrePops - pops0, host.vehTyrePops[42] - vehPops0);
+            }
+        }
     }
 }
 

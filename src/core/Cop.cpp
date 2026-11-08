@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "Atlas.h"
+#include "Audio.h"
 #include "CopTest.h"
 #include "Host.h"
 #include "NavGraph.h"
@@ -395,6 +396,80 @@ int sRingSlot[4];
 Vec3 sRingCentre;
 bool sShoreOn = false;    // item 29: the shoreline watch
 int sShoreSlot[3];
+// layer D+E's state: the priced disable and the sound law
+int sTyreStage = 0;       // item 10: tyres the prey's car has lost
+float sTyreT = 0.0f;      // the spacing between stages
+int sTyreVeh = -1;        // the car the stages belong to
+int sRadioLines = 0;      // item 39: radio lines fired this page
+int sRadioMask = 0;       // the kinds fired, as a bitmask (1 open,
+                          // 2 rung, 4 bail, 8 block, 16 death, 32 join)
+bool sRadioOpen = false;  // the pursuit's open line has been called
+int sRadioRung = 0;       // the ladder size last announced
+bool sPrevInVeh = false;  // the prey's last-tick seat (the bail edge)
+bool sForceHeard = false; // night witness: a pursuer has closed
+                          // within 18 m this pursuit
+
+// item 39: the force's one radio voice. Every line is LOGGED and
+// COUNTED - the user's live complaint was that the force never
+// talked, so the fix is measurable in the log and the sheet, not
+// just audible - and fired at the raised gain his ear asked for.
+// (The bridge's own two call sites are deleted in the bridge commit;
+// the core is the only voice now.)
+void RadioLine(int kind, const Vec3& at) {
+    static bool flip = false;
+    flip = !flip;
+    SoundEvent ev = SND_COP_RADIO_07;
+    const char* what = "pursuit open";
+    switch (kind) {
+    case 1:
+        ev = flip ? SND_COP_RADIO_07 : SND_COP_RADIO_08;
+        what = "pursuit open";
+        break;
+    case 2:
+        ev = flip ? SND_COP_RADIO_05 : SND_COP_RADIO_06;
+        what = "the felony rung climbs";
+        break;
+    case 4:
+        ev = SND_COP_RADIO_09;
+        what = "he bails out";
+        break;
+    case 8:
+        ev = SND_COP_RADIO_12;
+        what = "roadblock set";
+        break;
+    case 16:
+        ev = SND_COP_RADIO_15;
+        what = "a unit is down";
+        break;
+    case 32:
+        ev = flip ? SND_COP_RADIO_10 : SND_COP_RADIO_11;
+        what = "another unit joins";
+        break;
+    }
+    PlaySfx(ev, &at, 1.5f);
+    ++sRadioLines;
+    sRadioMask |= kind;
+    Log("cop radio: %s (line %d this page)", what, sRadioLines);
+}
+
+// item 39: the smart siren. A pursuer wails while he closes or
+// batters; the siren sleeps while the force statically surrounds a
+// pinned man (a posted unit that has arrived - the ring, a camp, a
+// shore post), a driver out of his car wails nothing, and at night
+// it stays asleep until a pursuer has actually closed within 18 m
+// this pursuit - the force arrives dark and announces itself at
+// contact (item 32's stealth, folded into the one siren law).
+bool SirenFor(const CopState& c) {
+    if (c.mode != COP_PURSUE)
+        return false;
+    if (c.bailState == 1)
+        return false;
+    if (c.holding && c.holdArrived)
+        return false;
+    if (TheHost().Dark() && !sForceHeard)
+        return false;
+    return true;
+}
 
 float WreckLineOf(const CopState& c) {
     return c.wreckLine > 0.0f ? c.wreckLine : kWreckLine;
@@ -1052,7 +1127,8 @@ void HoldControl(CopState& c, float dt) {
     }
     const float gas = c.speed < cruise ? 0.7f : 0.0f;
     const float brake = c.speed > cruise + 3.0f ? 0.5f : 0.0f;
-    Drive(c, gas, brake, steer, true);
+    c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
+    Drive(c, gas, brake, steer, c.sirenCmd);
 }
 
 void CopControl(CopState& c, float dt) {
@@ -1187,7 +1263,8 @@ void CopControl(CopState& c, float dt) {
             c.feedCruise = 12.0f;
             c.feedLive = true;
         }
-        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
+        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
         return;
     }
 
@@ -1445,7 +1522,8 @@ void CopControl(CopState& c, float dt) {
         c.feedPoint = target;
         c.feedCruise = c.desiredSpeed;
         c.feedLive = true;
-        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+        c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
+        Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
         return;
     }
 
@@ -1577,7 +1655,8 @@ void CopControl(CopState& c, float dt) {
     // which is a polite name for the reverse never being served at
     // all on a host whose pedals are outputs.
     PursuitFeed(c, target);
-    Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), true);
+    c.sirenCmd = SirenFor(c); // item 39: the siren is a law now, not a literal
+    Drive(c, g, b, Clamp(c.wheel / 512.0f, -1.0f, 1.0f), c.sirenCmd);
 }
 
 // ---------------------------------------------------------------------------
@@ -1854,6 +1933,7 @@ int PlaceBlockAt(const Vec3& at, const Vec3& segDir, int maxCars) {
         sBlockPoint = at;
         sBlockDir = segDir;
         sBlockLive = true;
+        RadioLine(8, at); // item 39: a set block is announced
     }
     return placed;
 }
@@ -2662,6 +2742,15 @@ void CopReset() {
     sRingOn = false;
     sShoreOn = false;
     sSpawnFlip = false;
+    sTyreStage = 0;
+    sTyreT = 0.0f;
+    sTyreVeh = -1;
+    sRadioLines = 0;
+    sRadioMask = 0;
+    sRadioOpen = false;
+    sRadioRung = 0;
+    sPrevInVeh = false;
+    sForceHeard = false;
     sBlockLive = false;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
@@ -2952,6 +3041,7 @@ void CopTick(float dt, const Vec3& playerPos) {
                 Log("cop: that retirement was the player's work - ourUnitsLost = %d (the replacement step's counter)",
                     gThreat.ourUnitsLost);
             }
+            RadioLine(16, c.pos); // item 39: a unit down is announced
             TheHost().CopBodySetHealth(c.veh, 0.0f);
             TheHost().CopBodyRetire(c.veh, true);
             c.veh = -1;
@@ -3055,6 +3145,39 @@ void CopTick(float dt, const Vec3& playerPos) {
                         TheHost().KickVehicle(gThreat.playerVehicle, dv, spin);
                     else if (!gThreat.playerInVehicle)
                         TheHost().KickPed(PreyOverrideOn() && sPreyPed >= 0 ? sPreyPed : 0, dv);
+                    // item 10 (the honest half): his car is taken
+                    // apart in priced stages - every full-blooded
+                    // kick (closing 10+) buys the next TYRE, one per
+                    // six seconds, four in all, burst through the
+                    // host's own shot-effect verb at the corner the
+                    // stage names (front pair first, then the rear).
+                    // A different car starts a fresh count. Steering
+                    // and power sabotage have NO verb on this host
+                    // and are not faked - the report names that wall
+                    // inside the item; and the player's car is never
+                    // HurtVehicle'd, which would bill his own felony
+                    // ledger for our work.
+                    if (gThreat.playerInVehicle && gThreat.playerVehicle >= 0) {
+                        if (gThreat.playerVehicle != sTyreVeh) {
+                            sTyreVeh = gThreat.playerVehicle;
+                            sTyreStage = 0;
+                            sTyreT = 0.0f;
+                        }
+                        if (closing >= 10.0f && sTyreStage < 4 && sTyreT <= 0.0f) {
+                            Vec3 pf = gThreat.playerVel;
+                            pf.z = 0.0f;
+                            pf = pf.Length() > 2.0f ? pf * (1.0f / pf.Length()) : Vec3(0, 1, 0);
+                            const Vec3 rt(pf.y, -pf.x, 0.0f);
+                            const Vec3 corner = gThreat.playerPos +
+                                                pf * (sTyreStage < 2 ? 1.6f : -1.6f) +
+                                                rt * ((sTyreStage % 2 == 0) ? 0.8f : -0.8f);
+                            TheHost().VehicleShotEffect(gThreat.playerVehicle, corner, 1);
+                            ++sTyreStage;
+                            sTyreT = 6.0f;
+                            Log("cop: the hit costs him a tyre (%d of 4) - the disable is priced off the kicks themselves",
+                                sTyreStage);
+                        }
+                    }
                     // immediate re-attack (the pressure law): the
                     // throw IS the contact - the post-impact stillness
                     // is not stuck evidence, a recovery the impact
@@ -3325,6 +3448,8 @@ void CopTick(float dt, const Vec3& playerPos) {
         for (int i = 0; i < sEscapeCount; ++i)
             if (sEscape[i].coolT > 0.0f)
                 sEscape[i].coolT -= dt;
+        if (sTyreT > 0.0f)
+            sTyreT -= dt; // item 10: the disable's stage spacing
     }
 
     // ---- the manager: pursuit transitions, the ladder, the cutoff
@@ -3334,6 +3459,37 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (UnitLiving(gCops[slot]))
             ++livingLadder;
     sWanted = LadderWanted(page.felony);
+
+    // item 39's announced moments, read off the manager's own state:
+    // the pursuit's opening call, a rung climbing while it runs, the
+    // prey bailing out of his car mid-pursuit, and the night witness
+    // (a pursuer inside 18 m means the force has been heard)
+    if (wantPursue && !sRadioOpen) {
+        sRadioOpen = true;
+        sRadioRung = sWanted;
+        RadioLine(1, preyPos);
+    } else if (!wantPursue) {
+        sRadioOpen = false;
+        sRadioRung = 0;
+        sForceHeard = false;
+    }
+    if (sRadioOpen && sWanted > sRadioRung) {
+        sRadioRung = sWanted;
+        RadioLine(2, preyPos);
+    }
+    if (sPrevInVeh && !gThreat.playerInVehicle && page.felony > kFelonyTrigger)
+        RadioLine(4, preyPos);
+    sPrevInVeh = gThreat.playerInVehicle;
+    if (wantPursue && !sForceHeard) {
+        for (int slot = 0; slot < kMaxCopCars; ++slot) {
+            const CopState& u = gCops[slot];
+            if (UnitLiving(u) && u.mode == COP_PURSUE &&
+                (u.pos - preyPos).Length() < 18.0f) {
+                sForceHeard = true;
+                break;
+            }
+        }
+    }
 
     // a summon's spike runs while the case is cold (piece 0's proof is
     // not the ladder's to cancel) - but piece 1's design always said the
@@ -3557,6 +3713,9 @@ void CopTick(float dt, const Vec3& playerPos) {
                             gCops[slot].wreckLine = 202500.0f;
                             Log("cop: the ladder's last car is the heavy one - his book runs half again as deep");
                         }
+                        if (sRadioOpen && livingLadder >= 1)
+                            RadioLine(32, at); // item 39: a join into
+                                // a live pursuit is announced
                         Log("cop: the ladder sends another unit - he enters at %.0f m on the road (felony %.0f, wanted %d)",
                             (at - preyPos).Length(), page.felony, sWanted);
                         ++livingLadder;
@@ -3747,6 +3906,9 @@ void CopTick(float dt, const Vec3& playerPos) {
 }
 
 // ---- piece 3: the decoded profile's accessors -------------------------
+int CopRadioLinesFired() { return sRadioLines; }
+int CopRadioEventMask() { return sRadioMask; }
+
 const CopProfileData& CopProfile() { return kCopProfile; }
 
 float CopProfilePowerGain() {
