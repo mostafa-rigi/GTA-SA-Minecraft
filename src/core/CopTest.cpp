@@ -29,6 +29,7 @@ enum Phase {
     PH_SPIKE,
     PH_PURSUIT,
     PH_RUNOVER,
+    PH_RING,
     PH_RECOVERY,
     PH_BLOCK,
     PH_PLAYER1,
@@ -85,6 +86,14 @@ Vec3 sPedStand;
 float sPedHealth0 = 0.0f;
 float sRoMin = 1e9f;
 float sRoStillT = 0.0f;
+float sRoRingT = 0.0f; // the settled-surround seconds (item 7's
+                       // outcome, graded as this act's second bar)
+// ring (the 39-package's item 7, machine-graded on the decoy man)
+float sRingSettledT = 0.0f;
+int sRingBest = 0;
+// radio (item 39): the run's own lines and kinds, against the
+// snapshot CopTestStart took of the page counters
+int sRadioLines0 = 0, sRadioMask0 = 0;
 // recovery
 int sRecSlot = -1;
 Vec3 sWedgePos;
@@ -529,7 +538,7 @@ void PhaseRunover(float dt) {
         sDecoyPed = TheHost().SpawnDecoyPed(want);
         if (sDecoyPed < 0) {
             Grade("runover", false, true, "no decoy ped could be staged");
-            GoPhase(PH_RECOVERY);
+            GoPhase(PH_RING);
             return;
         }
         sPedStand = want;
@@ -544,13 +553,14 @@ void PhaseRunover(float dt) {
         CopKnownSeed();
         sRoMin = 1e9f;
         sRoStillT = 0.0f;
+        sRoRingT = 0.0f;
     }
     CopPreyOverride(-1, sDecoyPed);
     Vec3 pp;
     float hp = 0.0f;
     if (!TheHost().DecoyPedReport(sDecoyPed, &pp, &hp)) {
         Grade("runover", false, true, "the decoy ped was lost mid-scenario");
-        GoPhase(PH_RECOVERY);
+        GoPhase(PH_RING);
         return;
     }
     const float d = NearestUnit(pp, true, nullptr);
@@ -569,26 +579,137 @@ void PhaseRunover(float dt) {
         Grade("runover", true, true,
               "closest centre %.1f m, ped displaced %.1f m, health %.0f of %.0f (bar: the hit itself - displaced >2 m or health lost)",
               sRoMin, displaced, hp, sPedHealth0);
-        GoPhase(PH_RECOVERY);
+        GoPhase(PH_RING);
         return;
     }
+    // the 39-package's reconciliation: a man standing still is
+    // RINGED now (item 7) - a settled surround is this act's second
+    // honest outcome, and the ring act after this one grades the
+    // surround's quality on its own. What this act still convicts
+    // is the old defect in its pure form: a unit stopped short in
+    // the band holding NO post, doing nothing (below).
+    {
+        int settled = 0;
+        for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+            const CopState& c = gCops[slot];
+            if (c.holding && c.holdArrived) {
+                const float dc = (c.pos - pp).Length();
+                if (dc >= 5.5f && dc <= 10.0f)
+                    ++settled;
+            }
+        }
+        if (settled >= 2)
+            sRoRingT += dt;
+        else
+            sRoRingT = 0.0f;
+        if (sRoRingT >= 2.0f) {
+            Grade("runover", true, true,
+                  "the standing man is surrounded - %d units settled in the ring around him, closest centre %.1f m (the hit is the chase's outcome; the surround is the pinned man's)",
+                  settled, sRoMin);
+            GoPhase(PH_RING);
+            return;
+        }
+    }
     // the stop-short ring: a pursuer parked in the 3.5..9 m band
+    // holding NO post (a posted unit in the band is the ring law
+    // working, graded above - not this defect)
     int slot = -1;
     const float nd = NearestUnit(pp, true, &slot);
-    if (slot >= 0 && nd > 3.5f && nd <= 9.0f && std::fabs(gCops[slot].speed) < 0.5f)
+    if (slot >= 0 && nd > 3.5f && nd <= 9.0f && std::fabs(gCops[slot].speed) < 0.5f &&
+        !gCops[slot].holding)
         sRoStillT += dt;
     else
         sRoStillT = 0.0f;
     if (sRoStillT > 6.0f) {
         Grade("runover", false, true,
               "a unit stopped short in the ring at %.1f m and held %.0f s", nd, sRoStillT);
-        GoPhase(PH_RECOVERY);
+        GoPhase(PH_RING);
         return;
     }
     if (sPhaseT > 35.0f) {
         Grade("runover", false, true,
               "never HIT him in 35 s (closest %.1f m, displaced %.1f m, health %.0f of %.0f)",
               sRoMin, displaced, hp, sPedHealth0);
+        GoPhase(PH_RING);
+    }
+}
+
+void PhaseRing(float dt) {
+    // the 39-package's item 7 on the machine: the run-over's man is
+    // still standing (the recovery act takes him over from here and
+    // retires him as before); the force must now SURROUND him -
+    // at least two units settled on posts in the 5.5..10 m band
+    // around him, held for two full seconds. Graded off the units'
+    // own state (holding, arrived, distance), never off intentions.
+    if (!sEntered) {
+        sEntered = true;
+        Say("coptest: --- ring: the man stands; the force must surround him and hold ---");
+        sRingSettledT = 0.0f;
+        sRingBest = 0;
+        // the ring's man is a FRESH stand at the run-over's spot:
+        // the run-over's own man was thrown by the hit that graded
+        // that act, and where he landed is that act's evidence, not
+        // this one's staging - the recovery act after this one
+        // stages from the same stand, as it always has
+        if (sDecoyPed >= 0) {
+            TheHost().RetireDecoyPed(sDecoyPed);
+            sDecoyPed = -1;
+        }
+        sDecoyPed = TheHost().SpawnDecoyPed(sPedStand);
+        if (sDecoyPed < 0) {
+            Grade("ring", false, false,
+                  "no decoy man could be stood for the ring - the scenario could not be staged honestly here");
+            GoPhase(PH_RECOVERY);
+            return;
+        }
+        CopPreyOverride(-1, sDecoyPed);
+        CopForceFelony(4096.0f);
+        CopKnownSeed();
+    }
+    CopPreyOverride(-1, sDecoyPed);
+    Vec3 pp;
+    float hp = 0.0f;
+    if (!TheHost().DecoyPedReport(sDecoyPed, &pp, &hp)) {
+        Grade("ring", false, true, "the decoy man was lost mid-scenario");
+        GoPhase(PH_RECOVERY);
+        return;
+    }
+    int settled = 0;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        const CopState& c = gCops[slot];
+        if (!c.holding || !c.holdArrived)
+            continue;
+        const float d = (c.pos - pp).Length();
+        if (d >= 5.5f && d <= 10.0f)
+            ++settled;
+    }
+    if (settled > sRingBest)
+        sRingBest = settled;
+    if (settled >= 2)
+        sRingSettledT += dt;
+    else
+        sRingSettledT = 0.0f;
+    if (sRingSettledT >= 2.0f) {
+        Grade("ring", true, true,
+              "%d units settled in the 5.5..10 m band around him and held 2 s", settled);
+        GoPhase(PH_RECOVERY);
+        return;
+    }
+    if (sPhaseT > 30.0f) {
+        char digest[120];
+        int dn = 0;
+        for (int slot = 0; slot < kMaxCopUnits && dn < 100; ++slot) {
+            const CopState& c = gCops[slot];
+            if (c.veh < 0)
+                continue;
+            dn += std::snprintf(digest + dn, sizeof digest - dn, " u%d:m%d h%d a%d d%.0f",
+                                slot, (int)c.mode, c.holding ? 1 : 0, c.holdArrived ? 1 : 0,
+                                (c.pos - pp).Length());
+        }
+        digest[dn] = '\0';
+        Grade("ring", false, true,
+              "never settled two units around him in 30 s (best simultaneous settled: %d) -%s",
+              sRingBest, digest);
         GoPhase(PH_RECOVERY);
     }
 }
@@ -667,6 +788,12 @@ void PhaseRecovery(float dt) {
                 const Vec3 place = wallAt - wallDir * 2.85f;
                 const float heading = std::atan2(wallDir.x, wallDir.y) * 57.29578f;
                 TheHost().CopBodyPlace(c.veh, place, heading);
+                c.holding = false; // the scenario re-stages this
+                c.holdArrived = false; // unit: a post from an earlier
+                    // act is not its business here - left standing, it
+                    // routes the unit's drive to the old point and
+                    // wedges it against this wall for good (the ring
+                    // act's posts made exactly that failure possible)
                 sWedgePos = place;
                 sRecCount0 = c.recoverCount;
                 // the target: on the road 55 m past the wall's far
@@ -720,7 +847,9 @@ void PhaseRecovery(float dt) {
     }
     if (sPhaseT > 50.0f) {
         Grade("recovery", false, true,
-              "still wedged after 50 s (moved %.1f m, %d recoveries)", fromWedge, recs);
+              "still wedged after 50 s (moved %.1f m, %d recoveries) - unit %d: mode %d holding %d speed %.1f desire %.0f stuck %.1f feed (%.0f,%.0f) live %d",
+              fromWedge, recs, sRecSlot, (int)c.mode, c.holding ? 1 : 0, c.speed,
+              c.desiredSpeed, c.stuckT, c.feedPoint.x, c.feedPoint.y, c.feedLive ? 1 : 0);
         GoPhase(PH_BLOCK);
     }
 }
@@ -895,6 +1024,8 @@ bool CopTestStart() {
         sFreeze[i] = 0.0f;
     sDecoyCar = -1;
     sDecoyPed = -1;
+    sRadioLines0 = CopRadioLinesFired();
+    sRadioMask0 = CopRadioEventMask();
     Say("coptest: starting - one session grades the whole force; just watch until YOUR TURN lines appear");
     GoPhase(PH_SPIKE);
     return true;
@@ -933,7 +1064,8 @@ void CopTestReset() {
         // ALWAYS end in DONE.
         Say("coptest: the world reset under a running test - grading what stands and finishing the sheet");
         static const char* const kCounted[] = { "spike", "arrival", "ram", "siren",
-                                                "runover", "recovery", "player-felony", "bailout" };
+                                                "runover", "ring", "recovery", "player-felony", "bailout",
+                                                "radio" };
         for (const char* name : kCounted)
             if (!AlreadyGraded(name))
                 Grade(name, false, true, "the run ended under it (world reset) before it could be graded");
@@ -988,17 +1120,32 @@ void CopTestTick(float dt) {
     case PH_SPIKE: PhaseSpike(dt); break;
     case PH_PURSUIT: PhasePursuit(dt); break;
     case PH_RUNOVER: PhaseRunover(dt); break;
+    case PH_RING: PhaseRing(dt); break;
     case PH_RECOVERY: PhaseRecovery(dt); break;
     case PH_BLOCK: PhaseBlock(dt); break;
     case PH_PLAYER1: PhasePlayer1(dt); break;
     case PH_PLAYER2_WAIT: PhasePlayer2Wait(dt); break;
     case PH_PLAYER2_BAIL: PhasePlayer2Bail(dt); break;
-    case PH_FINISH:
+    case PH_FINISH: {
+        // item 39's sheet line: the run's own radio traffic, read off
+        // the page counters against the start snapshot - the fix for
+        // "they never talked" is graded in numbers, like everything
+        // else on this sheet
+        const int lines = CopRadioLinesFired() - sRadioLines0;
+        const int fresh = CopRadioEventMask() & ~sRadioMask0;
+        int kinds = 0;
+        for (int b = 0; b < 8; ++b)
+            if (fresh & (1 << b))
+                ++kinds;
+        Grade("radio", lines >= 3 && kinds >= 3, true,
+              "%d radio lines across %d kinds during the run (bar: >=3 lines, >=3 kinds)",
+              lines, kinds);
         Grade("soak", sWorstFreeze <= 5.0f, true,
               "worst pursuing-unit freeze %.1f s (unit %d) (bar: <=5 s)",
               sWorstFreeze, sWorstSlot);
         Finish();
         break;
+    }
     default: break;
     }
 }

@@ -12655,13 +12655,24 @@ static void TestCopForce() {
                             b->pos = spots[sl];
                             b->vel = Vec3();
                         }
-                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                    for (int sl = 0; sl < kMaxCopUnits; ++sl)
                         if (gCops[sl].holding &&
                             (gCops[sl].holdPoint - (G + Vec3(0, 45, 0))).Length() < 5.0f)
                             ambushed = true;
                 }
-                CHECK(!gCop.known && ambushed,
-                      "item 20: the flight's exit is ambushed the moment the position is lost");
+                {
+                    float bestHold = 1e9f;
+                    int bestSlot = -1;
+                    for (int sl = 0; sl < kMaxCopUnits; ++sl)
+                        if (gCops[sl].holding) {
+                            const float dd = (gCops[sl].holdPoint - (G + Vec3(0, 45, 0))).Length();
+                            if (dd < bestHold) { bestHold = dd; bestSlot = sl; }
+                        }
+                    CHECK(!gCop.known && ambushed,
+                          "item 20: the flight's exit is ambushed the moment the position is lost (known %d, nearest hold %.0f m from the exit, unit %d mode %d)",
+                          (int)gCop.known, bestHold > 1e8f ? -1.0f : bestHold, bestSlot,
+                          bestSlot >= 0 ? (int)gCops[bestSlot].mode : -1);
+                }
                 // the watch runs out; then he passes the written
                 // junction again and the memory posts it anew
                 for (float t = 0.0f; t < 7.0f; t += dt) {
@@ -12930,8 +12941,14 @@ static void TestCopForce() {
                     host.StepAll(dt);
                 }
                 CHECK(ladderLiving() >= 2, "item 30 stage: a second unit is up");
-                // burn it where the coming block will stand
-                const Vec3 wreckSpot = w.PosAt(s0 + 80.0f, &dir0);
+                // burn it where the coming block will stand: the
+                // fire happens 3.2..4.2 s into the run (48..63 m at
+                // 15 m/s) and the fan crowns 86 m past the fire point
+                // (ahead 35 x 1.6 + 30), so the point lands at
+                // s0+134..149 - the wreck sits mid-window at +141
+                // (two earlier stagings, +80 and +95, both priced the
+                // point without its fan reach and were outrun)
+                const Vec3 wreckSpot = w.PosAt(s0 + 141.0f, &dir0);
                 if (ForceFakeHost::Body* b = host.Find(gCops[1].veh))
                     b->pos = wreckSpot;
                 gCops[1].totalDamage = 200000.0f;
@@ -12952,8 +12969,9 @@ static void TestCopForce() {
                     host.StepAll(dt);
                 }
                 CHECK(CopBlockCount() == kMaxBlockCars - 1,
-                      "item 30: the block over the wreck places one car fewer - the wreck holds its berth (cars %d)",
-                      CopBlockCount());
+                      "item 30: the block over the wreck places one car fewer - the wreck holds its berth (cars %d, first block car %.0f m from the wreck)",
+                      CopBlockCount(),
+                      CopBlockCount() > 0 ? (gCops[kMaxCopCars].pos - wreckSpot).Length() : -1.0f);
             }
         }
 
@@ -13362,11 +13380,11 @@ static void TestCopTest() {
     }
     CHECK(!CopTestRunning(), "the self-test finished its run (%.0f s of sim)", t);
     const CopTestSheet sheet = CopTestSheetForTest();
-    CHECK(sheet.counted >= 9, "the sheet counted %d scenarios (spike..soak, roadblock may skip)", sheet.counted);
+    CHECK(sheet.counted >= 11, "the sheet counted %d scenarios (spike..soak, roadblock may skip)", sheet.counted);
     CHECK(sheet.passed == sheet.counted, "every counted scenario passed in the fake world (%d of %d)",
           sheet.passed, sheet.counted);
     static const char* const kMustPass[] = { "spike", "arrival", "ram", "siren", "runover",
-                                             "recovery", "player-felony", "bailout", "soak" };
+                                             "ring", "recovery", "player-felony", "bailout", "radio", "soak" };
     for (const char* name : kMustPass) {
         bool pass = false, counted = false;
         const bool found = CopTestVerdictForTest(name, &pass, &counted);

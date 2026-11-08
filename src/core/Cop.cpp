@@ -316,6 +316,18 @@ CopState& Page() { return gCops[0]; }
 
 bool UnitLiving(const CopState& c) { return c.veh >= 0 && c.mode != COP_NONE; }
 
+// a unit ordered off (COP_LEAVE) gives his post back first: a post is
+// an order to stand somewhere, and a man driving away cannot hold
+// one - a leaving unit that kept its claim froze the post bookkeeping
+// around a ghost (the escape-ambush sim convicted it: the far unit
+// was stood down by felony decay mid-ambush and carried the post
+// into its drive-off). The post trackers all read the holding flag,
+// so clearing it here releases every claim cleanly.
+void GiveUpPost(CopState& c) {
+    c.holding = false;
+    c.holdArrived = false;
+}
+
 // The manager's books (ControlNumberOfCops / StepSim state).
 bool sForce = false;        // a summon stood the force up this session
 float sRespawnT = 0.0f;     // the ladder's spawn clock, seconds
@@ -392,7 +404,8 @@ Vec3 sWrecks[4];          // item 30: where units burned out - a
 int sWreckNext = 0, sWreckCount = 0; // wreck in a block's line IS
                           // part of the line
 bool sRingOn = false;     // item 7: the ring around a pinned man
-int sRingSlot[4];
+int sRingSlot[kMaxCopUnits];
+int sRingCount = 0;
 Vec3 sRingCentre;
 bool sShoreOn = false;    // item 29: the shoreline watch
 int sShoreSlot[3];
@@ -1109,6 +1122,32 @@ void HoldControl(CopState& c, float dt) {
         return;
     }
     c.holdArrived = false;
+    // a post is an order, not a life sentence: a unit wedged short of
+    // its post - feed live, speed ~0, still metres out - for over two
+    // seconds gives the post back and returns to the pursuit, whose
+    // own recovery law exists for exactly this. A held post must
+    // never be the reason a wedged unit never recovers (the /coptest
+    // recovery act convicted it: its wedged unit was re-claimed by a
+    // re-forming ring and froze, post-bound, for the whole act). The
+    // still-clock is the post's own: it starts when the post is taken
+    // (a pursuit stuck-clock already hot from the chase must not eat
+    // a fresh post in the tick it lands - the ambush sim convicted
+    // exactly that inheritance).
+    if (c.holdPoint.x != c.postPoint.x || c.holdPoint.y != c.postPoint.y ||
+        c.holdPoint.z != c.postPoint.z) {
+        c.postPoint = c.holdPoint;
+        c.postStillT = 0.0f;
+    }
+    if (dist > 4.0f && c.speed < 0.5f)
+        c.postStillT += dt;
+    else
+        c.postStillT = 0.0f;
+    if (c.postStillT > 2.0f) {
+        c.holding = false;
+        c.postStillT = 0.0f;
+        Log("cop: a unit cannot reach his post - the post is given back and the pursuit has him again");
+        return;
+    }
     const float cruise = Clamp(dist * 0.8f, 3.0f, 20.0f);
     c.desiredSpeed = cruise;
     c.feedPoint = c.holdPoint; // the post is an arrival, not a
@@ -2372,7 +2411,7 @@ void PostsTick(const Vec3& preyPos) {
                 order[j + 1] = o;
             }
             int assigned = 0;
-            for (int slot = 0; slot < kMaxCopCars && assigned < nd && assigned < 4; ++slot) {
+            for (int slot = 0; slot < kMaxCopUnits && assigned < nd && assigned < 4; ++slot) {
                 CopState& c = gCops[slot];
                 if (!UnitLiving(c) || (c.mode != COP_PURSUE && c.mode != COP_IDLE))
                     continue;
@@ -2438,7 +2477,7 @@ void PostsTick(const Vec3& preyPos) {
         gThreat.playerInVehicle) {
         int pick = -1;
         float farD = -1.0f;
-        for (int slot = 0; slot < kMaxCopCars; ++slot) {
+        for (int slot = 0; slot < kMaxCopUnits; ++slot) {
             const CopState& c = gCops[slot];
             if (!UnitLiving(c) || c.mode != COP_PURSUE || c.holding)
                 continue;
@@ -2530,7 +2569,7 @@ void PostsTick(const Vec3& preyPos) {
                 // pressing is just a parked car)
                 int near1 = -1, near2 = -1;
                 float d1 = 1e18f, d2 = 1e18f;
-                for (int slot = 0; slot < kMaxCopCars; ++slot) {
+                for (int slot = 0; slot < kMaxCopUnits; ++slot) {
                     const CopState& c = gCops[slot];
                     if (!UnitLiving(c) || c.mode != COP_PURSUE || c.holding)
                         continue;
@@ -2572,12 +2611,14 @@ void PostsTick(const Vec3& preyPos) {
             dj.z = 0.0f;
             if (dj.Length() > 35.0f)
                 continue;
-            for (int s = 0; s < kMaxCopCars; ++s) {
+            for (int s = 0; s < kMaxCopUnits; ++s) {
                 CopState& u = gCops[s];
                 if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
                     continue;
-                if ((u.pos - preyPos).Length() < 50.0f)
-                    continue;
+                const float dpick = (u.pos - preyPos).Length();
+                if (dpick < 50.0f || dpick > 150.0f)
+                    continue; // the same reach ceiling as the fresh
+                              // ambush: inside the post's lifetime
                 u.holding = true;
                 u.holdArrived = false;
                 u.holdPoint = r.exit;
@@ -2592,12 +2633,12 @@ void PostsTick(const Vec3& preyPos) {
     }
 
     // ---- item 7: the ring. A man on foot, standing or nearly so,
-    // at felony 1319+, is surrounded where he stands: up to four
-    // ladder units hold a 7.5 m circle around him, engines on (they
-    // stay pursuers on the hold mechanism - the drive-through law
-    // governs a MOVING man; a pinned one is held, not run through).
-    // The ring breaks the moment he moves off its centre, mounts,
-    // or the felony falls under the line.
+    // at felony 1319+, is surrounded where he stands: the whole
+    // pursuing force holds a 7.5 m circle around him, engines on
+    // (they stay pursuers on the hold mechanism - the drive-through
+    // law governs a MOVING man; a pinned one is held, not run
+    // through). The ring breaks the moment he moves off its centre,
+    // mounts, or the felony falls under the line.
     {
         Vec3 vel = gThreat.playerVel;
         vel.z = 0.0f;
@@ -2607,40 +2648,76 @@ void PostsTick(const Vec3& preyPos) {
             Vec3 dc = preyPos - sRingCentre;
             dc.z = 0.0f;
             if (!want || dc.Length() > 4.0f) {
-                for (int i = 0; i < 4; ++i) {
-                    if (sRingSlot[i] < 0)
-                        continue;
+                for (int i = 0; i < sRingCount; ++i) {
                     CopState& u = gCops[sRingSlot[i]];
                     u.holding = false;
                     u.holdArrived = false;
-                    sRingSlot[i] = -1;
                 }
+                sRingCount = 0;
                 sRingOn = false;
                 Log("cop: the ring opens - he moves again");
             }
         }
         if (want && !sRingOn) {
-            int n = 0;
-            for (int s = 0; s < kMaxCopCars && n < 4; ++s) {
+            // the ring is the WHOLE force, not the ladder alone: a
+            // woken block car left hunting drives through the man
+            // while the ring tries to settle around him (the
+            // /coptest ring act convicted exactly that - three
+            // woken block units dragged its man for 30 s and the
+            // ring never settled). Every free pursuer takes a post;
+            // the posts are as many as the force, spread evenly.
+            // And each unit takes the post nearest ITS OWN side,
+            // claimed greedily by distance - a unit ordered to a
+            // far-side post would drive through him to reach it,
+            // and a surrounding that runs him over on its way in is
+            // no surrounding at all.
+            int cand[kMaxCopUnits];
+            int m = 0;
+            for (int s = 0; s < kMaxCopUnits; ++s) {
                 CopState& u = gCops[s];
-                if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
-                    continue;
-                const float a = 0.7853982f + (float)n * 1.5707963f;
-                sRingSlot[n] = s;
-                u.holding = true;
-                u.holdArrived = false;
-                u.holdPoint = preyPos + Vec3(std::sin(a), std::cos(a), 0.0f) * 7.5f;
-                ++n;
+                if (UnitLiving(u) && u.mode == COP_PURSUE && !u.holding)
+                    cand[m++] = s;
             }
-            if (n >= 2) {
-                sRingOn = true;
-                sRingCentre = preyPos;
-                Log("cop: the ring closes - %d units hold a circle around him, engines on", n);
-            } else {
-                for (int i = 0; i < n; ++i) {
-                    CopState& u = gCops[sRingSlot[i]];
-                    u.holding = false;
-                    sRingSlot[i] = -1;
+            if (m >= 2) {
+                Vec3 posts[kMaxCopUnits];
+                bool claimed[kMaxCopUnits] = {};
+                for (int i = 0; i < m; ++i) {
+                    const float a = 0.7853982f + (float)i * (6.2831853f / (float)m);
+                    posts[i] = preyPos + Vec3(std::sin(a), std::cos(a), 0.0f) * 7.5f;
+                }
+                int n = 0;
+                for (int ci = 0; ci < m; ++ci) {
+                    CopState& u = gCops[cand[ci]];
+                    int bestPost = -1;
+                    float bestD = 1e18f;
+                    for (int i = 0; i < m; ++i) {
+                        if (claimed[i])
+                            continue;
+                        const float d = (posts[i] - u.pos).Length();
+                        if (d < bestD) {
+                            bestD = d;
+                            bestPost = i;
+                        }
+                    }
+                    if (bestPost < 0)
+                        break;
+                    claimed[bestPost] = true;
+                    sRingSlot[n] = cand[ci];
+                    u.holding = true;
+                    u.holdArrived = false;
+                    u.holdPoint = posts[bestPost];
+                    ++n;
+                }
+                if (n >= 2) {
+                    sRingOn = true;
+                    sRingCount = n;
+                    sRingCentre = preyPos;
+                    Log("cop: the ring closes - %d units hold a circle around him, engines on", n);
+                } else {
+                    for (int i = 0; i < n; ++i) {
+                        CopState& u = gCops[sRingSlot[i]];
+                        u.holding = false;
+                    }
                 }
             }
         }
@@ -2670,7 +2747,7 @@ void PostsTick(const Vec3& preyPos) {
         }
         if (swimming && !sShoreOn) {
             int n = 0;
-            for (int s = 0; s < kMaxCopCars && n < 3; ++s) {
+            for (int s = 0; s < kMaxCopUnits && n < 3; ++s) {
                 CopState& u = gCops[s];
                 if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
                     continue;
@@ -2740,6 +2817,7 @@ void CopReset() {
     sWreckNext = 0;
     sWreckCount = 0;
     sRingOn = false;
+    sRingCount = 0;
     sShoreOn = false;
     sSpawnFlip = false;
     sTyreStage = 0;
@@ -3253,12 +3331,18 @@ void CopTick(float dt, const Vec3& playerPos) {
                 sAmbushSlot = -1;
                 int best = -1;
                 float bestD = 50.0f;
-                for (int s = 0; s < kMaxCopCars; ++s) {
+                for (int s = 0; s < kMaxCopUnits; ++s) {
                     CopState& u = gCops[s];
                     if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
                         continue;
                     const float d = (u.pos - sLastSeenPos).Length();
-                    if (d > bestD) {
+                    // farthest WITHIN the post's own lifetime: the
+                    // post stands 6 s, so a unit past ~150 m is not
+                    // ambushing an exit, he is commuting to it - and
+                    // the unbound farthest once picked a woken block
+                    // car half a map away, which the ladder then stood
+                    // down in the same tick and the ambush died unborn
+                    if (d > bestD && d <= 150.0f) {
                         bestD = d;
                         best = s;
                     }
@@ -3556,6 +3640,7 @@ void CopTick(float dt, const Vec3& playerPos) {
             // a plain unit stands down where it stands
             if (c.blockUnit) {
                 c.mode = COP_LEAVE;
+                GiveUpPost(c);
                 c.leaveRoute.clear();
                 c.leaveIdx = 0;
                 Log("cop: the case is over - the block unit drives off");
@@ -3566,6 +3651,7 @@ void CopTick(float dt, const Vec3& playerPos) {
             }
         } else if (page.felony <= kFelonyTrigger && c.blockUnit && c.mode == COP_IDLE) {
             c.mode = COP_LEAVE;
+            GiveUpPost(c);
             c.leaveRoute.clear();
             c.leaveIdx = 0;
         }
@@ -3612,6 +3698,7 @@ void CopTick(float dt, const Vec3& playerPos) {
                     break;
                 CopState& c = gCops[farSlot];
                 c.mode = COP_LEAVE;
+                GiveUpPost(c);
                 c.leaveRoute.clear();
                 c.leaveIdx = 0;
                 Log("cop: the ladder wants %d - a surplus unit stands down and drives off", sWanted);

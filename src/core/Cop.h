@@ -207,6 +207,13 @@ struct CopState {
     Vec3 holdPoint;
     bool holding = false;
     bool holdArrived = false;
+    // the post's own still-clock (HoldControl's bail): the point the
+    // clock is serving and how long the unit has stood still short of
+    // it. It is the post's clock, not the pursuit's stuckT - a unit
+    // handed a post while its pursuit stuck-clock was already hot
+    // must not give the post back in the same tick he takes it.
+    Vec3 postPoint;
+    float postStillT = 0.0f;
     // item 38: the bail-out. 0 = the driver sits in his car (the
     // standing state); 1 = the core has ordered him out and the bridge
     // fights him on foot. bailT is his time out; the report's own
