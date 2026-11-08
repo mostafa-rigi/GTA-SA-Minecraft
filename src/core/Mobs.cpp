@@ -3791,7 +3791,7 @@ bool PoBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lookin
     toPlayer.z = 0.0f;
     const float dist = toPlayer.Length();
     const float atkDur = PoPoseDuration(PP_ATTACK);
-    const bool attacking = m.poAtkCd > 1.1f; // the cooldown tail past the swing (see below)
+    const bool attacking = m.poAtkCd > m.poAtkRest; // the cooldown tail past the swing (see below)
     bool chasing = false;
     int want = PP_IDLE;
     if (m.poHitT > 0.0f) {
@@ -3814,9 +3814,13 @@ bool PoBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lookin
         want = PP_IDLE;
         if (m.poAtkCd <= 0.0f && atkDur > 0.0f) {
             // in reach and rested: the attack show starts. The cooldown word
-            // carries the swing plus the rest after it (1.1 s), so
-            // `attacking` above reads the swing part back off the same clock.
-            m.poAtkCd = atkDur + 1.1f;
+            // carries the swing plus the rest after it, so `attacking`
+            // above reads the swing part back off the same clock. The rest
+            // is re-rolled per swing (1.1..2.6 s): step 1's fixed 1.1 s
+            // rest made standing with him a metronome of two clips - the
+            // eye verdict's "it repeats a few animations over and over".
+            m.poAtkRest = 1.1f + Rand01() * 1.5f;
+            m.poAtkCd = atkDur + m.poAtkRest;
             want = PP_ATTACK;
         }
     }
@@ -3828,6 +3832,17 @@ bool PoBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* lookin
         *looking = true;
     }
     PoSetPose(m, want, dt);
+    // the paper trail (fix round): one line a second while he lives, so
+    // the session log alone can convict the next fault - the state he is
+    // in, the clip it plays, his health book and the watching distance.
+    // Step 1 shipped him with no trail at all: his first creation was
+    // never even logged.
+    m.poLogT += dt;
+    if (m.poLogT >= 1.0f) {
+        m.poLogT = 0.0f;
+        static const char* kPoStateNames[6] = { "idle", "walk", "run", "attack", "hit", "die" };
+        Log("po state: %s (clip %d) hp %.0f dist %.1f m", kPoStateNames[want], want, (double)m.health, dist);
+    }
     return chasing;
 }
 
@@ -4000,6 +4015,9 @@ void Kill(Mob& m) {
             m.poDraw.fade = 0.0f;
         }
         Log("po pose: DEATH (fading from cat %d)", m.poDraw.category);
+        Log("po died at (%.1f, %.1f, %.1f) - his corpse holds the death clip's final pose, "
+            "then the shared corpse timer removes him, like every creature",
+            m.pos.x, m.pos.y, m.pos.z);
         m.poDraw.category = PP_DIE;
         m.poDraw.time = 0.0f;
     }
@@ -4343,6 +4361,13 @@ int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     Mob m = MakeSpawnedMob(kind, feet, persistent, baby);
     m.id = gNextMobId++;
     gMobs.push_back(m);
+    if (kind == MOB_PO)
+        // the creation line step 1 never wrote (fix round): the next
+        // session's log must show he was born, from what, and where
+        Log("po created: po.bin (%d bones, %d clips, %d verts) at (%.1f, %.1f, %.1f), hp %.0f - "
+            "his gun/melee damage door is the sensor-body relay (MobPoProxyDamage)",
+            PoBoneCount(), PoSequenceCount(), PoVertexCount(), (double)feet.x, (double)feet.y, (double)feet.z,
+            (double)gMobs.back().health);
     return (int)gMobs.size() - 1;
 }
 
@@ -4570,6 +4595,35 @@ void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerB
     const float hurtBefore = m.hurt;
     m.hurt = 0.0f; // the proxy bleeds at the game's rate, not at MobHurt's window
     MobHurt(index, capped, from, 0.0f);
+    if (m.death < 0.0f)
+        m.hurt = std::min(m.hurt, std::max(hurtBefore, 0.2f));
+}
+
+// Po's own damage door (fix round). The conviction, from the code: player
+// guns and melee in the real game land on PEDS through the game's own
+// weapon system; Po is a core entity, not a ped, and the only relay from
+// ped-land into the core's books was the soldier's (MobProxyDamage is
+// soldier-gated, and every bridge duty around it is his). So the user's
+// fire literally had no path to Po - he could be rammed (CarsHitMobs
+// calls MobHurt for any kind) but never shot or punched, and with 400
+// half-hearts even the rams barely showed: "he does not die". This door
+// is the soldier's pattern scoped to Po: the bridge keeps an invisible
+// sensor ped glued to him, reads its health deltas and relays them here;
+// MobHurt does the rest (the flinch clock, the death, the corpse).
+void MobPoProxyDamage(int index, float halfHearts) {
+    if (index < 0 || index >= (int)gMobs.size())
+        return;
+    Mob& m = gMobs[index];
+    if (m.kind != MOB_PO || m.death >= 0.0f || halfHearts <= 0.0f)
+        return;
+    // the soldier's cap law, on Po's own pool: one relayed event takes at
+    // most a tenth of his health book - ten solid events minimum to die,
+    // and no headshot-class spike is ever a one-shot.
+    const float capped = std::min(halfHearts, kTypes[MOB_PO].health * 0.10f);
+    const float hurtBefore = m.hurt;
+    m.hurt = 0.0f; // the proxy bleeds at the game's rate, not at MobHurt's window
+    MobHurt(index, capped, m.pos, 0.0f);
+    Log("po dmg: %.0f half-hearts relayed from his sensor body -> hp %.0f", (double)capped, (double)m.health);
     if (m.death < 0.0f)
         m.hurt = std::min(m.hurt, std::max(hurtBefore, 0.2f));
 }

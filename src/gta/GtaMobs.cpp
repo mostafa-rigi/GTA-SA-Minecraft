@@ -52,6 +52,9 @@ namespace {
 // the core has already priced through MobVehicleHit has also torn at the
 // proxy's game health, and one blow must not be billed twice.
 float gRamMuteT = 0.0f;
+// Po's sensor body has the same double-billing hazard (fix round): his
+// mute clock, set by CarsHitMobs on the blow it prices itself.
+float gPoRamMuteT = 0.0f;
 
 // vehicles hurt and throw the animals they run into
 void CarsHitMobs() {
@@ -107,6 +110,10 @@ void CarsHitMobs() {
                                    // must not relay it a second time
             } else {
                 MobHurt((int)j, speed * 0.45f, vp, 0.0f);
+                if (m.kind == MOB_PO)
+                    gPoRamMuteT = 0.35f; // the same impact also wounds his
+                                         // sensor body in the game's books:
+                                         // the relay must not bill it twice
             }
             m.vel = vel * 1.1f + CVector(0, 0, 3.0f + speed * 0.25f);
             m.onGround = false;
@@ -791,6 +798,173 @@ void BossDriverApply(float dt) {
     }
 }
 
+// ------------------------------------------------------------------
+// Po's perception body (fix round): the boss's sensor pattern, scoped
+// to Po and sensor-only - he has no driver mode and no fight of his own
+// to feed, so there is no attacker scan and no cowering here; the body
+// exists for one thing: so the game's own weapon fire has something of
+// Po's to land on. Before it existed, that fire had NO path to him at
+// all - he is a core entity, not a ped, and the only ped-to-core relay
+// was the soldier's - which is the whole of the eye verdict's "he does
+// not die": shot and punched at point blank, nothing reached his health
+// book but car rams. The body is built the way the game builds its own
+// (a CCopPed, MISSION-marked, held by pool ref), glued invisibly to Po
+// every frame, and its health deltas are relayed into MobPoProxyDamage;
+// the core owns the flinch, the death and the corpse from there.
+struct PoProxyState {
+    CPed* ped = nullptr;
+    int ref = 0; // his pool handle, the only name trusted across frames
+    uint32_t mobId = 0;
+    bool createFailed = false; // creation produced a non-pool body once:
+                               // latched off for the session
+};
+PoProxyState gPoProxy;
+
+bool PoProxyIsOurs(CPed* ped) {
+    return ped && ped->m_nType == ENTITY_TYPE_PED && ped->m_nPedType == PED_TYPE_COP &&
+           ped->m_nModelIndex == 0;
+}
+
+bool PoProxyAlive(CPed* ped) {
+    return PoProxyIsOurs(ped) && ped->m_fHealth > 0.0f &&
+           ped->m_ePedState != PEDSTATE_DIE && ped->m_ePedState != PEDSTATE_DEAD;
+}
+
+// Drop the pointer and the ref and touch NOTHING through either (the
+// boss's discipline, same reason: the game may already have the body).
+void PoProxyForget() {
+    if (gPoProxy.ped)
+        Log("po proxy: his body no longer resolves by its pool ref - forgetting it, hands off");
+    gPoProxy.ped = nullptr;
+    gPoProxy.ref = 0;
+    gPoProxy.mobId = 0;
+}
+
+CPed* PoProxyResolve() {
+    auto* pool = CPools::ms_pPedPool;
+    if (!pool || !gPoProxy.ped || !gPoProxy.ref)
+        return nullptr;
+    CPed* p = pool->GetAtRef(gPoProxy.ref);
+    return p == gPoProxy.ped ? p : nullptr;
+}
+
+void PoProxyKill() {
+    if (gPoProxy.ped) {
+        CPed* ped = PoProxyResolve();
+        if (!ped) {
+            PoProxyForget(); // the game already took him: hands off entirely
+            return;
+        }
+        PedSkinsIncludePed(ped); // his ref goes back to the slot's next tenant clean
+        CWorld::Remove(ped);
+        delete ped; // CPed::operator delete returns the slot to the pool
+        gPoProxy.ped = nullptr;
+        gPoProxy.ref = 0;
+    }
+    gPoProxy.mobId = 0;
+}
+
+bool PoProxyCreate(const Mob& m) {
+    auto* pool = CPools::ms_pPedPool;
+    if (!pool)
+        return false;
+    CCopPed* cop = new CCopPed(COP_TYPE_CITYCOP); // pool slot, fully constructed cop body
+    CPed* ped = cop;
+    if (!ped)
+        return false; // pool full right now: the next sync tries again
+    ped->SetModelIndex(0);
+    ped->SetCharCreatedBy(kCreatedByMission); // ours alone to remove
+    ped->ClearWeapons();                      // a sensor: he never shoots
+    CWorld::Add(ped);
+    const int idx = pool->GetIndex(ped);
+    if (idx < 0 || idx >= pool->m_nSize || pool->GetAt(idx) != ped || pool->IsFreeSlotAtIndex(idx)) {
+        CWorld::Remove(ped);
+        delete ped;
+        gPoProxy.createFailed = true;
+        Log("po proxy: creation did not land in the ped pool (index %d) - proxy stays off for this session", idx);
+        return false;
+    }
+    // containment from birth, the boss's recipe: the EMPTY decision
+    // maker and senses zeroed - he must never decide anything
+    if (ped->m_pIntelligence) {
+        ped->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
+        ped->m_pIntelligence->SetSeeingRange(0.0f);
+        ped->m_pIntelligence->SetHearingRange(0.0f);
+    }
+    gPoProxy.ped = ped;
+    gPoProxy.ref = pool->GetRef(ped);
+    gPoProxy.mobId = m.id;
+    ped->bIsVisible = false;
+    PedSkinsExcludePed(ped);  // the villager system must never adopt or draw him
+    SetPedDrawn(ped, false);  // his clump's atomics lose their render flags at once
+    ped->m_fMaxHealth = 1000.0f;
+    ped->m_fHealth = 1000.0f;
+    Log("po proxy: pool index %d, ref %d - one invisible mission cop body takes the game's fire for Po",
+        idx, gPoProxy.ref);
+    return true;
+}
+
+int PoFindPo() {
+    for (size_t j = 0; j < gMobs.size(); ++j)
+        if (gMobs[j].kind == MOB_PO && gMobs[j].death < 0.0f)
+            return (int)j;
+    return -1;
+}
+
+void PoProxySync(float dt, CPlayerPed* player) {
+    (void)player; // no attribution: step-1 Po makes no enemies of anyone
+    const int pi = PoFindPo();
+    if (pi < 0) {
+        PoProxyKill();
+        return;
+    }
+    Mob& m = gMobs[pi];
+    if (gPoProxy.ped && gPoProxy.mobId != m.id)
+        PoProxyKill();
+    if (gPoProxy.ped && !PoProxyResolve()) {
+        Log("po proxy: the game recycled his body - obtaining a fresh one");
+        PoProxyForget();
+    }
+    if (!gPoProxy.ped && !gPoProxy.createFailed) {
+        if (!PoProxyCreate(m))
+            return;
+    }
+    if (!gPoProxy.ped)
+        return;
+    if (!PoProxyAlive(gPoProxy.ped)) {
+        // he died in the game between frames (one explosion-class hit can
+        // take the whole 1000): a corpse is no sensor - retire and let a
+        // fresh body be built next sync, the boss's law
+        Log("po proxy: he died in the game - retiring the body, a fresh one is built next sync");
+        PoProxyKill();
+        return;
+    }
+    CPed* ped = gPoProxy.ped;
+    // the hurt he took since the last frame, relayed into the core's
+    // books - except a vehicle blow the core already priced this frame
+    // (CarsHitMobs mutes the relay for it: one impact, one bill)
+    gPoRamMuteT = std::max(0.0f, gPoRamMuteT - dt);
+    const float h = ped->m_fHealth;
+    if (h < 999.0f && gPoRamMuteT <= 0.0f)
+        MobPoProxyDamage(pi, (1000.0f - h) * 2.0f);
+    if (m.death >= 0.0f) {
+        PoProxyKill();
+        return;
+    }
+    // top the sensor back up and glue him to Po, every frame - invisible
+    // in the boss's layers, and hittable: his skeleton is kept up to date
+    // by hand because a ped the renderer skips stops updating the hit
+    // spheres the street's bullets test against
+    ped->m_fHealth = 1000.0f;
+    ped->m_fMaxHealth = 1000.0f;
+    ped->Teleport(CVector(m.pos.x, m.pos.y, m.pos.z + 0.9f), false);
+    ped->SetHeading(m.yaw);
+    ped->m_vecMoveSpeed = CVector(0, 0, 0);
+    SetPedDrawn(ped, false);
+    if (ped->m_pRwObject)
+        ped->UpdateRpHAnim();
+}
+
 void BossProxySync(float dt, CPlayerPed* player) {
     if (gBossTest.proxyOff) {
         // /bosstest proxy: the bisect removes his perception body entirely -
@@ -871,6 +1045,10 @@ void BossProxySessionReset() {
     // session too: the new one gets its own attempt.
     BossProxyForget();
     gBossProxy.createFailed = false;
+    // Po's sensor body belongs to the torn-down world too (fix round):
+    // forget it untouched, and the new session gets its own attempt
+    PoProxyForget();
+    gPoProxy.createFailed = false;
     // the driver's state belongs to the torn-down world too: pointers off,
     // nothing touched through them (the anchor object died with the world;
     // its model registration is process-lifetime and stays, the way the
@@ -950,6 +1128,7 @@ void MobsUpdate(float dt, CPlayerPed* player) {
     if (gGta.enabled) {
         const auto proxyT0 = std::chrono::steady_clock::now();
         BossProxySync(dt, player);
+        PoProxySync(dt, player); // Po's sensor body rides the same frame point
         BossTestNoteProxyMs(
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - proxyT0).count());
         // a horn at him is a loud fact in his ears, like a shout in traffic

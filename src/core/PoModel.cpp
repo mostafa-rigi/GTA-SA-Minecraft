@@ -112,7 +112,13 @@ const Seq* FindSeq(int category) {
 bool PoseLocals(const Seq& s, float time, std::vector<PoLocal>& out) {
     if (gBones <= 0 || s.frames <= 0)
         return false;
-    float ft = s.duration > 0.0f ? time / s.duration * (float)s.frames : 0.0f;
+    // fix round (60 fps bake): loop clips bake WITHOUT a duplicate
+    // endpoint - frame k is source key k over a period of exactly
+    // duration, so the frames scale is exact there. Non-loop clips bake
+    // every key INCLUDING the endpoint, so frame k sits at
+    // k/(frames-1) of the duration and the scale is frames-1 (the old
+    // frames scale ran those clips fast and squeezed the last interval).
+    float ft = s.duration > 0.0f ? time / s.duration * (float)(s.loop ? s.frames : s.frames - 1) : 0.0f;
     if (s.loop) {
         ft = std::fmod(ft, (float)s.frames);
         if (ft < 0)
@@ -454,6 +460,7 @@ void UnloadPoModel() {
 bool PoModelReady() { return gReady; }
 int PoBoneCount() { return gBones; }
 int PoSequenceCount() { return (int)gSeqs.size(); }
+int PoVertexCount() { return (int)gVerts.size(); }
 const int* PoBoneParents() { return gParents.empty() ? nullptr : gParents.data(); }
 
 float PoPoseDuration(int category) {
@@ -524,6 +531,38 @@ void DrawPoModel(const Pose& base, const PoDrawState& st, float light, float r, 
         v[3] = v[2];
         TheModelSink().Quad(p, u, v, col);
     }
+}
+
+bool PoDebugSkin(const PoDrawState& st, std::vector<float>& world12, std::vector<float>& skin12,
+                 std::vector<Vec3>& pos) {
+    if (!gReady)
+        return false;
+    std::vector<PoLocal> locals;
+    if (!ComposeRenderLocals(st, locals))
+        return false;
+    std::vector<Mat> mats;
+    ComposeWorldMats(locals, mats);
+    world12.assign((size_t)gBones * 12, 0.0f);
+    skin12.assign((size_t)gBones * 12, 0.0f);
+    for (int b = 0; b < gBones; ++b) {
+        const Mat skin = Mul(mats[b], gIBM[b]);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) {
+                world12[(size_t)b * 12 + r * 3 + c] = mats[b].a[r][c];
+                skin12[(size_t)b * 12 + r * 3 + c] = skin.a[r][c];
+            }
+        world12[(size_t)b * 12 + 9] = mats[b].t.x;
+        world12[(size_t)b * 12 + 10] = mats[b].t.y;
+        world12[(size_t)b * 12 + 11] = mats[b].t.z;
+        skin12[(size_t)b * 12 + 9] = skin.t.x;
+        skin12[(size_t)b * 12 + 10] = skin.t.y;
+        skin12[(size_t)b * 12 + 11] = skin.t.z;
+    }
+    std::vector<Vec3> nrm;
+    float mr = 0.0f, lo = 0.0f, hi = 0.0f;
+    bool finite = true;
+    SkinAllVerts(mats, pos, nrm, &mr, &lo, &hi, &finite);
+    return finite;
 }
 
 bool PoRenderExtents(const PoDrawState& st, float* maxRadial, float* loZ, float* hiZ) {

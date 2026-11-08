@@ -152,8 +152,25 @@ struct Im3DSink : ModelSink {
             SetRaster(gSoldierTex[tex - MT_SOLDIER].Raster()); // the CS soldier's own files
         else if (tex >= MT_COP && tex < MT_COP + kCopTexMax && gCopTex[tex - MT_COP].tex)
             SetRaster(gCopTex[tex - MT_COP].Raster()); // the Driver 2 cop's own files
-        else if (tex == MT_PO && gPoTex.tex)
-            SetRaster(gPoTex.Raster()); // Po's own atlas
+        else if (tex == MT_PO) {
+            // Po's atlas - and the one-time word on which texture he is
+            // ACTUALLY wearing (fix round): the eye verdict's "no eyes"
+            // is what the fallback below looks like, so the log must be
+            // able to convict the binding by itself next session
+            static bool poBindLogged = false;
+            if (!poBindLogged) {
+                poBindLogged = true;
+                if (gPoTex.tex)
+                    Log("po texture: MT_PO binds po_tex0.png (%dx%d) - his own atlas", gPoTex.w, gPoTex.h);
+                else
+                    Log("po texture: WARNING - po_tex0.png is NOT loaded; Po is drawn with the fallback "
+                        "entity atlas (no eyes, wrong fur - the binding is the fault when this line appears)");
+            }
+            if (gPoTex.tex)
+                SetRaster(gPoTex.Raster()); // Po's own atlas
+            else
+                SetRaster(gEntityTex.Raster());
+        }
         else
             SetRaster(gEntityTex.Raster());
     }

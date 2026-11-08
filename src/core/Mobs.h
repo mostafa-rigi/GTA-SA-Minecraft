@@ -307,6 +307,9 @@ struct Mob {
     PoDrawState poDraw;         // Po: the whole-body pose the renderer draws
     float poHitT = 0.0f;        // Po: seconds his hit flinch still shows (set by MobHurt)
     float poAtkCd = 0.0f;       // Po: seconds before his next proximity attack
+    float poAtkRest = 1.1f;     // Po: the CURRENT rest after a swing (re-rolled per
+                                // swing, 1.1..2.6 s - a fixed rest read as a loop)
+    float poLogT = 0.0f;        // Po: the per-second state-log clock
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;
@@ -378,6 +381,13 @@ void MobProvoked(int index, int being, const Vec3& from);
 // gangs shoot at): relayed into his real health, per-event capped, never a
 // one-shot, and it names the attacker when the bridge knows him.
 void MobProxyDamage(int index, float halfHearts, const Vec3& from, int attackerBeing);
+// Po's own damage door (fix round): hurt that landed on HIS perception body
+// in the host (an invisible sensor ped glued to him, the boss's pattern) is
+// relayed into his real health book here - per-event capped like the
+// soldier's door, so no single event is a one-shot. Before this door
+// existed, player guns and melee could never reach Po at all: the game's
+// fire lands on peds, Po is not one, and the only relay was soldier-gated.
+void MobPoProxyDamage(int index, float halfHearts);
 // A vehicle is charging him on a collision line: he dodges if there is room.
 void MobVehicleThreat(int index, const Vec3& vehPos, const Vec3& vehVel, bool driverIsPlayer);
 // A vehicle actually hit him: heavy, capped, never fatal by itself, and the

@@ -66,6 +66,7 @@ void UnloadPoModel();
 bool PoModelReady();
 int PoBoneCount();
 int PoSequenceCount(); // test support
+int PoVertexCount();   // test support / the creation log line
 
 // Composes the draw state's bone locals (cross-fade NOT included - the
 // renderer blends through PoRenderLocals' twin inside PoModel.cpp; this is
@@ -84,6 +85,15 @@ void DrawPoModel(const Pose& base, const PoDrawState& st, float light, float r, 
 
 // The bone hierarchy's parents (test support).
 const int* PoBoneParents();
+// Test support: the exact matrices and skinned positions the renderer
+// composes for a draw state - per bone, the world matrix and the skin
+// matrix (world x inverse bind), each as 12 floats (3x3 rows, then the
+// translation), plus every skinned vertex in model space, in file order.
+// This is DrawPoModel's own composition (cross-fade included), exposed so
+// the offline harness can diff the engine path against the reference
+// skinning of the source data, vertex for vertex.
+bool PoDebugSkin(const PoDrawState& st, std::vector<float>& world12, std::vector<float>& skin12,
+                 std::vector<Vec3>& pos);
 // Test support: the skinned figure's true extents for a draw state, composed
 // exactly as the renderer composes it (cross-fade included).
 bool PoRenderExtents(const PoDrawState& st, float* maxRadial, float* loZ, float* hiZ);
