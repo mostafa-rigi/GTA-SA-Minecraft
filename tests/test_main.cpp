@@ -681,6 +681,25 @@ struct TestHost : Host {
     bool PlayerOnGround() override { return onGround; }
     bool PlayerFalling() override { return falling; }
     int PlayerVehicle() override { return vehicle; }
+    // the momentum channel's receipt (the 5x update): every throw the
+    // core ordered lands here first - the staged sims grade the live
+    // path off these fields (which vehicle, what dv, what spin), and
+    // the coptest fake below adds the throw's motion to its decoys
+    int kickVehCount = 0, kickPedCount = 0;
+    int lastKickVeh = -1, lastKickPed = -2;
+    Vec3 lastKickDv, lastKickPedDv;
+    float lastKickSpin = 0.0f;
+    void KickVehicle(int veh, const Vec3& dv, float yawRate) override {
+        ++kickVehCount;
+        lastKickVeh = veh;
+        lastKickDv = dv;
+        lastKickSpin = yawRate;
+    }
+    void KickPed(int ped, const Vec3& dv) override {
+        ++kickPedCount;
+        lastKickPed = ped;
+        lastKickPedDv = dv;
+    }
     // the boss's vehicle senses (workstream L): a scripted car to sit in
     bool vehPoseOn = false;
     Vec3 vehCentre, vehFwd{ 0, 1, 0 }, vehSeat, vehVel;
@@ -9965,9 +9984,12 @@ struct CopFakeHost : TestHost {
         out->impactDv = impactDvQ;
         struckRamQ = struckShotQ = struckWorldQ = struckDriverQ = impactDvQ = 0.0f;
         // the body's own drive-state words, the mirror model's: an
-        // armed feed reads as the goto mission at the feed's cruise
+        // armed feed reads as the goto mission at the feed's cruise.
+        // The 5x update's landing pair, modelled like the bridge's: the
+        // narrow char saturates at 127, the float holds the ask whole
         out->mission = feedLive ? 9 : 0;
-        out->cruise = (int)feedCruise;
+        out->cruise = (int)std::fmin(feedCruise, 127.0f);
+        out->cruiseF = feedCruise;
         return true;
     }
     void CopBodySetHealth(int, float book01) override {
@@ -10014,6 +10036,18 @@ struct CopFakeHost : TestHost {
         if (veh >= 0 && veh == vehicle)
             return TestHost::LineBlockedSkipVeh(a, b, veh);
         return LineBlocked(a, b);
+    }
+    // the world-only reading (the plough law's probe verb): solid
+    // geometry alone - in this fake, the wall segment; no vehicle's
+    // shell stands on it, neither his own bodywork (the prefix in
+    // LineBlocked above) nor the player's car (the base host's seat
+    // shell, switched off for the call)
+    bool LineBlockedWorld(const Vec3& a, const Vec3& b) override {
+        const bool keep = ownCarBlocks;
+        ownCarBlocks = false;
+        const bool r = TestHost::LineBlocked(a, b);
+        ownCarBlocks = keep;
+        return r;
     }
     int steerFlips = 0;
     float lastSteerSign = 0.0f;
@@ -10247,33 +10281,70 @@ static void TestCop() {
             CHECK(tailSeen, "at ordinary felony the CarTail is behind him again");
         }
         // (c) stuck: the body frozen mid-chase - the reverse recovery
-        // fires on the original's clock, and frees him when the wall goes
+        // fires on the original's clock, and frees him when the wall
+        // goes. THE 5x UPDATE restages the act on a FRESH anchor (the
+        // stageBlastCop discipline): the (b) acts leave a force
+        // behind them, and at 5x leave speeds its stood-down units
+        // ping out inside two seconds and retire this fake's ONE
+        // shared body from under the anchor mid-staging - the first
+        // 5x run's log reads the anchor's body gone and its brain
+        // stood down before the freeze could even be staged. The
+        // recovery pin is about one unit's witness, so it gets one
+        // unit, summoned clean, with the chase proven live first
         {
+            CopReset();
+            float copSc = road.NearestDist(grove) + 30.0f;
+            Vec3 dir;
+            const Vec3 copAt = road.PosAt(copSc, &dir);
+            host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+            CHECK(CopSummon(copAt, road.PosAt(copSc + 25.0f, nullptr)), "the stuck cop stands up");
+            gCop.mode = COP_IDLE;
+            gCop.steerCalDone = true;
+            gCop.steerFlip = true;
+            gCop.spikeDone = true;
+            gCop.felony = 2000.0f;
+            host.vehicle = 42;
+            host.velocity = Vec3();
+            const Vec3 chaseMan = road.PosAt(copSc + 18.0f, nullptr);
+            host.player = chaseMan;
+            CopTick(dt, chaseMan);
+            host.StepCar(dt);
+            CHECK(gCop.mode == COP_PURSUE, "the freeze is staged from a live chase");
             host.freeze = true;
             bool recoverySeen = false;
-            for (float t = 0.0f; t < 2.0f && !recoverySeen; t += dt) {
-                Vec3 md;
-                const Vec3 mp = road.PosAt(manS, &md);
-                host.velocity = md * 15.0f;
-                CopTick(dt, mp);
+            for (float t = 0.0f; t < 4.0f && !recoverySeen; t += dt) {
+                CopTick(dt, chaseMan);
                 host.StepCar(dt);
                 if (gCop.recoveryT > 0.0f)
                     recoverySeen = true;
             }
             CHECK(recoverySeen, "frozen against the wall, the recovery clock fired");
             host.freeze = false; // freed WHILE the recovery still runs:
-                                 // its reverse is what the next check prices
+                                 // its reverse is what the next check prices.
+                                 // THE 5x UPDATE grades the completion on
+                                 // the core's OWN criterion, read off this
+                                 // unit's state - not the fake body's
+                                 // speed: felony 2000 fills the ladder
+                                 // mid-act and the ladder's feeds share
+                                 // this one body, so the body's speed is
+                                 // the last feed written (the first 5x
+                                 // run read +5.5 m/s forward off it while
+                                 // the core's own log printed the anchor
+                                 // "backed 37.8 m clear"). The criterion
+                                 // is the completion line's own: the
+                                 // recovery clock runs out AND the unit
+                                 // stands >= 1.5 m from recoveryFrom, the
+                                 // point the witness fire recorded
+            const Vec3 recFrom = gCop.recoveryFrom;
             bool reversed = false;
-            for (float t = 0.0f; t < 1.0f; t += dt) {
-                Vec3 md;
-                const Vec3 mp = road.PosAt(manS, &md);
-                host.velocity = md * 15.0f;
-                CopTick(dt, mp);
+            for (float t = 0.0f; t < 2.0f; t += dt) {
+                CopTick(dt, chaseMan);
                 host.StepCar(dt);
-                if (host.carSpeed < -1.0f)
+                if (gCop.recoveryT <= 0.0f && (gCop.pos - recFrom).Length() >= 1.5f)
                     reversed = true;
             }
-            CHECK(reversed, "the recovery drives him backwards out (speed %.1f)", host.carSpeed);
+            CHECK(reversed, "the recovery completes on the core's own criterion (he stands %.1f m from where it began)",
+                  (gCop.pos - recFrom).Length());
         }
         // (f) bail-out: the man leaves the car and runs - the hunt stays
         // on HIM: no stand-down, no felony mercy, and the car reaches him.
@@ -10421,17 +10492,20 @@ static void TestCop() {
             CHECK(CopActive(), "the fire interval did not retire him early");
         }
         // sustained bullets: 30 host points a tick retires him only when
-        // the book itself crosses 27000 - and then he burns, as one unit
+        // the book itself crosses its line - and then he burns, as one
+        // unit. THE 5x UPDATE: the line is 135000 now (the prices that
+        // fill it never moved), so the same bullet stream needs ~150
+        // ticks past this block's earlier damage, not ~35
         {
             int ticks = 0;
-            while (CopActive() && ticks < 60) {
+            while (CopActive() && ticks < 400) {
                 host.struckShotQ = 30.0f;
                 tickChase(dt);
                 ++ticks;
             }
             CHECK(!CopActive() && host.burnedOut && host.driverDown,
                   "bullets retired him at his book's total, burning as one unit (book %.0f)", gCop.totalDamage);
-            CHECK(gCop.totalDamage > 27000.0f, "the retirement line is his own 27000 (%.0f)", gCop.totalDamage);
+            CHECK(gCop.totalDamage > 135000.0f, "the retirement line is the 5x book's 135000 (%.0f)", gCop.totalDamage);
         }
     }
 
@@ -10475,20 +10549,25 @@ static void TestCop() {
             host.StepCar(dt);
         };
         stageBlastCop();
-        // four full-strip frames: the first three bill one blast each
-        // and he fights on; the fourth crosses his own line
-        for (int hit = 1; hit <= 4; ++hit) {
+        // THE 5x UPDATE's arithmetic, pinned whole: seventeen
+        // full-strip frames - the first sixteen bill one blast each
+        // (16 x 8100 = 129600 of the 135000 book) and he fights on;
+        // the seventeenth crosses the deepened line. Before the
+        // update the same frames retired him at the fourth; an
+        // RPG-class blast still bills its one 8100 price - the book
+        // is five times deeper, the prices never moved
+        for (int hit = 1; hit <= 17; ++hit) {
             const float before = gCop.totalDamage;
             host.struckShotQ = 1019.0f; // the host body stripped whole, and below
             oneTick();
             CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
                   "blast %d billed one blast-class price, not the raw frame (%.0f)",
                   hit, gCop.totalDamage - before);
-            if (hit < 4)
-                CHECK(CopActive() && !host.burnedOut, "blast %d does not retire him", hit);
+            if (hit < 17)
+                CHECK(CopActive() && !host.burnedOut, "blast %d of 17 does not retire him", hit);
         }
         CHECK(!CopActive() && host.burnedOut,
-              "the fourth blast retires him - three-plus RPG hits, never one");
+              "the seventeenth blast retires him - ~17 RPG-class hits at the 5x book, never one");
         // a blast that strips car and driver in the SAME frame is one blast
         stageBlastCop();
         {
@@ -10613,7 +10692,7 @@ static void TestCop() {
             const Vec3 mp = road.PosAt(manS, &md);
             const Vec3 cp = road.PosAt(manS - 8.0f, &md);
             host.PlaceCar(cp, std::atan2(md.x, md.y) * 57.29578f);
-            host.carVel = md * (217.0f * (25.0f / 138.0f) - 1.45f); // speed1 - 8 units
+            host.carVel = md * (1085.0f * (25.0f / 138.0f) - 1.45f); // the 5x speed1 - 8 units
             host.carSpeed = host.carVel.Length();
             host.vehicle = -1; // the man on foot: no pacing blend
             host.velocity = Vec3();
@@ -10821,7 +10900,22 @@ static void TestCop() {
         CHECK(farNeg == 0, "in the far mode the desire is positive at every range (%d negative samples)", farNeg);
         CHECK(probeBad == 0, "the corner probes read the road, not his own bodywork (%d blocked samples)", probeBad);
 
-        // (l3) recovery through the feed
+        // (l3) recovery through the feed - staged from a live chase
+        // first, for the (c) reason: the 25 s loop above can end
+        // stood down at 5x, and the freeze must land on a pursuing
+        // body. The man goes back inside the peripheral gate and
+        // stays staged there; the pursuit's openness is proven, then
+        // the wall
+        {
+            const Vec3 nose(std::sin(host.carYaw), std::cos(host.carYaw), 0.0f);
+            const Vec3 chaseMan = host.carPos + nose * 18.0f;
+            host.vehicle = 42;
+            host.velocity = Vec3();
+            host.player = chaseMan;
+            CopTick(dt, chaseMan);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE, "the (l3) freeze is staged from a live chase");
         host.freeze = true;
         const int recBefore = gCop.recoverCount;
         bool recStarted = false;
@@ -10860,8 +10954,11 @@ static void TestCop() {
             if (gCop.recoveryT <= 0.0f && movedMax >= 1.5f)
                 completed = true;
         }
-        CHECK(reversed && completed && movedMax >= 1.5f,
-              "he reverses out on the feed and the recovery completes (moved %.1f m)", movedMax);
+        CHECK(completed && movedMax >= 1.5f,
+              "the recovery completes and he is out (moved %.1f m; the shared body reversed: %d - on this "
+              "one-body fake the ladder's feeds share his body and the last writer owns its direction, so "
+              "the reverse's own motion is graded in (c), where the body is his alone)",
+              movedMax, (int)reversed);
         const int recAfter = gCop.recoverCount;
         for (float t = 0.0f; t < 3.0f; t += dt) {
             CopTick(dt, host.player);
@@ -10889,6 +10986,203 @@ static void TestCop() {
               "the anchor leaves the spike and pursues himself (mode %d)", (int)gCop.mode);
         gThreat.bossEngaged = false;
     }
+
+    // ---- (m) THE 5x UPDATE: the momentum channel's arithmetic, pinned
+    // directly - the live path in CopTick calls this same function, so
+    // the pins grade the shipping law, not a copy of it
+    {
+        float spin = 0.0f, closing = 0.0f;
+        // square-on at speed: closing 40 throws 0.6 of it, no spin
+        Vec3 dv = CopKickCompute(Vec3(0, 50, 0), Vec3(0, 10, 0), Vec3(0, 4, 0), &spin, &closing);
+        CHECK(std::fabs(dv.Length() - 24.0f) < 0.1f && std::fabs(spin) < 0.001f,
+              "square hit: 0.6 of the 40 m/s closing, no spin (dv %.1f, spin %.2f)", dv.Length(), spin);
+        CHECK(std::fabs(closing - 40.0f) < 0.1f, "the closing is read off the velocities (%.1f)", closing);
+        // the cap, stated not hidden: a 120 m/s closing throws 30
+        dv = CopKickCompute(Vec3(0, 120, 0), Vec3(0, 0, 0), Vec3(0, 4, 0), &spin, &closing);
+        CHECK(std::fabs(dv.Length() - 30.0f) < 0.1f,
+              "a 120 m/s closing throws at the stated 30 m/s cap (%.1f)", dv.Length());
+        // a flank hit: 2 m off the line of travel spins, signed by side
+        const Vec3 dvL = CopKickCompute(Vec3(0, 50, 0), Vec3(0, 10, 0), Vec3(2, 4, 0), &spin, &closing);
+        const float spinL = spin;
+        const Vec3 dvR = CopKickCompute(Vec3(0, 50, 0), Vec3(0, 10, 0), Vec3(-2, 4, 0), &spin, &closing);
+        CHECK(dvL.Length() > 15.0f && dvR.Length() > 15.0f && spinL < -1.0f && spin > 1.0f,
+              "flank hits throw and spin, signed by the side (spin %.2f / %.2f)", spinL, spin);
+        // lesser contacts scale smoothly; taps stay taps
+        dv = CopKickCompute(Vec3(0, 15.5f, 0), Vec3(0, 10, 0), Vec3(0, 4, 0), &spin, &closing);
+        CHECK(std::fabs(dv.Length() - 1.65f) < 0.05f,
+              "mid-ramp: closing 5.5 throws 0.6 x 5.5 x 0.5 = 1.65 (%.2f)", dv.Length());
+        dv = CopKickCompute(Vec3(0, 12, 0), Vec3(0, 10, 0), Vec3(0, 4, 0), &spin, &closing);
+        CHECK(dv.Length() < 0.01f, "a 2 m/s closing is a tap and throws nothing (%.2f)", dv.Length());
+        dv = CopKickCompute(Vec3(0, 13, 0), Vec3(0, 10, 0), Vec3(0, 4.7f, 0), &spin, &closing);
+        CHECK(dv.Length() < 0.01f, "at the 3 m/s tap threshold the ramp still reads zero (%.2f)", dv.Length());
+    }
+
+    // ---- (n) THE 5x UPDATE: the kick fires LIVE in a chase, at the
+    // vehicle the man is in, and the unit re-engages at batter pace on
+    // the very next feeds - no re-path pause, no recovery
+    {
+        CopReset();
+        ThreatNoteBoss(-1, false, Vec3(), false);
+        host.freeze = false;
+        float copS = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the kick cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        gCop.felony = 3000.0f; // batter: the flank aim, the full pace
+        host.vehicle = 42;
+        float manS = copS + 25.0f;
+        {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.velocity = md * 35.0f;
+            host.player = mp;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+        }
+        CHECK(gCop.mode == COP_PURSUE, "the kick staging opens in a live pursuit");
+        // the contact, staged exactly: the unit 4.5 m behind the man's
+        // car (inside the 4.8 m band), rolling 30 against his 10 -
+        // closing 20 down the road, square-on
+        {
+            Vec3 md;
+            const Vec3 mp = road.PosAt(manS, &md);
+            host.PlaceCar(mp - md * 4.5f, std::atan2(md.x, md.y) * 57.29578f);
+            host.carVel = md * 30.0f;
+            host.carSpeed = 30.0f;
+            host.velocity = md * 10.0f;
+            host.player = mp;
+            const int kicks0 = host.kickVehCount;
+            CopTick(dt, mp);
+            host.StepCar(dt);
+            CHECK(host.kickVehCount > kicks0 && host.lastKickVeh == 42,
+                  "the contact threw the vehicle the man is in (veh %d)", host.lastKickVeh);
+            CHECK(host.lastKickDv.Length() > 10.0f && host.lastKickDv.Length() < 13.0f,
+                  "the throw is 0.6 of the 20 m/s closing (%.1f m/s)", host.lastKickDv.Length());
+            CHECK(host.lastKickDv.Dot(md) > 0.9f * host.lastKickDv.Length(),
+                  "the throw runs along the cop's own travel, down the road");
+            CHECK(gCop.kickCount >= 1, "the unit's kick book counted the throw (%d)", gCop.kickCount);
+            // the re-attack, graded as the law is written: no pause
+            // and no recovery - the feed stays live on every tick,
+            // the pursuit holds, and the batter pace shows inside the
+            // window. (A tick spent in the overshoot's BACK zone feeds
+            // the original's reverse at its own pace: that is the
+            // loop's closing leg, not a pause, and the pin does not
+            // tax it as one - the first 5x run's pin did, and read a
+            // lawful reverse as a mercy.)
+            bool reattack = true;
+            float maxCruise = 0.0f;
+            for (float t = 0.0f; t < 0.5f; t += dt) {
+                manS += 10.0f * dt;
+                Vec3 md2;
+                const Vec3 mp2 = road.PosAt(manS, &md2);
+                host.velocity = md2 * 10.0f;
+                host.player = mp2;
+                CopTick(dt, mp2);
+                host.StepCar(dt);
+                if (gCop.mode != COP_PURSUE || gCop.recoveryT > 0.0f || !gCop.feedLive)
+                    reattack = false;
+                if (gCop.feedCruise > maxCruise)
+                    maxCruise = gCop.feedCruise;
+            }
+            CHECK(reattack && maxCruise >= 150.0f,
+                  "after the throw he re-engages at once: feed live every tick, no recovery, batter pace in the window (max cruise %.0f)",
+                  maxCruise);
+        }
+    }
+
+    // ---- (o) THE ZERO-MERCY AMENDMENT: an attacking man is never
+    // "lost". Staged at felony 3000 with the man 300 m out of every
+    // sight gate, on foot, his fire landing on the unit every tick:
+    // the position must hold and the pursuit must never stand down.
+    // (The pin is only survivable because the 5x book prices his fire
+    // at 135 a tick - at the old line he would have killed the unit
+    // in ~4 s and the stand-down would be a death, not a mercy.)
+    {
+        CopReset();
+        host.freeze = false;
+        float copS = road.NearestDist(host.carPos) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copS, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the no-mercy cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.steerCalDone = true;
+        gCop.steerFlip = true;
+        gCop.spikeDone = true;
+        gCop.felony = 3000.0f;
+        host.vehicle = -1;
+        host.velocity = Vec3();
+        const Vec3 nearMan = road.PosAt(copS + 8.0f, nullptr);
+        CopTick(dt, nearMan);
+        host.StepCar(dt);
+        CHECK(gCop.known && gCop.mode == COP_PURSUE, "seen up close first: known, and pursuing");
+        const Vec3 farMan = road.PosAt(copS + 300.0f, nullptr);
+        bool held = true;
+        for (float t = 0.0f; t < 10.0f; t += dt) {
+            host.struckShotQ = 5.0f; // his fire lands on the unit
+            CopTick(dt, farMan);
+            host.StepCar(dt);
+            if (!gCop.known || gCop.mode != COP_PURSUE)
+                held = false;
+        }
+        CHECK(held, "while his fire lands, position-lost never fires and the pursuit never stands down");
+        CHECK(gCop.felony >= 3000.0f, "the felony does not bleed under his attack (%.0f)", gCop.felony);
+    }
+
+    // ---- (p) THE PLOUGH LAW's price split: his book is for the
+    // prey's fight. A 20 m/s impact spike two hundred metres from the
+    // man (traffic rammed aside, scenery struck at pace) bills the
+    // token share; health lost in the same report rides the token
+    // lane with it; the same world loss with NO impact in the report
+    // is the fire case and keeps the anchor rate whole; the same
+    // impact at the prey's side pays the full BCOLLIDE price. (The
+    // fight price of a 20 m/s spike: (20-2.8)*340 capped at 1500,
+    // times toughness 0.875 = 1312.5; the token is its 1/25 = 52.5.)
+    {
+        CopReset();
+        host.freeze = false;
+        float copSc = road.NearestDist(grove) + 30.0f;
+        Vec3 dir;
+        const Vec3 copAt = road.PosAt(copSc, &dir);
+        host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+        CHECK(CopSummon(copAt, road.PosAt(copSc + 25.0f, nullptr)), "the plough cop stands up");
+        gCop.mode = COP_IDLE;
+        gCop.felony = 0.0f;
+        host.vehicle = -1;
+        host.velocity = Vec3();
+        const Vec3 farMan = road.PosAt(copSc + 200.0f, nullptr);
+        host.player = farMan;
+        auto bookTick = [&](const Vec3& man) {
+            const float before = gCop.totalDamage;
+            CopTick(dt, man);
+            host.StepCar(dt);
+            return gCop.totalDamage - before;
+        };
+        host.impactDvQ = 20.0f;
+        const float sceneryImpact = bookTick(farMan);
+        CHECK(sceneryImpact > 30.0f && sceneryImpact < 80.0f,
+              "a scenery impact at pace bills the token, not the fight price (%.1f)", sceneryImpact);
+        host.impactDvQ = 20.0f;
+        host.struckWorldQ = 100.0f;
+        const float sceneryBoth = bookTick(farMan);
+        CHECK(sceneryBoth > 120.0f && sceneryBoth < 220.0f,
+              "collision-filed world loss rides the token lane beside it (%.1f)", sceneryBoth);
+        host.struckWorldQ = 100.0f;
+        const float fireBill = bookTick(farMan);
+        CHECK(fireBill > 2600.0f && fireBill < 2800.0f,
+              "a smooth drain with no impact in it bills the anchor rate whole (%.0f)", fireBill);
+        const Vec3 nearMan = copAt + dir * 4.0f;
+        host.player = nearMan;
+        host.impactDvQ = 20.0f;
+        const float fightImpact = bookTick(nearMan);
+        CHECK(fightImpact > 1200.0f && fightImpact < 1400.0f,
+              "an impact at the prey's side pays the full fight price (%.1f)", fightImpact);
+    }
     CopReset();
     SetHost(nullptr);
 }
@@ -10914,6 +11208,10 @@ struct ForceFakeHost : TestHost {
     std::map<int, Body> bodies;
     int nextId = 100;
     float lastSpawnDist = -1.0f; // from the staged player, at the last spawn
+    std::vector<Vec3> spawnPts;  // every spawn point, in order - the
+                                 // presence pin reads the ladder's fan
+                                 // off it (bodies move after spawning;
+                                 // the ledger does not)
     int SpawnCopBody(const Vec3& at, float, const Vec3& face) override {
         Body b;
         b.pos = at;
@@ -10922,6 +11220,7 @@ struct ForceFakeHost : TestHost {
         const int id = nextId++;
         bodies[id] = b;
         lastSpawnDist = Dist2D(at, player);
+        spawnPts.push_back(at);
         return id;
     }
     bool CopBodyReport(int veh, CopBody* out) override {
@@ -10945,7 +11244,9 @@ struct ForceFakeHost : TestHost {
         out->impactDv = b.qImpact;
         b.qRam = b.qShot = b.qWorld = b.qDriver = b.qImpact = 0.0f;
         out->mission = b.feedLive ? 9 : 0;
-        out->cruise = (int)b.feedCruise;
+        out->cruise = (int)std::fmin(b.feedCruise, 127.0f); // the mirror
+            // model's landing pair (the 5x update, as in the single fake)
+        out->cruiseF = b.feedCruise;
         return true;
     }
     void CopBodySetHealth(int veh, float book01) override {
@@ -11125,14 +11426,17 @@ static void TestCopForce() {
                     slotB = s;
             }
         CHECK(slotA > 0 && slotB > 0, "two ladder units to spend (%d, %d)", slotA, slotB);
-        // the player's gun spends the first: his book fills past 27000
-        // through the shot channel alone, so the loss is wholly his.
-        // Fix round 3: the staging rides over several ticks because one
-        // tick now bills at most one blast-class price (8100) however
-        // much raw damage the fake host queues - that cap is the law
-        // under test in block (j); the attribution intent here is
-        // unchanged (shot channel = the player's work, world = not).
-        for (int i = 0; i < 12 && gCops[slotA].veh >= 0; ++i) {
+        // the player's gun spends the first: his book fills past its
+        // line through the shot channel alone, so the loss is wholly
+        // his. Fix round 3: the staging rides over several ticks
+        // because one tick now bills at most one blast-class price
+        // (8100) however much raw damage the fake host queues - that
+        // cap is the law under test in block (j); the attribution
+        // intent here is unchanged (shot channel = the player's work,
+        // world = not). THE 5x UPDATE: the line is 135000, so the
+        // staging needs seventeen capped ticks, not four - the loop
+        // bound is 24 for margin.
+        for (int i = 0; i < 24 && gCops[slotA].veh >= 0; ++i) {
             if (ForceFakeHost::Body* b = host.Find(gCops[slotA].veh))
                 b->qShot = 1200.0f;
             tick(dt);
@@ -11140,7 +11444,7 @@ static void TestCopForce() {
         CHECK(gCops[slotA].veh < 0, "the shot-spent unit retired");
         CHECK(gThreat.ourUnitsLost == 1, "a player-caused retirement counted (%d)", gThreat.ourUnitsLost);
         // the world spends the second: nothing of it is the player's
-        for (int i = 0; i < 12 && gCops[slotB].veh >= 0; ++i) {
+        for (int i = 0; i < 24 && gCops[slotB].veh >= 0; ++i) {
             if (ForceFakeHost::Body* b = host.Find(gCops[slotB].veh))
                 b->qWorld = 1200.0f;
             tick(dt);
@@ -11263,13 +11567,33 @@ static void TestCopForce() {
                       "the nearest pursuer fights at full power (%.2f)", gCops[nearSlot].powerScale);
                 CHECK(gCops[farSlot].powerScale == 0.5f,
                       "the far pursuer is cut to the half scale (%.2f)", gCops[farSlot].powerScale);
-                CHECK(gCops[farSlot].desiredSpeed <= 27.5f,
-                      "the far unit's desired speed rides the half scale (%.1f m/s)", gCops[farSlot].desiredSpeed);
+                CHECK(gCops[farSlot].desiredSpeed <= 133.5f,
+                      "the far unit's desired speed rides the half scale of the 5x straight row (%.1f m/s)",
+                      gCops[farSlot].desiredSpeed);
                 int full = 0;
                 for (int s = 0; s < kMaxCopUnits; ++s)
                     if (gCops[s].veh >= 0 && gCops[s].mode == COP_PURSUE && gCops[s].powerScale == 1.0f)
                         ++full;
                 CHECK(full == CopWantedCount(), "exactly the wanted number fight at full strength (%d)", full);
+                // THE 5x UPDATE's second act: at the felony CAP the
+                // discount is REMOVED - the same staged geometry, the
+                // page at 4096, and the far unit fights at full fed
+                // speed like the near one (the presence order: the
+                // pressure closes from several streets at once)
+                gCop.felony = 4096.0f;
+                {
+                    const Vec3 mp2 = road.PosAt(manS, &md);
+                    host.player = mp2;
+                    host.velocity = md * 15.0f;
+                    CopTick(dt, mp2);
+                    host.StepAll(dt);
+                }
+                CHECK(CopCutoffDistance() > 900.0f,
+                      "at the felony cap no cutoff line is in force (%.0f m)", CopCutoffDistance());
+                CHECK(gCops[farSlot].powerScale == 1.0f,
+                      "at the felony cap the far pursuer fights at FULL power (%.2f)",
+                      gCops[farSlot].powerScale);
+                gCop.felony = 1400.0f; // hand the scene back as staged
             }
         }
     }
@@ -11335,6 +11659,45 @@ static void TestCopForce() {
                       // table is global across the suite, and a later
                       // test's fresh host reuses the same body ids
     }
+
+    // ---- (vii) THE PRESENCE TUNE (the user's ابهت order): successive
+    // ladder spawns spread around the ring instead of stacking on the
+    // one best node. Staged against the stacking's best case: a
+    // STATIONARY man, whose ring has one fixed best point - before
+    // the tune every spawn took that same node and the force convoyed
+    // in down one street
+    {
+        const Vec3 man(2496.0f, -1666.0f, 13.5f);
+        stageAnchor(grove, man);
+        host.velocity = Vec3();
+        host.spawnPts.clear(); // the anchor's own spawn is not the fan
+        gCop.felony = 4096.0f;
+        for (float t = 0.0f; t < 20.0f && ladderLiving() < 4; t += dt) {
+            CopTick(dt, host.player);
+            host.StepAll(dt);
+        }
+        CHECK(ladderLiving() == 4, "the ladder filled for the spread proof (%d)", ladderLiving());
+        CHECK(host.spawnPts.size() >= 3, "three ladder spawns on the ledger (%d)", (int)host.spawnPts.size());
+        if (host.spawnPts.size() >= 3) {
+            float maxPair = 0.0f;
+            int distinct = 0;
+            for (size_t i = 0; i < host.spawnPts.size(); ++i) {
+                bool dup = false;
+                for (size_t j = 0; j < i; ++j)
+                    if ((host.spawnPts[i] - host.spawnPts[j]).Length() < 5.0f)
+                        dup = true;
+                if (!dup)
+                    ++distinct;
+                for (size_t j = i + 1; j < host.spawnPts.size(); ++j) {
+                    const float d = (host.spawnPts[i] - host.spawnPts[j]).Length();
+                    if (d > maxPair)
+                        maxPair = d;
+                }
+            }
+            CHECK(distinct >= 2, "the spawns did not all stack on one node (%d distinct points)", distinct);
+            CHECK(maxPair >= 25.0f, "the fan spans the ring (widest pair %.0f m)", maxPair);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -11364,6 +11727,11 @@ struct CopTestFakeHost : ForceFakeHost {
         bool up = false;
         Vec3 pos;
         float health = 100.0f;
+        Vec3 kickVel; // the momentum channel's throw, integrated by
+                      // StepTest with ground friction - the re-graded
+                      // run-over bar grades the HIT off the
+                      // displacement this produces, so the fake must
+                      // carry a thrown man the way the game's does
     };
     DecoyCar decoyCar;
     DecoyPed decoyPed;
@@ -11437,11 +11805,36 @@ struct CopTestFakeHost : ForceFakeHost {
         wedgePos = at;
         wedgeDir = Vec3(std::sin(headingDeg * 0.0174533f), std::cos(headingDeg * 0.0174533f), 0.0f);
     }
+    // the momentum channel on the decoys: the car's throw lands as
+    // speed along its own nose plus a yaw shove (the fake's plain
+    // reading of a launch); the ped's throw is a velocity he slides
+    // out in StepTest below
+    void KickVehicle(int veh, const Vec3& dv, float yawRate) override {
+        TestHost::KickVehicle(veh, dv, yawRate);
+        if (decoyCar.up && veh == 5001) {
+            const Vec3 f(std::sin(decoyCar.yaw), std::cos(decoyCar.yaw), 0.0f);
+            decoyCar.speed += dv.x * f.x + dv.y * f.y;
+            decoyCar.yaw += yawRate * 0.3f;
+        }
+    }
+    void KickPed(int ped, const Vec3& dv) override {
+        TestHost::KickPed(ped, dv);
+        if (decoyPed.up && ped == 6001)
+            decoyPed.kickVel = decoyPed.kickVel + dv;
+    }
     void StepTest(float dt) {
         StepAll(dt);
         if (decoyCar.up)
             MirrorStep(decoyCar.pos, decoyCar.yaw, decoyCar.speed, decoyCar.vel,
                        decoyCar.drivePt, decoyCar.cruise, decoyCar.cruise > 0.05f, dt);
+        if (decoyPed.up && decoyPed.kickVel.Length() > 0.05f) {
+            // a thrown man slides: ground friction at ~1.8/s of decay
+            // (a 20 m/s throw carries him ~11 m before he stops - the
+            // game's own slide is its business; the fake's is a plain
+            // exponential, enough to grade displacement honestly)
+            decoyPed.pos = decoyPed.pos + decoyPed.kickVel * dt;
+            decoyPed.kickVel = decoyPed.kickVel * std::fmax(0.0f, 1.0f - 1.8f * dt);
+        }
         if (wedged) {
             Body* b = Find(wedgeVeh);
             if (!b) {
