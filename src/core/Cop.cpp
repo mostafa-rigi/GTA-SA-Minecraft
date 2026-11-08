@@ -371,6 +371,30 @@ bool sBlockLive = false;  // a block stands (its point means something)
 float sWallOpenSide = 0.0f; // item 13: -1/+1 = the prey's open side
                           // (the other has world geometry within 9 m),
                           // 0 = both open or both walled
+// layer C's presence-and-shape state
+struct EscapeRec {        // items 3+20: a written escape - the
+    Vec3 junction, exit;  // junction he vanished at, the exit he was
+    float coolT = 0.0f;    // making for, and its reuse cooldown
+};
+EscapeRec sEscape[6];
+int sEscapeNext = 0, sEscapeCount = 0;
+int sAmbushSlot = -1;     // the posted ambush's unit (-1 = none)
+float sAmbushT = 0.0f;    // its remaining watch
+Vec3 sLastSeenPos;        // the prey's place at last sight, and his
+Vec3 sLastSeenVel;        // velocity then - the page itself keeps no
+                          // such snapshot (its pos is the anchor's
+                          // own body), so the escape book takes its
+                          // own, refreshed every seen tick
+bool sPreyOffRoad = false; // item 18: his nearest road node is 25+ m
+                           // away - he has left the graph
+Vec3 sWrecks[4];          // item 30: where units burned out - a
+int sWreckNext = 0, sWreckCount = 0; // wreck in a block's line IS
+                          // part of the line
+bool sRingOn = false;     // item 7: the ring around a pinned man
+int sRingSlot[4];
+Vec3 sRingCentre;
+bool sShoreOn = false;    // item 29: the shoreline watch
+int sShoreSlot[3];
 
 float WreckLineOf(const CopState& c) {
     return c.wreckLine > 0.0f ? c.wreckLine : kWreckLine;
@@ -1350,7 +1374,15 @@ void CopControl(CopState& c, float dt) {
         Vec3 from = c.pos;
         if (std::fabs(pPos.z - c.pos.z) > 4.0f && ((&c - gCops) % 2 == 1))
             from.z = pPos.z;
-        if (Page().fieldOk && VehicleFieldDescent(from, ahead, &far)) {
+        if (sPreyOffRoad) {
+            // item 18: he has left the road - grass, dirt, a car
+            // park, the beach. The descent would keep the unit on
+            // the graph while he cuts the field; instead the unit
+            // leaves the road too and the feed drives cross-country
+            // at the man himself, the same fallback the no-field
+            // case already uses, now chosen on purpose
+            target = pPos;
+        } else if (Page().fieldOk && VehicleFieldDescent(from, ahead, &far)) {
             target = far;
             if (VehicleFieldDescent(from, ahead * 2.2f, &farther)) {
                 Vec3 a = far - c.pos;
@@ -1644,7 +1676,20 @@ bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
 // full; the first in-band node wins, with a preference for the half of
 // the ring behind the player's motion (the spawner seats cars where the
 // player is not looking - ours approximates the looking with his vel).
+bool sSpawnFront = false; // item 5: the batter alternation's side
+bool sSpawnFlip = false;  // and its toggle, reset with the page so
+                          // every pursuit's first batter spawn is
+                          // the head-on one
 bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out, const Vec3* prefer = nullptr) {
+    // item 5: at the batter rung, alternate spawns prefer his front;
+    // the flip happens once per query (this function runs exactly
+    // once per spawn), and only at batter - at ordinary felonies the
+    // behind law stands untouched
+    sSpawnFront = false;
+    if (Page().felony >= kFelonyCap - 1.0f) {
+        sSpawnFlip = !sSpawnFlip;
+        sSpawnFront = sSpawnFlip;
+    }
     Vec3 back(0, -1, 0);
     {
         Vec3 v = gThreat.playerVel;
@@ -1670,7 +1715,13 @@ bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out, const Vec3* prefer = nul
         dirv.z = 0.0f;
         const float dl = dirv.Length();
         const float behind = dl > 0.5f ? (dirv * (1.0f / dl)).Dot(back) : 0.0f;
+        // item 5: at the batter rung the ladder stops arriving only
+        // from behind - alternate spawns score his FRONT hemisphere
+        // instead, so the next car greens up ahead of him, head-on
+        // (sSpawnFront flips once per point query, above the loop)
         float score = behind * 100.0f - std::fabs(d - kSpawnRing);
+        if (sSpawnFront)
+            score = -behind * 100.0f - std::fabs(d - kSpawnRing);
         // item 16's handover preference: among the in-band candidates
         // the one nearest the fallen unit's spot scores up - the band
         // itself (50..95 m from the man, on the road) is NOT widened:
@@ -1770,11 +1821,27 @@ void BlockSlotPos(const Vec3& at, const Vec3& segDir, int idx, Vec3* carAt, Vec3
 // (the plain roadblock, item 22's airport approach, and - at one
 // fewer car - item 30's wreck-discounted row in layer C)
 int PlaceBlockAt(const Vec3& at, const Vec3& segDir, int maxCars) {
+    // item 30: a wreck already standing in the line IS part of the
+    // line - when a burned-out unit lies within 45 m of the point,
+    // the first berth is left to the wreck and one car fewer is
+    // placed (never below a two-car line)
+    int startIdx = 0;
+    if (maxCars > 2) {
+        for (int i = 0; i < sWreckCount; ++i) {
+            Vec3 dw = sWrecks[i] - at;
+            dw.z = 0.0f;
+            if (dw.Length() < 45.0f) {
+                startIdx = 1;
+                Log("cop: a wreck already stands in this line - one berth is his, and one car fewer is placed");
+                break;
+            }
+        }
+    }
     int placed = 0;
-    for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed < maxCars; ++slot) {
+    for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed + startIdx < maxCars; ++slot) {
         if (UnitLiving(gCops[slot]))
             continue;
-        const int idx = placed;
+        const int idx = placed + startIdx;
         Vec3 carAt, face;
         BlockSlotPos(at, segDir, idx, &carAt, &face);
         if (SpawnUnit(slot, carAt, face, true)) {
@@ -1990,6 +2057,11 @@ bool TryAirportBlock(const Vec3& playerPos) {
 // units stand on opposite sides of him in range of the synchronised
 // hit (item 11). CopControl reads the assignments; nothing here drives.
 void TacticsTick(const Vec3& preyPos) {
+    // items 24/25: the aim overrides are THIS tick's property - the
+    // tactics tick owns them, clears every one, and re-earns the ones
+    // whose geometry still holds; CopControl only reads them
+    for (int slot = 0; slot < kMaxCopUnits; ++slot)
+        gCops[slot].aimOverrideOn = false;
     int ps[kMaxCopUnits];
     int n = 0;
     for (int slot = 0; slot < kMaxCopUnits; ++slot) {
@@ -2104,6 +2176,75 @@ void TacticsTick(const Vec3& preyPos) {
         gCops[flankR].role = 1;
     if (flankL >= 0 && sWallOpenSide <= 0.0f)
         gCops[flankL].role = 2;
+
+    // ---- item 24: traffic as a weapon. A civilian car standing in
+    // a pursuer's corridor, with the prey just past it, is not an
+    // obstacle - it is a free ram: the unit aims at the car itself
+    // for this second, and the host's own physics delivers the shove
+    // into him. The kick stays prey-only; what the traffic car does
+    // to him afterwards is the world's arithmetic, not a priced hit.
+    for (int i = 0; i < n; ++i) {
+        CopState& c = gCops[ps[i]];
+        std::vector<Host::VehicleInfo> near;
+        TheHost().NearbyVehicles(c.pos, 18.0f, near);
+        for (const Host::VehicleInfo& v : near) {
+            Vec3 to = v.pos - c.pos;
+            to.z = 0.0f;
+            const float d = to.Length();
+            if (d < 3.0f || d > 18.0f)
+                continue;
+            const Vec3 dirv = to * (1.0f / d);
+            if (dirv.Dot(c.fwd) < 0.7f)
+                continue;
+            const Vec3 right(c.fwd.y, -c.fwd.x, 0.0f);
+            if (std::fabs(to.Dot(right)) > 2.6f)
+                continue;
+            Vec3 past = preyPos - v.pos;
+            past.z = 0.0f;
+            if (past.Length() > 35.0f || past.Dot(dirv) < 0.0f)
+                continue;
+            c.aimOverride = v.pos;
+            c.aimOverrideOn = true;
+            break;
+        }
+    }
+
+    // ---- item 25: the wounded friend is spent as the last ram. A
+    // pursuer whose book is past 60% and who can barely move, with
+    // the prey within 25 m, is worth more as momentum than as a
+    // hunter: the nearest sound pursuer is aimed at his rear quarter
+    // for this second, to shove him into the hit. Read fresh each
+    // tick like item 24 - a geometry that stops holding stops being
+    // aimed at.
+    {
+        int wounded = -1;
+        for (int i = 0; i < n; ++i) {
+            const CopState& w = gCops[ps[i]];
+            if (w.totalDamage > 0.6f * WreckLineOf(w) && w.vel.Length() < 2.0f &&
+                (w.pos - preyPos).Length() < 25.0f) {
+                wounded = ps[i];
+                break;
+            }
+        }
+        if (wounded >= 0) {
+            int helper = -1;
+            float bestD = 1e18f;
+            for (int i = 0; i < n; ++i) {
+                if (ps[i] == wounded)
+                    continue;
+                const float d = (gCops[ps[i]].pos - gCops[wounded].pos).Length();
+                if (d < bestD) {
+                    bestD = d;
+                    helper = ps[i];
+                }
+            }
+            if (helper >= 0) {
+                const CopState& w = gCops[wounded];
+                gCops[helper].aimOverride = w.pos - w.fwd * 3.2f;
+                gCops[helper].aimOverrideOn = true;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2337,6 +2478,140 @@ void PostsTick(const Vec3& preyPos) {
             }
         }
     }
+
+    // ---- item 3, the memory used: a written junction he passes
+    // again earns its ambush in a later pursuit - one far unit
+    // pre-holds the recorded exit, once per record per 20 s, and
+    // never while another ambush stands
+    if (page.known && page.felony > kFelonyTrigger && sAmbushSlot < 0) {
+        for (int i = 0; i < sEscapeCount; ++i) {
+            EscapeRec& r = sEscape[i];
+            if (r.coolT > 0.0f)
+                continue;
+            Vec3 dj = preyPos - r.junction;
+            dj.z = 0.0f;
+            if (dj.Length() > 35.0f)
+                continue;
+            for (int s = 0; s < kMaxCopCars; ++s) {
+                CopState& u = gCops[s];
+                if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
+                    continue;
+                if ((u.pos - preyPos).Length() < 50.0f)
+                    continue;
+                u.holding = true;
+                u.holdArrived = false;
+                u.holdPoint = r.exit;
+                sAmbushSlot = s;
+                sAmbushT = 8.0f;
+                r.coolT = 20.0f;
+                Log("cop: the written escape is remembered - a far unit pre-holds its exit before he reaches it");
+                break;
+            }
+            break; // one ambush per posts tick
+        }
+    }
+
+    // ---- item 7: the ring. A man on foot, standing or nearly so,
+    // at felony 1319+, is surrounded where he stands: up to four
+    // ladder units hold a 7.5 m circle around him, engines on (they
+    // stay pursuers on the hold mechanism - the drive-through law
+    // governs a MOVING man; a pinned one is held, not run through).
+    // The ring breaks the moment he moves off its centre, mounts,
+    // or the felony falls under the line.
+    {
+        Vec3 vel = gThreat.playerVel;
+        vel.z = 0.0f;
+        const bool want = !gThreat.playerInVehicle && page.known &&
+                          page.felony >= 1319.0f && vel.Length() < 2.0f;
+        if (sRingOn) {
+            Vec3 dc = preyPos - sRingCentre;
+            dc.z = 0.0f;
+            if (!want || dc.Length() > 4.0f) {
+                for (int i = 0; i < 4; ++i) {
+                    if (sRingSlot[i] < 0)
+                        continue;
+                    CopState& u = gCops[sRingSlot[i]];
+                    u.holding = false;
+                    u.holdArrived = false;
+                    sRingSlot[i] = -1;
+                }
+                sRingOn = false;
+                Log("cop: the ring opens - he moves again");
+            }
+        }
+        if (want && !sRingOn) {
+            int n = 0;
+            for (int s = 0; s < kMaxCopCars && n < 4; ++s) {
+                CopState& u = gCops[s];
+                if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
+                    continue;
+                const float a = 0.7853982f + (float)n * 1.5707963f;
+                sRingSlot[n] = s;
+                u.holding = true;
+                u.holdArrived = false;
+                u.holdPoint = preyPos + Vec3(std::sin(a), std::cos(a), 0.0f) * 7.5f;
+                ++n;
+            }
+            if (n >= 2) {
+                sRingOn = true;
+                sRingCentre = preyPos;
+                Log("cop: the ring closes - %d units hold a circle around him, engines on", n);
+            } else {
+                for (int i = 0; i < n; ++i) {
+                    CopState& u = gCops[sRingSlot[i]];
+                    u.holding = false;
+                    sRingSlot[i] = -1;
+                }
+            }
+        }
+    }
+
+    // ---- item 29: the shoreline. While he swims the force cannot
+    // follow him into the water, so it holds the shore instead: up
+    // to three units post at the road points nearest him, spread
+    // around, and wait for the bank he must climb. Released the
+    // moment he is out of the water.
+    {
+        float wl = 0.0f;
+        const bool swimming = !gThreat.playerInVehicle &&
+                              TheHost().WaterLevel(preyPos, &wl) &&
+                              wl >= preyPos.z - 0.5f;
+        if (sShoreOn && !swimming) {
+            for (int i = 0; i < 3; ++i) {
+                if (sShoreSlot[i] < 0)
+                    continue;
+                CopState& u = gCops[sShoreSlot[i]];
+                u.holding = false;
+                u.holdArrived = false;
+                sShoreSlot[i] = -1;
+            }
+            sShoreOn = false;
+            Log("cop: he is out of the water - the shoreline watch stands down");
+        }
+        if (swimming && !sShoreOn) {
+            int n = 0;
+            for (int s = 0; s < kMaxCopCars && n < 3; ++s) {
+                CopState& u = gCops[s];
+                if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
+                    continue;
+                const float a = 0.5f + (float)n * 2.0943951f;
+                const Vec3 wantPt = preyPos + Vec3(std::sin(a), std::cos(a), 0.0f) * 30.0f;
+                const int node = VehicleNearestNode(wantPt, 60.0f);
+                Vec3 np;
+                if (node < 0 || !VehicleNodePos(node, &np))
+                    continue;
+                sShoreSlot[n] = s;
+                u.holding = true;
+                u.holdArrived = false;
+                u.holdPoint = np;
+                ++n;
+            }
+            if (n >= 1) {
+                sShoreOn = true;
+                Log("cop: he swims - %d units hold the shoreline around him", n);
+            }
+        }
+    }
 }
 
 } // namespace
@@ -2376,6 +2651,17 @@ void CopReset() {
     sIndoor = false;
     sIndoorFam[0] = '\0';
     sCreepT = 0.0f;
+    sBlockLive = false;
+    sEscapeNext = 0;
+    sEscapeCount = 0;
+    sAmbushSlot = -1;
+    sAmbushT = 0.0f;
+    sPreyOffRoad = false;
+    sWreckNext = 0;
+    sWreckCount = 0;
+    sRingOn = false;
+    sShoreOn = false;
+    sSpawnFlip = false;
     sBlockLive = false;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
@@ -2644,6 +2930,13 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (c.totalDamage > WreckLineOf(c) && c.mode != COP_WRECKED) {
             const bool wasPursuing = c.mode == COP_PURSUE;
             c.mode = COP_WRECKED;
+            c.holding = false; // a spent unit holds no post
+            // item 30: the wreck's place is written down - a block
+            // placed over it counts it as part of the line
+            sWrecks[sWreckNext] = c.pos;
+            sWreckNext = (sWreckNext + 1) % 4;
+            if (sWreckCount < 4)
+                ++sWreckCount;
             Log("cop: a unit's book is spent (%.0f of his points) - he retires and burns as one unit, car and driver together",
                 c.totalDamage);
             if (wasPursuing) {
@@ -2805,11 +3098,59 @@ void CopTick(float dt, const Vec3& playerPos) {
     if (anySeen) {
         page.unseenT = 0.0f;
         page.known = true;
+        sLastSeenPos = preyPos; // items 3+20's snapshot, taken while
+        sLastSeenVel = gThreat.playerVel; // sight is a fact, not at
+                                // the loss, when it is already gone
     } else if (page.known) {
         page.unseenT += dt;
         if (page.unseenT > kLostAfter) {
             page.known = false;
             Log("cop: position lost (256 unseen ticks)");
+            // items 3+20: a FLIGHT is written down - felony over the
+            // trigger and his speed at last sight over 8 m/s. The
+            // junction is his last known place, the exit the point
+            // his velocity was making for; the farthest pursuer (the
+            // near ones keep searching the spot) ambushes the exit
+            // for six seconds. A man who merely steps out of sight
+            // teaches the force nothing.
+            Vec3 v = sLastSeenVel;
+            v.z = 0.0f;
+            if (page.felony > kFelonyTrigger && v.Length() > 8.0f) {
+                EscapeRec& r = sEscape[sEscapeNext];
+                r.junction = sLastSeenPos;
+                r.exit = sLastSeenPos + v * (45.0f / v.Length());
+                r.coolT = 0.0f;
+                sEscapeNext = (sEscapeNext + 1) % 6;
+                if (sEscapeCount < 6)
+                    ++sEscapeCount;
+                if (sAmbushSlot >= 0 && gCops[sAmbushSlot].holding) {
+                    gCops[sAmbushSlot].holding = false;
+                    gCops[sAmbushSlot].holdArrived = false;
+                }
+                sAmbushSlot = -1;
+                int best = -1;
+                float bestD = 50.0f;
+                for (int s = 0; s < kMaxCopCars; ++s) {
+                    CopState& u = gCops[s];
+                    if (!UnitLiving(u) || u.mode != COP_PURSUE || u.holding)
+                        continue;
+                    const float d = (u.pos - sLastSeenPos).Length();
+                    if (d > bestD) {
+                        bestD = d;
+                        best = s;
+                    }
+                }
+                if (best >= 0) {
+                    CopState& u = gCops[best];
+                    u.holding = true;
+                    u.holdArrived = false;
+                    u.holdPoint = r.exit;
+                    sAmbushSlot = best;
+                    sAmbushT = 6.0f;
+                    Log("cop: the escape is written down (junction %.0f,%.0f) - a far unit ambushes the exit he was making for",
+                        r.junction.x, r.junction.y);
+                }
+            }
         }
     }
 
@@ -2967,6 +3308,23 @@ void CopTick(float dt, const Vec3& playerPos) {
             if (sHandoverT <= 0.0f)
                 sHandover = false;
         }
+        // layer C: the ambush's watch runs out the same way, and the
+        // written escapes' reuse cooldowns tick down with it
+        if (sAmbushT > 0.0f) {
+            sAmbushT -= dt;
+            if (sAmbushT <= 0.0f && sAmbushSlot >= 0) {
+                CopState& u = gCops[sAmbushSlot];
+                if (u.holding) {
+                    u.holding = false;
+                    u.holdArrived = false;
+                    Log("cop: the ambush watch is over - its unit hunts again");
+                }
+                sAmbushSlot = -1;
+            }
+        }
+        for (int i = 0; i < sEscapeCount; ++i)
+            if (sEscape[i].coolT > 0.0f)
+                sEscape[i].coolT -= dt;
     }
 
     // ---- the manager: pursuit transitions, the ladder, the cutoff
@@ -3150,6 +3508,9 @@ void CopTick(float dt, const Vec3& playerPos) {
     sTacticsT -= dt;
     if (sTacticsT <= 0.0f) {
         sTacticsT = 1.0f;
+        // item 18's witness, on the same cadence: he is off-road
+        // when no road node stands within 25 m of him
+        sPreyOffRoad = VehicleNearestNode(preyPos, 25.0f) < 0;
         TacticsTick(preyPos);
     }
     // the posts tick (layer B): the force's places - door camps, the
@@ -3183,6 +3544,19 @@ void CopTick(float dt, const Vec3& playerPos) {
                 Vec3 at;
                 if (LadderSpawnPoint(preyPos, &at, sHandover ? &sHandoverPos : nullptr)) {
                     if (SpawnUnit(slot, at, preyPos, false)) {
+                        // item 4 (the built half): the ladder's LAST
+                        // car, joining at the top rungs, is the heavy
+                        // one - a book half again as deep (202500)
+                        // and kicks carrying layer A's heavy
+                        // multiplier. The wall half is a visibly
+                        // bigger body: the Chicago mesh is baked
+                        // once, at its own size, and the draw has no
+                        // scale path - named in the report, not faked
+                        if (livingLadder == sWanted - 1 && page.felony >= 2457.0f) {
+                            gCops[slot].heavyUnit = true;
+                            gCops[slot].wreckLine = 202500.0f;
+                            Log("cop: the ladder's last car is the heavy one - his book runs half again as deep");
+                        }
                         Log("cop: the ladder sends another unit - he enters at %.0f m on the road (felony %.0f, wanted %d)",
                             (at - preyPos).Length(), page.felony, sWanted);
                         ++livingLadder;

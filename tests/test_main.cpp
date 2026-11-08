@@ -11287,6 +11287,15 @@ struct ForceFakeHost : TestHost {
                                  // presence pin reads the ladder's fan
                                  // off it (bodies move after spawning;
                                  // the ledger does not)
+    // item 24's staged traffic: civilian cars the core may read as
+    // weapons; a sim fills the list, the verb serves it honestly
+    std::vector<VehicleInfo> traffic;
+    void NearbyVehicles(const Vec3& centre, float radius,
+                        std::vector<VehicleInfo>& out) override {
+        for (const VehicleInfo& v : traffic)
+            if ((v.pos - centre).Length() <= radius)
+                out.push_back(v);
+    }
     int SpawnCopBody(const Vec3& at, float, const Vec3& face) override {
         Body b;
         b.pos = at;
@@ -12516,6 +12525,435 @@ static void TestCopForce() {
                 // starts here, so the floor CHOICE is graded eye-only
                 // in the report; what is pinned is the shifted half
                 // of the force reading his floor directly
+            }
+        }
+
+        // (ao) LAYER C - presence and shape: the force arrives as a
+        // force and stays one
+        {
+            const Vec3 G(2480, -1660, 13); // Grove, on the graph
+            // (ao1) item 23, the void pin: the graph is bidirectional
+            {
+                int edges = 0, oneWay = 0;
+                for (int n = 0; n < VehicleNodeCount(); ++n) {
+                    const int deg = VehicleNodeDegree(n);
+                    for (int e = 0; e < deg; ++e) {
+                        const int m = VehicleNodeEdgeTo(n, e);
+                        if (m < 0)
+                            continue;
+                        ++edges;
+                        bool back = false;
+                        const int d2 = VehicleNodeDegree(m);
+                        for (int e2 = 0; e2 < d2; ++e2)
+                            if (VehicleNodeEdgeTo(m, e2) == n) {
+                                back = true;
+                                break;
+                            }
+                        if (!back)
+                            ++oneWay;
+                    }
+                }
+                CHECK(oneWay == 0,
+                      "item 23: wrong-way needs no law - %d of %d directed edges lack a reverse",
+                      oneWay, edges);
+            }
+            // (ao2) item 4: the ladder's last car at the top rungs is
+            // the heavy one
+            {
+                host.player = G;
+                host.velocity = Vec3();
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                gCop.felony = 3000.0f;
+                for (float t = 0.0f; t < 15.0f && ladderLiving() < 4; t += dt) {
+                    host.player = G;
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() == 4, "item 4 stage: the ladder is full");
+                int heavies = 0;
+                bool linesOk = true;
+                for (int sl = 0; sl < kMaxCopCars; ++sl) {
+                    if (gCops[sl].veh < 0 || gCops[sl].mode == COP_NONE)
+                        continue;
+                    if (gCops[sl].heavyUnit) {
+                        ++heavies;
+                        if (gCops[sl].wreckLine != 202500.0f)
+                            linesOk = false;
+                    } else if (gCops[sl].wreckLine != 135000.0f)
+                        linesOk = false; // SpawnUnit writes the
+                                          // standing line at birth
+                }
+                CHECK(heavies == 1 && linesOk,
+                      "item 4: exactly one heavy unit, his book line 202500, the rest the standing 135000 (heavies %d)",
+                      heavies);
+            }
+            // (ao3) item 5: at batter, spawns alternate to his front
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3(0, 20, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -30, 0), G);
+                gCop.felony = 4096.0f;
+                const size_t base = host.spawnPts.size();
+                for (float t = 0.0f; t < 15.0f && host.spawnPts.size() < base + 2; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, G);
+                }
+                CHECK(host.spawnPts.size() >= base + 2,
+                      "item 5 stage: two batter spawns recorded (%d)",
+                      (int)(host.spawnPts.size() - base));
+                if (host.spawnPts.size() >= base + 2) {
+                    const float y1 = host.spawnPts[base].y - G.y;
+                    const float y2 = host.spawnPts[base + 1].y - G.y;
+                    CHECK(y1 > 15.0f && y2 < -15.0f,
+                          "item 5: at batter the spawns alternate front (%.0f) then behind (%.0f)",
+                          y1, y2);
+                }
+            }
+            // (ao4) items 3+20: a flight is written down, its exit
+            // ambushed at once, and the junction remembered later
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3(0, 20, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -60, 0), G);
+                gCop.felony = 3000.0f;
+                for (float t = 0.0f; t < 12.0f && ladderLiving() < 3; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() >= 3 && gCop.known,
+                      "item 3 stage: the force is up and holds his position");
+                // freeze the force on an exact 55 m ring, facing him:
+                // inside the hot sight cone (~64 m), outside the
+                // ambush pick's 50 m floor - where they converged to
+                // is the chase's business, not this law's staging
+                Vec3 spots[kMaxCopCars];
+                for (int sl = 0; sl < kMaxCopCars; ++sl) {
+                    const float a = (float)sl * 2.1f;
+                    spots[sl] = G + Vec3(std::sin(a), std::cos(a), 0.0f) * 55.0f;
+                    if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                        b->pos = spots[sl];
+                        b->vel = Vec3();
+                        b->yaw = std::atan2(G.x - spots[sl].x, G.y - spots[sl].y);
+                    }
+                }
+                const Vec3 farAway = G + Vec3(0, 400, 0);
+                bool ambushed = false;
+                for (float t = 0.0f; t < 9.0f && !ambushed; t += dt) {
+                    host.player = farAway;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, farAway);
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                            b->pos = spots[sl];
+                            b->vel = Vec3();
+                        }
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (gCops[sl].holding &&
+                            (gCops[sl].holdPoint - (G + Vec3(0, 45, 0))).Length() < 5.0f)
+                            ambushed = true;
+                }
+                CHECK(!gCop.known && ambushed,
+                      "item 20: the flight's exit is ambushed the moment the position is lost");
+                // the watch runs out; then he passes the written
+                // junction again and the memory posts it anew
+                for (float t = 0.0f; t < 7.0f; t += dt) {
+                    host.player = farAway;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, farAway);
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                            b->pos = spots[sl];
+                            b->vel = Vec3();
+                        }
+                }
+                bool reposted = false;
+                const Vec3 backNear = G + Vec3(10, 0, 0);
+                for (float t = 0.0f; t < 4.0f && !reposted; t += dt) {
+                    host.player = backNear;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, backNear);
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                            b->pos = spots[sl];
+                            b->vel = Vec3();
+                        }
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (gCops[sl].holding &&
+                            (gCops[sl].holdPoint - (G + Vec3(0, 45, 0))).Length() < 5.0f)
+                            reposted = true;
+                }
+                CHECK(reposted,
+                      "item 3: passing the written junction again posts its exit ambush anew");
+            }
+            // (ao5) item 7: the ring around a pinned man
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3();
+                host.vehicle = -1;
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                gCop.felony = 2000.0f;
+                host.vehicle = -1; // on foot for the ring
+                int settled = 0;
+                for (float t = 0.0f; t < 12.0f && settled < 2; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    settled = 0;
+                    for (int sl = 0; sl < kMaxCopCars; ++sl) {
+                        if (!gCops[sl].holding || !gCops[sl].holdArrived)
+                            continue;
+                        const float d = (gCops[sl].pos - G).Length();
+                        if (d > 5.0f && d < 11.0f)
+                            ++settled;
+                    }
+                }
+                CHECK(settled >= 2,
+                      "item 7: the ring settles - %d units hold the circle around him", settled);
+                int ringSlots[4];
+                int ringN = 0;
+                for (int sl = 0; sl < kMaxCopCars && ringN < 4; ++sl)
+                    if (gCops[sl].holding)
+                        ringSlots[ringN++] = sl;
+                bool released = false;
+                Vec3 moved = G;
+                for (float t = 0.0f; t < 3.0f && !released; t += dt) {
+                    // he MOVES off - a man who merely stands somewhere
+                    // else is a new centre and the ring rightly
+                    // re-forms on him there (the first staging read
+                    // exactly that re-forming as a failed release)
+                    moved = moved + Vec3(10.0f * dt, 0, 0);
+                    host.player = moved;
+                    host.velocity = Vec3(10, 0, 0);
+                    CopTick(dt, moved);
+                    host.StepAll(dt);
+                    released = true;
+                    for (int i = 0; i < ringN; ++i)
+                        if (gCops[ringSlots[i]].holding)
+                            released = false;
+                }
+                CHECK(released, "item 7: he moves off the centre and the ring opens");
+            }
+            // (ao6) item 29: the shoreline while he swims
+            {
+                CopReset();
+                host.sea = 13.0f; // the water stands at his height
+                host.player = G;
+                host.velocity = Vec3();
+                host.vehicle = -1;
+                stageAnchor(G + Vec3(0, -30, 0), G);
+                gCop.felony = 2000.0f;
+                host.vehicle = -1; // on foot, swimming
+                bool posted = false;
+                for (float t = 0.0f; t < 12.0f && !posted; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (gCops[sl].holding && gCops[sl].holdArrived &&
+                            (gCops[sl].holdPoint - G).Length() < 55.0f)
+                            posted = true;
+                }
+                CHECK(posted, "item 29: he swims and a unit holds the shoreline by him");
+                int shoreSlots[3];
+                int shoreN = 0;
+                for (int sl = 0; sl < kMaxCopCars && shoreN < 3; ++sl)
+                    if (gCops[sl].holding)
+                        shoreSlots[shoreN++] = sl;
+                host.sea = -1000.0f;
+                bool down = false;
+                Vec3 ashore = G;
+                for (float t = 0.0f; t < 3.0f && !down; t += dt) {
+                    // he climbs out and MOVES - a standing man ashore
+                    // would be re-posted by the ring law in the same
+                    // tick, which is that law working, not this one
+                    // failing to stand down
+                    ashore = ashore + Vec3(8.0f * dt, 0, 0);
+                    host.player = ashore;
+                    host.velocity = Vec3(8, 0, 0);
+                    CopTick(dt, ashore);
+                    host.StepAll(dt);
+                    down = true;
+                    for (int i = 0; i < shoreN; ++i)
+                        if (gCops[shoreSlots[i]].holding)
+                            down = false;
+                }
+                CHECK(down, "item 29: out of the water, the shoreline watch stands down");
+            }
+            // (ao7) item 18: off-road, the unit leaves the road too
+            {
+                CopReset();
+                Vec3 Q;
+                bool found = false;
+                for (float x = 2350.0f; x <= 2650.0f && !found; x += 10.0f)
+                    for (float y = -1850.0f; y <= -1550.0f && !found; y += 10.0f) {
+                        const Vec3 cand(x, y, 13.0f);
+                        if (VehicleNearestNode(cand, 25.0f) >= 0)
+                            continue;
+                        const int n = VehicleNearestNode(cand, 90.0f);
+                        Vec3 np;
+                        if (n < 0 || !VehicleNodePos(n, &np))
+                            continue;
+                        const float d = (np - cand).Length();
+                        if (d < 50.0f || d > 90.0f)
+                            continue;
+                        Q = cand;
+                        found = true;
+                    }
+                CHECK(found, "item 18 stage: an off-road field stands by the road");
+                if (found) {
+                    const int nn = VehicleNearestNode(Q, 90.0f);
+                    Vec3 np;
+                    VehicleNodePos(nn, &np);
+                    host.player = Q;
+                    host.velocity = Vec3();
+                    host.vehicle = 42;
+                    stageAnchor(np, Q);
+                    gCop.felony = 2000.0f;
+                    const float d0 = (gCop.pos - Q).Length();
+                    float dEnd = d0;
+                    for (float t = 0.0f; t < 4.0f; t += dt) {
+                        host.player = Q;
+                        host.velocity = Vec3();
+                        CopTick(dt, Q);
+                        host.StepAll(dt);
+                        dEnd = (gCop.pos - Q).Length();
+                    }
+                    CHECK((gCop.target - Q).Length() < 6.0f && dEnd < d0 - 8.0f,
+                          "item 18: off-road, the unit's aim is the man himself and it closes cross-country (%.0f -> %.0f m)",
+                          d0, dEnd);
+                }
+            }
+            // (ao8) item 24: the traffic car in the corridor is aimed
+            // at as a weapon
+            {
+                CopReset();
+                host.traffic.clear();
+                Host::VehicleInfo tv;
+                tv.veh = 777;
+                tv.pos = G + Vec3(1, -9, 0);
+                host.traffic.push_back(tv);
+                host.player = G;
+                host.velocity = Vec3(0, 5, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -18, 0), G);
+                gCop.felony = 2000.0f;
+                bool aimed = false;
+                for (float t = 0.0f; t < 5.0f && !aimed; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 5, 0);
+                    // the anchor is pinned in the corridor: a free
+                    // anchor drives through the staged geometry in
+                    // under a second, before the first tactics tick
+                    // can read it (the first staging's miss)
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = G + Vec3(0, -16, 0);
+                        b->vel = Vec3();
+                        b->yaw = 0.0f;
+                    }
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    if ((gCop.target - tv.pos).Length() < 1.5f)
+                        aimed = true;
+                }
+                CHECK(aimed, "item 24: the corridor's traffic car becomes the unit's aim");
+                host.traffic.clear();
+            }
+            // (ao9) item 25: the wounded friend is the helper's aim
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3(0, 8, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -20, 0), G);
+                gCop.felony = 2000.0f;
+                for (float t = 0.0f; t < 12.0f && ladderLiving() < 2; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 8, 0);
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() >= 2, "item 25 stage: two units are up");
+                if (ladderLiving() >= 2) {
+                    const Vec3 wSpot = G + Vec3(6, -10, 0);
+                    gCops[1].totalDamage = 100000.0f; // past 60% of his
+                        // book, short of the retirement line
+                    bool aimed = false;
+                    for (float t = 0.0f; t < 5.0f && !aimed; t += dt) {
+                        host.player = G;
+                        host.velocity = Vec3(0, 8, 0);
+                        if (ForceFakeHost::Body* b = host.Find(gCops[1].veh)) {
+                            b->pos = wSpot;
+                            b->vel = Vec3();
+                            b->yaw = 0.0f; // facing north
+                        }
+                        CopTick(dt, G);
+                        host.StepAll(dt);
+                        if (gCop.aimOverrideOn &&
+                            (gCop.aimOverride - (wSpot + Vec3(0, -3.2f, 0))).Length() < 2.0f)
+                            aimed = true;
+                    }
+                    CHECK(aimed,
+                          "item 25: the sound unit is aimed at the wounded friend's rear quarter");
+                }
+            }
+            // (ao10) item 30: a wreck in the line is part of the line
+            {
+                CopReset();
+                std::vector<Vec3> route;
+                float routeLen = 0.0f;
+                VehicleRoute(Vec3(2480, -1660, 13), Vec3(1690, -2280, 13), &route, &routeLen);
+                RoadWalker w;
+                w.Build(route);
+                const float s0 = 700.0f;
+                Vec3 dir0;
+                const Vec3 startP = w.PosAt(s0, &dir0);
+                host.player = startP;
+                host.velocity = dir0 * 15.0f;
+                host.vehicle = 42;
+                stageAnchor(w.PosAt(s0 - 25.0f, &dir0), startP);
+                gCop.felony = 1200.0f;
+                for (float t = 0.0f; t < 12.0f && ladderLiving() < 2; t += dt) {
+                    host.player = startP;
+                    host.velocity = dir0 * 15.0f;
+                    CopTick(dt, startP);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() >= 2, "item 30 stage: a second unit is up");
+                // burn it where the coming block will stand
+                const Vec3 wreckSpot = w.PosAt(s0 + 80.0f, &dir0);
+                if (ForceFakeHost::Body* b = host.Find(gCops[1].veh))
+                    b->pos = wreckSpot;
+                gCops[1].totalDamage = 200000.0f;
+                CopTick(dt, startP);
+                host.StepAll(dt);
+                // dip and re-arm the block chain, then run at it
+                gCop.felony = 1000.0f;
+                CopTick(dt, startP);
+                gCop.felony = 1400.0f;
+                float s = s0;
+                for (float t = 0.0f; t < 14.0f && CopBlockCount() == 0; t += dt) {
+                    s += 15.0f * dt;
+                    Vec3 dir;
+                    const Vec3 p = w.PosAt(s, &dir);
+                    host.player = p;
+                    host.velocity = dir * 15.0f;
+                    CopTick(dt, p);
+                    host.StepAll(dt);
+                }
+                CHECK(CopBlockCount() == kMaxBlockCars - 1,
+                      "item 30: the block over the wreck places one car fewer - the wreck holds its berth (cars %d)",
+                      CopBlockCount());
             }
         }
     }
