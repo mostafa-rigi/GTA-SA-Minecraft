@@ -978,14 +978,15 @@ void MobsRender(float light) {
         CVector up(0, 0, 1);
         CVector right(fwd.y, -fwd.x, 0.0f);
         float r = 1.0f, g = 1.0f, b = 1.0f;
-        if (m.death >= 0.0f && m.kind != MOB_SOLDIER) {
+        if (m.death >= 0.0f && m.kind != MOB_SOLDIER && m.kind != MOB_PO) {
             Vec3 r2 = right, u2 = up;
             DeathTilt(m.death, r2, u2); // the dead animal tips over onto its side
             right = ToGta(r2);
             up = ToGta(u2);
         }
         // (the soldier falls with Counter-Strike's own death animation instead -
-        // SoldierModel poses it; a Minecraft tip-over on top of it would double the fall)
+        // SoldierModel poses it; a Minecraft tip-over on top of it would double the fall.
+        // Po falls with his own death clip for the same reason.)
         if (m.hurt > 0.0f || m.death >= 0.0f) {
             g = 0.45f;
             b = 0.45f;
@@ -1009,6 +1010,13 @@ void MobsRender(float light) {
             // and set the fall; here the fall's clock and its fade simply run
             a.soldier.fullTime = m.death;
             a.soldier.fade = Clamp(m.death / kSoldierFadeSeconds, 0.0f, 1.0f);
+        }
+        a.po = m.poDraw;
+        if (m.death >= 0.0f && m.kind == MOB_PO) {
+            // Po's death likewise: Kill snapshotted and set PP_DIE; the
+            // render drives the clip's clock and its fade off the death age
+            a.po.time = m.death;
+            a.po.fade = Clamp(m.death / kPoFadeSeconds, 0.0f, 1.0f);
         }
         DrawMob(m.kind, base, a, light, r, g, b);
         if (m.groundZ > -900.0f)

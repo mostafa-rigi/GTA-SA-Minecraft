@@ -6,6 +6,7 @@
 #include "Image.h"
 #include "NavGraph.h"
 #include "Other.h"
+#include "PoModel.h"
 #include "RenderWare.h"
 #include "SoldierModel.h"
 
@@ -13,6 +14,7 @@ namespace mc {
 
 Tex gAtlasTex, gGuiTex, gFontTex, gEntityTex, gMenuTex;
 Tex gSoldierTex[3];
+Tex gPoTex;
 Tex gCopTex[kCopTexMax];
 int gCopTexLoaded = 0; // how many of the bin's textures actually loaded
 
@@ -224,6 +226,42 @@ bool CopBodyFilesReady() {
     return CopCarModelReady() && gCopTexLoaded == CopCarTextureCount();
 }
 
+// Po's own files live in the MinecraftSA\po folder (the soldier's folder
+// discipline: the folder first, a loose file as the fallback).
+static std::string PoFilePath(const char* file) {
+    const std::string inFolder = ModPath((std::string("po\\") + file).c_str());
+    FILE* probe = std::fopen(inFolder.c_str(), "rb");
+    if (probe) {
+        std::fclose(probe);
+        return inFolder;
+    }
+    return ModPath(file);
+}
+
+// Po's model file, read whole and handed to the core, and his one texture.
+// A missing or broken file is not fatal to the mod - it only means there
+// is no Po, and the core's loader has already shouted why.
+static void LoadPoFiles() {
+    LoadPngAt(PoFilePath("po_tex0.png"), "po_tex0.png", gPoTex);
+    const std::string path = PoFilePath("po.bin");
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        Log("ERROR: could not load %s - Po cannot appear without his model file", path.c_str());
+        return;
+    }
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes(size > 0 ? (size_t)size : 0);
+    if (size <= 0 || std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size()) {
+        Log("ERROR: could not read %s - Po cannot appear", path.c_str());
+        std::fclose(f);
+        return;
+    }
+    std::fclose(f);
+    LoadPoModel(bytes.data(), bytes.size());
+}
+
 bool LoadTextures() {
     bool ok = LoadPng("atlas.png", gAtlasTex, &gAtlasAlpha);
     ok &= LoadPng("gui.png", gGuiTex);
@@ -232,6 +270,7 @@ bool LoadTextures() {
     LoadPng("menu.png", gMenuTex); // without it GTA's own menu stays
     LoadSoldierFiles();           // the soldier is an extra, never a reason to fail the mod
     LoadCopFiles();               // the cop's body likewise
+    LoadPoFiles();                // Po likewise
     return ok;
 }
 
@@ -255,6 +294,8 @@ void UnloadTextures() {
         Free(t);
     gCopTexLoaded = 0;
     UnloadCopCarModel();
+    Free(gPoTex);
+    UnloadPoModel();
 }
 
 } // namespace mc
