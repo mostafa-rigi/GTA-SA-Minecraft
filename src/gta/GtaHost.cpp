@@ -108,6 +108,17 @@ struct GtaHost : Host {
         CWorld::pIgnoreEntity = old;
         return blocked;
     }
+    bool LineBlockedWorld(const Vec3& a, const Vec3& b) override {
+        // solid world alone: buildings and objects read, vehicles and
+        // peds do not - a pursuing unit's corner probes must never read
+        // a traffic car as a wall (the plough law, core side: the feed
+        // holds its pace through movable obstacles; only the geometry
+        // the host itself cannot pass may read blocked)
+        CColPoint cp;
+        CEntity* e = nullptr;
+        return CWorld::ProcessLineOfSight(a, b, cp, e, true, false, false, true, false, false, false, false) &&
+               !IsCollisionObject(e);
+    }
     bool WaterLevel(const Vec3& at, float* level) override {
         return CWaterLevel::GetWaterLevelNoWaves(at.x, at.y, at.z, level);
     }
@@ -271,6 +282,10 @@ struct GtaHost : Host {
         return GtaDecoyPedReport(ped, pos, health);
     }
     void RetireDecoyPed(int ped) override { GtaRetireDecoyPed(ped); }
+    void KickVehicle(int veh, const Vec3& dv, float yawRate) override {
+        GtaKickVehicle(veh, dv, yawRate);
+    }
+    void KickPed(int ped, const Vec3& dv) override { GtaKickPed(ped, dv); }
     // ---- the boss's vehicle senses (workstream L)
     bool PlayerVehiclePose(Vec3* centre, Vec3* forward, Vec3* driverChest, Vec3* velocity) override {
         CPlayerPed* ped = FindPlayerPed();

@@ -48,5 +48,10 @@ void GtaRetireDecoy(int veh);
 int GtaSpawnDecoyPed(const Vec3& at);
 bool GtaDecoyPedReport(int ped, Vec3* pos, float* health);
 void GtaRetireDecoyPed(int ped);
+// the momentum channel's hands (the 5x update): land the core's priced
+// throw on a vehicle (dv m/s added, yawRate rad/s of spin) or on a man
+// on foot (ped 0 = the player himself, otherwise a decoy ped)
+void GtaKickVehicle(int veh, const Vec3& dv, float yawRate);
+void GtaKickPed(int ped, const Vec3& dv);
 
 } // namespace mc

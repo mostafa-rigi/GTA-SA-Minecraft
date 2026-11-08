@@ -367,8 +367,17 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
                 // closest honest reading of both (traffic cruise
                 // settings live in the same range) - the read-back in
                 // the Report prints what landed, and the spike's speed
-                // lines are the pace's judge
-                ap.m_nCruiseSpeed = (char)Clamp(b.apCruise, 0.0f, 60.0f);
+                // lines are the pace's judge.
+                // THE 5x UPDATE: the char is a NARROW field - at the
+                // new pace rows the brain's ask (up to 266) cannot
+                // fit it, so it saturates at 127, the most a signed
+                // char holds (the safe reading under either signedness
+                // the SDK header allows), while the float beside it
+                // carries the true ask whole. Neither is dressed as
+                // the other: the Report reads both back and the unit
+                // line prints the pair, so what ProcessAI was actually
+                // handed is measured every second, not assumed.
+                ap.m_nCruiseSpeed = (char)Clamp(b.apCruise, 0.0f, 127.0f);
                 ap.m_fMaxTrafficSpeed = b.apCruise;
                 b.apWritten = b.apTarget;
                 b.apWrittenCruise = b.apCruise;
@@ -947,6 +956,9 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->status = (int)v->m_nStatus;
     out->mission = (int)v->m_autoPilot.m_nCarMission;
     out->cruise = (int)v->m_autoPilot.m_nCruiseSpeed;
+    out->cruiseF = v->m_autoPilot.m_fMaxTrafficSpeed; // the float's
+        // landing, read back beside the char's (the 5x update: the
+        // pair is the clipping's receipt)
     if (CPed* drv = LiveDriver(s))
         out->driverInVehicle = drv->bInVehicle;
     // the impact channel: the car's own velocity change since the last
@@ -1255,7 +1267,8 @@ void GtaDecoyCarDrive(int veh, const Vec3& at, float cruiseMps) {
     ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
     ap.m_nCarDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
     ap.m_vecDestinationCoors = CVector(at.x, at.y, at.z);
-    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 60.0f);
+    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 127.0f); // the same
+        // saturation law as the cop mirror's (the 5x update)
     ap.m_fMaxTrafficSpeed = cruiseMps;
     v->bEngineOn = true;
     v->bIsHandbrakeOn = false;
@@ -1374,6 +1387,50 @@ void GtaRetireDecoyPed(int ped) {
         delete man;
     }
     s = DecoyPedState();
+}
+
+// ---- the momentum channel's hands (the 5x update): the core prices
+// the throw and names its size; these two only land it on the body.
+// Resolution follows this file's one discipline: a decoy is found in
+// its own table and proven live through its pool; any other vehicle
+// number is a pool ref and is touched only after GetAtRef resolves it
+// AND its own GetRef reproduces the number (the round-1 crash lesson -
+// a handle is never an index). The velocity fields are per-frame at
+// this host's 50 fps (the Report's x50 read-back is the same fact
+// read the other way), so the core's m/s divides by 50 on the way in;
+// the turn speed beside it is the same per-frame family and takes the
+// yaw rate on the same scale - the spin's exact felt size is the
+// game's own integration, the linear throw is the graded channel.
+void GtaKickVehicle(int veh, const Vec3& dv, float yawRate) {
+    CVehicle* v = nullptr;
+    if (DecoyCarState* dc = FindDecoyCar(veh))
+        v = LiveDecoyVeh(*dc);
+    if (!v) {
+        auto* vpool = CPools::ms_pVehiclePool;
+        if (vpool && veh > 0) {
+            CVehicle* cand = vpool->GetAtRef(veh);
+            if (cand && vpool->GetRef(cand) == veh)
+                v = cand;
+        }
+    }
+    if (!v)
+        return;
+    v->m_vecMoveSpeed += CVector(dv.x / 50.0f, dv.y / 50.0f, dv.z / 50.0f);
+    v->m_vecTurnSpeed.z += yawRate / 50.0f;
+}
+
+void GtaKickPed(int ped, const Vec3& dv) {
+    CPed* man = nullptr;
+    if (ped == 0)
+        man = FindPlayerPed();
+    else if (DecoyPedState* dp = FindDecoyPed(ped))
+        man = LiveDecoyPed(*dp);
+    if (!man)
+        return;
+    // a man on his feet given a move speed is the host's own thrown
+    // body from here - slide, stumble or fall is its physics' word,
+    // the channel only guarantees the velocity lands whole
+    man->m_vecMoveSpeed += CVector(dv.x / 50.0f, dv.y / 50.0f, dv.z / 50.0f);
 }
 
 } // namespace mc
