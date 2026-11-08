@@ -90,6 +90,17 @@ float sDirStallT = 0.0f;   // the current standstill inside the ram
                            // manoeuvre, and its worst (the loop-back
                            // stall witness)
 float sDirStallWorst = 0.0f;
+// the channel repair's witness: the anchor's hook stamp count must
+// keep ADVANCING while the core commands drive - the 14:44 build's
+// failure was a channel that never reached physics at all, and a
+// silent door (wrong desk, unpatched table) reads exactly like it:
+// stamps frozen under a live gas order. Two seconds of commanded
+// drive without one new stamp convicts the door itself, apart from
+// anything the car then does or does not do
+int sDirHookLast = -1;     // the anchor's stamp count at the last tick
+float sDirHookStallT = 0.0f; // seconds of ordered drive, no new stamp
+bool sDirHookBad = false;  // the door stood silent under orders
+int sDirHookTotal = 0;     // stamps landed across the whole act
 // pursuit
 float sStartDist = 0.0f;
 bool sPursuitOpen = false;
@@ -488,6 +499,10 @@ void PhaseDirect(float dt) {
         sDirPassMax = 0.0f;
         sDirStallT = 0.0f;
         sDirStallWorst = 0.0f;
+        sDirHookLast = -1;
+        sDirHookStallT = 0.0f;
+        sDirHookBad = false;
+        sDirHookTotal = 0;
         // stage 0: a man standing back at the spike's start, felony
         // at the ladder's top - the far hunt back along the road is
         // the pace order. He stands THERE, not ahead of the anchor's
@@ -522,6 +537,24 @@ void PhaseDirect(float dt) {
     // reported (-1) is not evidence either way
     if (a.repMission > 0)
         sDirMissionBad = true;
+    // the door witness rides beside it: while the core's gas order on
+    // the anchor stands (an order to move, in any manoeuvre), the
+    // channel's stamp count must advance - the count is the bridge's
+    // own, stashed by the same report. A count that never starts is
+    // a door that was never installed; a count that stalls under
+    // orders is a door physics never hears. Either convicts the
+    // channel before any manoeuvre's bar is even read
+    if (sDirHookLast < 0)
+        sDirHookLast = a.repHookStamps;
+    if (a.repHookStamps > sDirHookLast) {
+        sDirHookTotal += a.repHookStamps - sDirHookLast;
+        sDirHookLast = a.repHookStamps;
+        sDirHookStallT = 0.0f;
+    } else if (a.gas > 0.3f) {
+        sDirHookStallT += dt;
+        if (sDirHookStallT > 2.0f)
+            sDirHookBad = true;
+    }
     if (sDirStage == 0) {
         if (std::fabs(a.speed) > sDirPeak)
             sDirPeak = std::fabs(a.speed);
@@ -655,14 +688,16 @@ void PhaseDirect(float dt) {
         const bool pace = sDirPeak >= 25.0f;
         const bool settled = sDirHoldT >= 10.0f && sDirEntries <= 3;
         const bool ram = contact && sDirPassMax >= 5.0f && sDirStallWorst <= 1.5f;
-        Grade("direct", pace && settled && ram && !sDirMissionBad, true,
+        Grade("direct", pace && settled && ram && !sDirMissionBad && !sDirHookBad, true,
               "pace %.1f m/s (bar >=25) | settle held %.0f s worst %.1f m entries %d"
               " (bar: 10 continuous s inside 4 m, <=3 entries) | ram contact %s, carried %.1f m past,"
               " worst stall %.1f s (bar: hit + >=5 m, stall <=1.5 s)"
-              " | body mission %s (bar: NONE throughout)",
+              " | body mission %s (bar: NONE throughout)"
+              " | channel stamps %d, door %s (bar: advancing under orders)",
               sDirPeak, sDirHoldT, sDirHoldMax, sDirEntries,
               contact ? "yes" : "NO", sDirPassMax, sDirStallWorst,
-              sDirMissionBad ? "CLAIMED" : "none");
+              sDirMissionBad ? "CLAIMED" : "none",
+              sDirHookTotal, sDirHookBad ? "SILENT" : "stamping");
         CopPreyOverride(-1, -1);
         if (sDecoyCar >= 0) {
             TheHost().RetireDecoy(sDecoyCar);

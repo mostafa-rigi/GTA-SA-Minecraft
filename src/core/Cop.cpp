@@ -921,10 +921,12 @@ void SpikeDrive(float dt) {
         Host::CopBody rep;
         if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok)
             Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f"
+                " | hook gas %.2f brake %.2f steer %.2f n %d"
                 " | engine %d handbrake %d broken %d status %d mission %d cruise %d/%.0f driver-in %d",
                 rep.pos.x, rep.pos.y, rep.pos.z,
                 rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z,
                 rep.gas, rep.brake, rep.steer,
+                rep.hookGas, rep.hookBrake, rep.hookSteer, rep.hookStamps,
                 rep.engineOn ? 1 : 0, rep.handbrake ? 1 : 0, rep.engineBroken ? 1 : 0,
                 rep.status, rep.mission, rep.cruise, rep.cruiseF, rep.driverInVehicle ? 1 : 0);
     }
@@ -3128,6 +3130,14 @@ void CopTick(float dt, const Vec3& playerPos) {
         c.repSteer = rep.steer;
         c.repGas = rep.gas;
         c.repBrake = rep.brake;
+        // the channel repair's third reading rides the same stash:
+        // what the ProcessAI-door last stamped on this body and how
+        // many frames it has stamped - the direct act grades its
+        // advance, the unit line prints it beside cmd and body
+        c.repHookSteer = rep.hookSteer;
+        c.repHookGas = rep.hookGas;
+        c.repHookBrake = rep.hookBrake;
+        c.repHookStamps = rep.hookStamps;
         c.repMission = rep.mission;
         c.repCruise = rep.cruise;
         c.repCruiseF = rep.cruiseF;
@@ -4081,17 +4091,27 @@ void CopTick(float dt, const Vec3& playerPos) {
         // `body` is the word the car ANSWERED with on its last report
         // - commanded vs landed, every second, beside the mission the
         // body reports (which must read 0/NONE under direct drive).
+        // THE CHANNEL REPAIR adds the third reading between them:
+        // `hook` is what the bridge's ProcessAI replacement stamped
+        // at the desk physics reads (and n, its stamp count) - the
+        // 14:44 session proved cmd and body alone can tell opposite
+        // stories about the same fields at different frame points;
+        // the hook segment is the reading at the point that decides
+        // motion, and a session convicts the channel by comparing
+        // all three.
         // The aim distance is the brain's own target again (the feed
         // point it replaced in round 5 no longer exists).
         c.unitLogT -= dt;
         if (c.unitLogT <= 0.0f) {
             c.unitLogT = 1.0f;
             Log("cop unit %d: mode %d speed %.1f want %.1f | cmd steer %.2f gas %.2f brake %.2f"
-                " | body steer %.2f gas %.2f brake %.2f mission %d cruise %d/%.0f siren %d"
+                " | body steer %.2f gas %.2f brake %.2f | hook steer %.2f gas %.2f brake %.2f n %d"
+                " | mission %d cruise %d/%.0f siren %d"
                 " | aim %.0f m | felony %.0f known %d seen %d kicks %d",
                 slot, (int)c.mode, c.speed, c.desiredSpeed,
                 c.cmdSteer, c.gas, c.brake,
                 c.repSteer, c.repGas, c.repBrake,
+                c.repHookSteer, c.repHookGas, c.repHookBrake, c.repHookStamps,
                 c.repMission, c.repCruise, c.repCruiseF, c.repSiren ? 1 : 0,
                 (c.target - c.pos).Length(),
                 page.felony, page.known ? 1 : 0, page.seen ? 1 : 0, c.kickCount);

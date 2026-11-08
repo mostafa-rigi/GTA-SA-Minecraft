@@ -209,6 +209,28 @@ struct Host {
         // session can see the claim stay empty
         float cruiseF = 0.0f;
         bool driverInVehicle = false;
+        // THE CHANNEL REPAIR's witness (2026-11-08): the words the
+        // direct-drive channel last stamped AT THE DESK PHYSICS READS
+        // (the bridge's ProcessAI replacement, stamping the core's
+        // stored command inside the vehicle's own control pass), and
+        // how many frames it has stamped on this body so far. The
+        // 14:44 live session convicted the old witnesses' timing: the
+        // spike's fresh read-back showed gas 1.00 because it read the
+        // fields microseconds after our own write inside the same
+        // callback, while the unit line's tick-start report read gas
+        // 0.00 / brake 0.50-1.00 because the game's ProcessAI had
+        // already recomputed the fields inside that frame's
+        // processing - same fields, two frame points, opposite
+        // stories. These four are the third reading, taken at the
+        // only point that decides motion: hook* must track the
+        // commanded words while the body is ordered to drive, and
+        // hookStamps must keep advancing. A host with no door to
+        // stamp at (the fakes) answers the command itself, which IS
+        // what their physics consumes, and counts its drive calls.
+        float hookSteer = 0.0f;
+        float hookGas = 0.0f;
+        float hookBrake = 0.0f;
+        int hookStamps = 0;
         // the 39-package's bail-out (item 38): once the core orders the
         // driver out (CopBodyBail), the bridge fights him on foot and
         // reports him here - out of the car, and where he stands. His

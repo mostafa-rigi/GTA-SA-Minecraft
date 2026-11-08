@@ -191,6 +191,14 @@ struct CopState {
     // read NONE/0 while the car drives: a moving car on mission 0 is
     // the no-middleman receipt, printed on the same unit line
     float repSteer = 0.0f, repGas = 0.0f, repBrake = 0.0f;
+    // the channel repair's third reading (2026-11-08): the words the
+    // bridge's ProcessAI replacement last stamped at the desk physics
+    // reads, and its stamp count on this body - the unit line prints
+    // them beside cmd and body, so one session separates all three
+    // stories (what the core ordered, what the channel stamped, what
+    // the fields held when the tick looked)
+    float repHookSteer = 0.0f, repHookGas = 0.0f, repHookBrake = 0.0f;
+    int repHookStamps = 0;
     int repMission = -1;
     int repCruise = 0;
     float repCruiseF = 0.0f;

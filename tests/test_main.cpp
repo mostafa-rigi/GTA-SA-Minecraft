@@ -10010,6 +10010,10 @@ struct CopFakeHost : TestHost {
     float carHealth = 1.0f;
     float cmdGas = 0, cmdBrake = 0, cmdSteer = 0;
     bool cmdSiren = false;
+    int hookStamps = 0; // the channel witness: on this body the drive
+                        // call IS the stamp (PedalStep consumes the
+                        // recorded words directly - there is no door
+                        // between command and physics to stay silent)
     float struckRamQ = 0, struckShotQ = 0, impactQ = 0;
     float struckWorldQ = 0, struckDriverQ = 0, impactDvQ = 0;
     float displayHealth = 1000.0f; // the last book display the core commanded
@@ -10052,6 +10056,13 @@ struct CopFakeHost : TestHost {
         out->mission = 0;
         out->cruise = 0;
         out->cruiseF = 0.0f;
+        // the channel witness, answered the only way this body can:
+        // the stamped words are the commanded words (its physics
+        // reads them whole), and the count is its drive calls
+        out->hookGas = cmdGas;
+        out->hookBrake = cmdBrake;
+        out->hookSteer = cmdSteer;
+        out->hookStamps = hookStamps;
         return true;
     }
     void CopBodySetHealth(int, float book01) override {
@@ -10117,6 +10128,7 @@ struct CopFakeHost : TestHost {
         cmdBrake = brake;
         cmdSteer = steer;
         cmdSiren = siren;
+        ++hookStamps; // the drive call is this body's stamp (above)
     }
     float PlayerVehicleImpact() override {
         const float q = impactQ;
@@ -11354,6 +11366,9 @@ struct ForceFakeHost : TestHost {
         float yaw = 0.0f, speed = 0.0f;
         float cmdGas = 0, cmdBrake = 0, cmdSteer = 0;
         bool cmdSiren = false;
+        int hookStamps = 0; // as the single fake: the drive call is
+                            // the stamp - no door exists here that
+                            // could stay silent under orders
         float display = 1000.0f;
         bool burned = false, driverDown = false;
         float qRam = 0, qShot = 0, qWorld = 0, qDriver = 0, qImpact = 0;
@@ -11456,6 +11471,10 @@ struct ForceFakeHost : TestHost {
         out->mission = 0; // direct drive: no autopilot on the body,
         out->cruise = 0;  // the receipt reads NONE/0 while it drives
         out->cruiseF = 0.0f;
+        out->hookGas = b.cmdGas; // the channel witness: the stamped
+        out->hookBrake = b.cmdBrake; // words are the commanded words,
+        out->hookSteer = b.cmdSteer; // the count the body's drive calls
+        out->hookStamps = b.hookStamps;
         out->driverOut = b.driverOut; // item 38: the driver stands
         out->driverPos = b.driverOut ? b.pos + Vec3(2, 0, 0) : b.pos;
         return true;
@@ -11481,6 +11500,7 @@ struct ForceFakeHost : TestHost {
         it->second.cmdBrake = brake;
         it->second.cmdSteer = steer;
         it->second.cmdSiren = siren;
+        ++it->second.hookStamps;
     }
     void CopBodyDriveTarget(int, const Vec3&, float) override {} // the
         // retired feed verb: no autopilot here to feed (see the single
