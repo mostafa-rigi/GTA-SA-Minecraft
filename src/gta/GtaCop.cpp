@@ -385,7 +385,7 @@ void EnsureChannel(CVehicle* veh, bool bike) {
                  // stamps' silence grades it, never retried per spawn
     void** vt = *reinterpret_cast<void***>(veh);
     void*& orig = bike ? sBikeAIOrig : sCarAIOrig;
-    void*& savedVt = bike ? sBikeVtable : sCarVtable;
+    void**& savedVt = bike ? sBikeVtable : sCarVtable;
     orig = vt[kProcessAISlot];
     savedVt = vt;
     auto fn = &CopAIFn::ProcessAI;
