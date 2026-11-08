@@ -9,6 +9,8 @@
 #include "eCarMission.h" // the autopilot's mission words (fix round 4)
 #include "CPlayerPed.h"
 #include "CTask.h"
+#include "CTaskComplexKillPedOnFoot.h" // item 38: the bailed driver's fight (the soldier's own task class)
+#include "eWeaponType.h"                 // item 38: his pistol's word
 #include "CVehicle.h"
 #include "CWorld.h"
 #include "common.h"
@@ -33,6 +35,9 @@ namespace {
 constexpr unsigned char kCreatedByMission = 2;
 constexpr int kCopCarModel = 596;   // SA's LSPD cruiser: the stand-in body
 constexpr int kCopDriverModel = 280; // SA's LSPD officer: the stand-in driver
+constexpr int kCopBikeModel = 523;  // SA's HPV-1000 police bike (item 36):
+                                    // the host's own bike IS the body - no
+                                    // Chicago mesh is drawn over it
 
 // Step 2: one body state per cop unit, keyed by the vehicle's pool ref -
 // piece 1's single state, pluralised. The discipline is unchanged: a
@@ -44,6 +49,12 @@ struct CopBodyState {
     int vehRef = -1;
     CPed* driver = nullptr;
     int driverRef = -1;
+    bool bike = false;     // item 36: this body is the host's police
+                           // bike - it stays visible and CopRender
+                           // draws nothing over it
+    bool bailOut = false;  // item 38: the driver is out of this body,
+                           // fighting on foot (the core ordered it;
+                           // the report reads it back)
     bool seated = false;
     float seatT = 0.0f;      // seconds since spawn; the seat warp's budget
     bool seatRetried = false;
@@ -492,17 +503,11 @@ void CopBodyPre(float dt) {
             if (driver->m_pVehicle == veh && veh->m_pDriver == driver) {
                 b.seated = true;
                 Log("cop body: a driver is seated - the pedals are the core's from here");
-                // a unit seating while another already pursues is a
-                // reinforcement joining a live chase - COP_AI.C's own
-                // join callouts are phrases 10/11 (rnd % 2 + 10), spoken
-                // from the joining car
-                for (int j = 0; j < kMaxCopUnits; ++j) {
-                    if (j != i && sBodies[j].used && sBodies[j].siren) {
-                        const Vec3 at(veh->m_matrix->pos.x, veh->m_matrix->pos.y, veh->m_matrix->pos.z);
-                        PlaySfx((rand() % 2) ? SND_COP_RADIO_10 : SND_COP_RADIO_11, &at, 1.0f, 1.0f);
-                        break;
-                    }
-                }
+                // (the join callout that used to sound here is gone:
+                // since the 39-package the CORE is the only radio
+                // voice - it fires the join line at the ladder spawn
+                // itself, gained and logged; two voices saying the
+                // same moment was the double-talk the user heard)
             } else if (b.seatT > 20.0f) {
                 // said out loud, in the log the spike verdict is read from:
                 // if this line ever prints, field control has no driver.
@@ -587,10 +592,12 @@ void CopBodyPost() {
         // set that completes late, or a body the game re-shows, heals
         // itself either way; with any file missing both stay visible
         // and the force drives on the named stand-in.
-        const bool shown = CopBodyFilesReady();
+        const bool shown = CopBodyFilesReady() && !b.bike;
         veh->bIsVisible = !shown;
         if (CPed* driver = LiveDriver(b)) {
-            driver->bIsVisible = !shown;
+            // a bailed-out driver is a man fighting in the street:
+            // he is shown even while his car wears the drawn body
+            driver->bIsVisible = !shown || b.bailOut;
             // Pre's measure-and-hold, mirrored after the game's frame:
             // a hit that lands between Pre and Post is measured and
             // topped up in the same frame instead of the next. The
@@ -624,10 +631,10 @@ void CopBodyPost() {
                                  : 0.90f + b.gas * 0.25f;
         SetPosLoop(i * 2 + 1, (SoundEvent)b.engineEv, b.seated && b.book01 > 0.0f,
                    pos, 0.55f, pitch, 40.0f);
-        // his radio on the pursuit's first moment: FELONY.C speaks
-        // phrases 7/8 ((rnd & 1) + 7) as a chase opens
-        if (b.siren && !b.sirenPrev)
-            PlaySfx((rand() % 2) ? SND_COP_RADIO_07 : SND_COP_RADIO_08, &pos, 1.0f, 1.0f);
+        // (his radio on the pursuit's first moment used to sound
+        // here; since the 39-package the CORE fires the opening line
+        // itself - gained, logged and counted - and this site keeps
+        // only the edge bookkeeping)
         b.sirenPrev = b.siren;
     }
 }
@@ -648,8 +655,9 @@ void CopRender(float light) {
     const float steerSign = gCops[0].steerFlip ? 1.0f : -1.0f;
     for (int i = 0; i < kMaxCopUnits; ++i) {
         CopBodyState& b = sBodies[i];
-        if (!b.used)
-            continue;
+        if (!b.used || b.bike)
+            continue; // item 36: no Chicago mesh over a bike - the
+                      // host's own bike and rider are the body
         CVehicle* veh = LiveVeh(b);
         if (!veh)
             continue;
@@ -684,7 +692,12 @@ void CopRender(float light) {
     }
 }
 
-int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
+// the one standing-up, two bodies: the car (the Chicago-bodied
+// cruiser the force has always worn) and, for item 36, the host's
+// own police bike - same pool discipline, same driver, same seat
+// warp, same proofs; only the vehicle model and the body's own
+// flags differ (a bike is never hidden and never drawn over)
+int GtaSpawnCopBodyKind(const Vec3& at, float headingDeg, const Vec3& face, bool bike) {
     (void)headingDeg; // the face point decides the nose, like the original's
                       // justPinged: a fresh cop starts facing his man
     // step 2: a spawn takes a FREE body slot - the other units' bodies
@@ -702,10 +715,12 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     CopBodyState& s = *slot;
     s = CopBodyState();
     s.used = true;
-    Command<Commands::REQUEST_MODEL>(kCopCarModel);
+    s.bike = bike;
+    const int vehModel = bike ? kCopBikeModel : kCopCarModel;
+    Command<Commands::REQUEST_MODEL>(vehModel);
     Command<Commands::REQUEST_MODEL>(kCopDriverModel);
     Command<Commands::LOAD_ALL_MODELS_NOW>();
-    if (!Command<Commands::HAS_MODEL_LOADED>(kCopCarModel) ||
+    if (!Command<Commands::HAS_MODEL_LOADED>(vehModel) ||
         !Command<Commands::HAS_MODEL_LOADED>(kCopDriverModel)) {
         s = CopBodyState();
         return -1;
@@ -714,10 +729,10 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
     if (!found)
         gz = at.z;
-    Log("cop spawn: step 1 - models in, creating car %d at (%.0f, %.0f)", kCopCarModel, at.x, at.y);
+    Log("cop spawn: step 1 - models in, creating %s %d at (%.0f, %.0f)", bike ? "bike" : "car", vehModel, at.x, at.y);
     int handle = 0;
-    Command<Commands::CREATE_CAR>(kCopCarModel, at.x, at.y, gz + 0.6f, &handle);
-    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kCopCarModel);
+    Command<Commands::CREATE_CAR>(vehModel, at.x, at.y, gz + 0.6f, &handle);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(vehModel);
     Log("cop spawn: step 2 - CREATE_CAR returned handle %d", handle);
     // the handle is a pool REF, not a slot index - the second-summon
     // crash of 2026-11-07 was born here. CREATE_CAR is the game's own
@@ -919,6 +934,113 @@ int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
     return s.vehRef;
 }
 
+int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) {
+    return GtaSpawnCopBodyKind(at, headingDeg, face, false);
+}
+
+int GtaSpawnCopBikeBody(const Vec3& at, float headingDeg, const Vec3& face) {
+    return GtaSpawnCopBodyKind(at, headingDeg, face, true);
+}
+
+// item 38: the bail order. Out: the seated driver is warped to his
+// own door (the game's script warp, GtaMining's surface), given his
+// pistol and the soldier's own fight task against the player, with
+// his senses opened for the fight's duration; Pre keeps measuring
+// and topping him wherever he stands, so the one-unit book never
+// notices he left the seat. Back: the fight is cleared, the pistol
+// taken, the senses closed, and the same warp that seated him at
+// spawn puts him back. The core owns when; this owns how.
+void GtaCopBodyBail(int veh, bool out) {
+    CopBodyState* bp = FindBody(veh);
+    if (!bp)
+        return;
+    CopBodyState& b = *bp;
+    CVehicle* v = LiveVeh(b);
+    CPed* driver = LiveDriver(b);
+    if (!v || !driver || !v->m_matrix) {
+        Log("cop bail: body %d cannot answer a bail order (vehicle %p, driver %p)", veh, (void*)v, (void*)driver);
+        return;
+    }
+    if (out && !b.bailOut) {
+        CPlayerPed* player = FindPlayerPed();
+        if (!player) {
+            Log("cop bail: no player to fight - the order waits");
+            return;
+        }
+        const CMatrix& cm = *v->m_matrix;
+        const CVector doorP = cm.pos + cm.right * -0.9f + cm.up * 0.6f;
+        Command<Commands::WARP_CHAR_FROM_CAR_TO_COORD>(CPools::GetPedRef(driver), doorP.x, doorP.y, doorP.z);
+        Command<Commands::GIVE_WEAPON_TO_CHAR>(CPools::GetPedRef(driver), (int)WEAPONTYPE_PISTOL, 9999);
+        Command<Commands::SET_CURRENT_CHAR_WEAPON>(CPools::GetPedRef(driver), (int)WEAPONTYPE_PISTOL);
+        if (driver->m_pIntelligence) {
+            driver->m_pIntelligence->SetSeeingRange(60.0f);
+            driver->m_pIntelligence->SetHearingRange(60.0f);
+            auto* fight = new CTaskComplexKillPedOnFoot(player, -1, 0, 0, 100, 0);
+            driver->m_pIntelligence->m_TaskMgr.SetTask(fight, TASK_PRIMARY_PRIMARY, false);
+        }
+        b.bailOut = true;
+        Log("cop bail: the driver of car %d is out and fighting on foot", veh);
+    } else if (!out && b.bailOut) {
+        driver->ClearWeapons();
+        if (driver->m_pIntelligence) {
+            driver->m_pIntelligence->SetSeeingRange(0.0f);
+            driver->m_pIntelligence->SetHearingRange(0.0f);
+        }
+        Command<Commands::TASK_WARP_CHAR_INTO_CAR_AS_DRIVER>(CPools::GetPedRef(driver),
+                                                             CPools::GetVehicleRef(v));
+        b.bailOut = false;
+        Log("cop bail: the driver of car %d is warped back into his seat", veh);
+    }
+}
+
+// item 24's traffic: the host's own vehicles around a point, by the
+// pool's own enumeration. Cop bodies, the decoys and the player's
+// vehicle are not traffic and never appear; the number handed back
+// is the pool ref, the same number the kick verbs trade in.
+void GtaNearbyVehicles(const Vec3& centre, float radius, std::vector<Host::VehicleInfo>& out) {
+    auto* pool = CPools::ms_pVehiclePool;
+    if (!pool)
+        return;
+    CVehicle* mine[kMaxCopUnits];
+    int nMine = 0;
+    for (int i = 0; i < kMaxCopUnits; ++i)
+        if (sBodies[i].used)
+            if (CVehicle* v = LiveVeh(sBodies[i]))
+                mine[nMine++] = v;
+    CVehicle* decoys[4];
+    int nDecoys = 0;
+    for (int i = 0; i < 2; ++i) {
+        if (sDecoyCars[i].used) {
+            if (CVehicle* v = LiveDecoyVeh(sDecoyCars[i]))
+                decoys[nDecoys++] = v;
+        }
+    }
+    CVehicle* pv = FindPlayerVehicle();
+    const float r2 = radius * radius;
+    for (int i = 0; i < pool->m_nSize; ++i) {
+        CVehicle* v = pool->GetAt(i);
+        if (!v || v == pv)
+            continue;
+        bool own = false;
+        for (int j = 0; j < nMine; ++j)
+            own = own || mine[j] == v;
+        for (int j = 0; j < nDecoys; ++j)
+            own = own || decoys[j] == v;
+        if (own || !v->m_matrix)
+            continue;
+        const CVector& vp = v->m_matrix->pos;
+        const float dx = vp.x - centre.x, dy = vp.y - centre.y, dz = vp.z - centre.z;
+        if (dx * dx + dy * dy + dz * dz > r2)
+            continue;
+        Host::VehicleInfo info;
+        info.veh = pool->GetRef(v);
+        info.pos = Vec3(vp.x, vp.y, vp.z);
+        info.vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
+        out.push_back(info);
+    }
+}
+}
+
 bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     CopBodyState* bp = FindBody(veh);
     if (!bp || !out)
@@ -961,6 +1083,13 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
         // pair is the clipping's receipt)
     if (CPed* drv = LiveDriver(s))
         out->driverInVehicle = drv->bInVehicle;
+    // item 38's read-back: out of the car, and where he stands -
+    // read off the ped himself, the way every other word here is
+    out->driverOut = s.bailOut;
+    if (CPed* drv = LiveDriver(s)) {
+        const CVector dp = drv->GetPosition();
+        out->driverPos = Vec3(dp.x, dp.y, dp.z);
+    }
     // the impact channel: the car's own velocity change since the last
     // report - the collision signature the core prices his book by (his
     // own acceleration is ~0.15 m/s a frame; a strike stands out whole)

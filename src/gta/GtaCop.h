@@ -31,6 +31,9 @@ void CopBodyPost();
 void CopRender(float light);
 
 int GtaSpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face);
+int GtaSpawnCopBikeBody(const Vec3& at, float headingDeg, const Vec3& face);
+void GtaCopBodyBail(int veh, bool out);
+void GtaNearbyVehicles(const Vec3& centre, float radius, std::vector<Host::VehicleInfo>& out);
 bool GtaCopBodyReport(int veh, Host::CopBody* out);
 void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren);
 void GtaCopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps);

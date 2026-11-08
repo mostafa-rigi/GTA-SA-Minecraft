@@ -254,6 +254,13 @@ struct GtaHost : Host {
     int SpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) override {
         return GtaSpawnCopBody(at, headingDeg, face);
     }
+    int SpawnCopBikeBody(const Vec3& at, float headingDeg, const Vec3& face) override {
+        return GtaSpawnCopBikeBody(at, headingDeg, face);
+    }
+    void CopBodyBail(int veh, bool out) override { GtaCopBodyBail(veh, out); }
+    void NearbyVehicles(const Vec3& centre, float radius, std::vector<VehicleInfo>& out) override {
+        GtaNearbyVehicles(centre, radius, out);
+    }
     bool CopBodyReport(int veh, CopBody* out) override { return GtaCopBodyReport(veh, out); }
     void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) override {
         GtaCopBodyDrive(veh, gas, brake, steer, siren);
