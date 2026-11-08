@@ -13126,6 +13126,106 @@ static void TestCopForce() {
                       "item 10: a fifth stage does not exist - and every pop was on HIS car (pops %d, on-42 %d)",
                       host.tyrePops - pops0, host.vehTyrePops[42] - vehPops0);
             }
+            // (aq) item 35: the ramp jump - the force drives at the
+            // landing while he is in the air, and a kick inside the
+            // touchdown window throws half again
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3(0, 18, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                gCop.felony = 3000.0f;
+                // the arc, scripted ballistically: vz = 8 - 9.8 t,
+                // z = 8t - 4.9 t^2 over the launch height, touchdown
+                // at t = 1.633, 29.4 m north of the launch
+                auto arcAt = [&](float t, Vec3* pos, Vec3* vel) {
+                    if (t < 1.633f) {
+                        *pos = G + Vec3(0, 18.0f * t, 8.0f * t - 4.9f * t * t);
+                        *vel = Vec3(0, 18.0f, 8.0f - 9.8f * t);
+                    } else {
+                        *pos = G + Vec3(0, 29.4f + 18.0f * (t - 1.633f), 0);
+                        *vel = Vec3(0, 18.0f, 0);
+                    }
+                };
+                Vec3 mp, mv;
+                float aimErr = 1e9f;
+                for (float t = 0.0f; t < 1.633f; t += dt) {
+                    arcAt(t, &mp, &mv);
+                    host.player = mp;
+                    host.velocity = mv;
+                    CopTick(dt, mp);
+                    host.StepAll(dt);
+                    if (t > 0.55f && t < 0.65f)
+                        aimErr = (gCop.target - (G + Vec3(0, 29.4f, 0))).Length();
+                }
+                CHECK(aimErr < 7.0f,
+                      "item 35: mid-flight the force aims at the landing, not the car in the air (err %.1f m)",
+                      aimErr);
+                auto stageKick = [&](const Vec3& preyPos) {
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = preyPos + Vec3(0, -4.5f, 0);
+                        b->vel = Vec3(0, 38, 0);
+                        b->yaw = 0.0f;
+                    }
+                };
+                arcAt(1.633f, &mp, &mv);
+                // one settle tick first: the touchdown registers in
+                // the tracker, which runs after the kick's Pre pass -
+                // staging the body in the same tick would kick a man
+                // the book still reads as falling
+                host.player = mp;
+                host.velocity = mv;
+                CopTick(dt, mp);
+                host.StepAll(dt);
+                mp = mp + mv * dt;
+                stageKick(mp);
+                const int kicks0 = host.kickVehCount;
+                for (int i = 0; i < 25 && host.kickVehCount == kicks0; ++i) {
+                    host.player = mp;
+                    host.velocity = mv;
+                    CopTick(dt, mp);
+                    host.StepAll(dt);
+                    mp = mp + mv * dt; // he rolls on at 18
+                }
+                const float landDv = host.lastKickDv.Length();
+                CHECK(host.kickVehCount > kicks0 && landDv > 15.0f && landDv < 21.0f,
+                      "item 35: the landing hit throws half again (dv %.1f, the plain throw is ~12)",
+                      landDv);
+                // the control: the same geometry a second later,
+                // the window shut, is the plain throw again
+                for (float t = 0.0f; t < 1.2f; t += dt) {
+                    host.player = mp;
+                    host.velocity = mv;
+                    CopTick(dt, mp);
+                    host.StepAll(dt);
+                    mp = mp + mv * dt;
+                }
+                if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                    b->pos = mp + Vec3(0, -30, 0); // separation re-arms
+                    b->vel = Vec3();
+                }
+                for (int i = 0; i < 10; ++i) {
+                    host.player = mp;
+                    host.velocity = mv;
+                    CopTick(dt, mp);
+                    host.StepAll(dt);
+                    mp = mp + mv * dt;
+                }
+                stageKick(mp);
+                const int kicks1 = host.kickVehCount;
+                for (int i = 0; i < 25 && host.kickVehCount == kicks1; ++i) {
+                    host.player = mp;
+                    host.velocity = mv;
+                    CopTick(dt, mp);
+                    host.StepAll(dt);
+                    mp = mp + mv * dt;
+                }
+                const float plainDv = host.lastKickDv.Length();
+                CHECK(host.kickVehCount > kicks1 && plainDv > 9.0f && plainDv < 14.0f,
+                      "item 35: outside the window the same kick is the plain throw (dv %.1f)",
+                      plainDv);
+            }
         }
     }
 }

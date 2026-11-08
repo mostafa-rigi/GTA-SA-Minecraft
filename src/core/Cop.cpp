@@ -363,6 +363,13 @@ float sCrashT = 0.0f;     // item 31: the prey just crashed - the
 float sSpdOld = 0.0f;     // the crash witness's older speed sample
 float sSpdAge = 1e9f;     // seconds since that sample was taken
 float sSyncT = 0.0f;      // item 11: the synchronised-hit window
+bool sAirborne = false;   // item 35: the prey's car is in the air
+bool sAirFell = false;    // item 35: ...and has started falling
+float sAirLaunchZ = 0.0f; // item 35: the height he left the ground at
+Vec3 sLandPoint;          // item 35: the predicted touchdown point
+bool sLandValid = false;  // item 35: a landing prediction stands
+float sLandedT = 0.0f;    // item 35: seconds left of the landing
+                          // window (a grip-less car, priced throws)
 float sTurnRate = 0.0f;   // item 12: the prey's smoothed yaw rate
 bool sTurnStrike = false; // |turn rate| past the strike line, with a
                           // pursuer close enough to spend it
@@ -1453,6 +1460,11 @@ void CopControl(CopState& c, float dt) {
             // the tactics tick only sets it for one tick at a time
             if (c.aimOverrideOn)
                 target = c.aimOverride;
+            // item 35 outranks even those: while he is in the air
+            // there is no car to shove or flank - there is only the
+            // landing he is making for
+            if (sLandValid)
+                target = sLandPoint;
         }
     } else {
         // FAR: WibbleDownTheRoad - walk the field's descent from where he
@@ -1522,6 +1534,10 @@ void CopControl(CopState& c, float dt) {
             c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed2[kDifficulty] * PaceMul(c));
         // (pathStraight is consumed by the speed choice and the thrust
         // bonus below; it is recomputed with the target every far tick)
+        if (sLandValid)
+            target = sLandPoint; // item 35: the far road walk is
+                                  // pointless under an airborne prey -
+                                  // the landing is the destination
         c.target = target;
         // steer and thrust for the far target ride the shared tail below
         const Vec3 toF = target - c.pos;
@@ -2795,6 +2811,10 @@ void CopReset() {
     sSpdOld = 0.0f;
     sSpdAge = 1e9f;
     sSyncT = 0.0f;
+    sAirborne = false;
+    sAirFell = false;
+    sLandValid = false;
+    sLandedT = 0.0f;
     sTurnRate = 0.0f;
     sTurnStrike = false;
     sHeadOk = false;
@@ -3202,6 +3222,12 @@ void CopTick(float dt, const Vec3& playerPos) {
                     float tScale = 1.0f;
                     if (c.heavyUnit)
                         tScale *= 1.25f;
+                    if (sLandedT > 0.0f) {
+                        tScale *= 1.5f; // item 35: the landing hit -
+                            // inside the touchdown window he has no
+                            // grip to answer a throw with
+                        Log("cop: the landing hit - the throw is priced half again while he has no grip");
+                    }
                     if (c.lastRamT > 0.0f) {
                         tScale *= 1.5f;
                         c.lastRamT = 0.0f;
@@ -3535,6 +3561,55 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (sTyreT > 0.0f)
             sTyreT -= dt; // item 10: the disable's stage spacing
     }
+
+    // item 35: the ramp jump. The prey's own velocity feed carries
+    // the whole story - a launch (z-velocity up past 4), the fall
+    // (z-velocity under -1), and the touchdown (the fall's snap back
+    // to ~0). While he is in the air the force does not chase the car
+    // it sees; it drives at the LANDING the arc is making for,
+    // recomputed every tick against the launch height, and a kick
+    // that lands inside the touchdown window is priced half again:
+    // a car in its first grip-less instants cannot answer a throw.
+    // (Whether a pursuer's own body catches the same ramp is the
+    // host's physics; the brain's part - be at the landing, priced -
+    // is this tracker and the two wirings that read it.)
+    if (gThreat.playerInVehicle) {
+        const Vec3& pv = gThreat.playerVel;
+        if (!sAirborne && pv.z > 4.0f) {
+            sAirborne = true;
+            sAirFell = false;
+            sAirLaunchZ = preyPos.z;
+            Log("cop: he is airborne - the force drives at his landing, not at the car in the air");
+        }
+        if (sAirborne) {
+            if (pv.z < -1.0f)
+                sAirFell = true;
+            if (sAirFell && pv.z > -1.0f) {
+                sAirborne = false;
+                sAirFell = false;
+                sLandValid = false;
+                sLandedT = 0.6f;
+                Log("cop: touchdown - the landing window is open");
+            } else {
+                const float dz = preyPos.z - sAirLaunchZ;
+                const float disc = pv.z * pv.z + 19.6f * dz;
+                const float tf = (pv.z + std::sqrt(disc > 0.0f ? disc : 0.0f)) / 9.8f;
+                if (tf > 0.05f) {
+                    sLandPoint = preyPos + Vec3(pv.x, pv.y, 0.0f) * tf;
+                    sLandPoint.z = preyPos.z;
+                    sLandValid = true;
+                } else {
+                    sLandValid = false;
+                }
+            }
+        }
+    } else {
+        sAirborne = false;
+        sAirFell = false;
+        sLandValid = false;
+    }
+    if (sLandedT > 0.0f)
+        sLandedT -= dt;
 
     // ---- the manager: pursuit transitions, the ladder, the cutoff
     const bool wantPursue = page.felony > kFelonyTrigger && page.known;
