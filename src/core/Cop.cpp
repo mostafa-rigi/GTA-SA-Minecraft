@@ -1091,13 +1091,21 @@ void HoldControl(CopState& c, float dt) {
     // the post.
     const float cruise = Clamp(dist * 0.8f, 3.0f, 20.0f);
     c.desiredSpeed = cruise;
-    Vec3 f = c.fwd;
-    f.z = 0.0f;
+    // the steer is the leave law's, not a bare cross product: a cross
+    // is ZERO dead astern as well as dead ahead, so a proportional-
+    // cross steer has a dead spot exactly where an overshot post
+    // sits - the first direct-drive run's settle drove straight to
+    // 600 m with the post behind it and the steer reading 0.00. The
+    // angle-error form (atan2) with a full-lock answer in the rear
+    // hemisphere is the law the spike and the leave already steer by.
     float steer = 0.0f;
-    if (f.Length() > 0.01f && dist > 0.01f) {
-        f = f * (1.0f / f.Length());
-        const Vec3 dir = to * (1.0f / dist);
-        steer = Clamp((f.x * dir.y - f.y * dir.x) * 2.0f, -1.0f, 1.0f);
+    if (dist > 0.01f) {
+        Vec3 dirv = to * (1.0f / dist);
+        const float cross = c.fwd.x * dirv.y - c.fwd.y * dirv.x;
+        const float dot = c.fwd.x * dirv.x + c.fwd.y * dirv.y;
+        const float err = std::atan2(cross, dot);
+        steer = dot < 0.0f ? (cross >= 0.0f ? -1.0f : 1.0f)
+                           : Clamp(-err * 1.4f, -1.0f, 1.0f);
     }
     float gas = 0.0f, brake = 0.0f;
     if (c.speed < cruise)
