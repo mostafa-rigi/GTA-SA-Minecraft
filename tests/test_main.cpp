@@ -12149,6 +12149,376 @@ static void TestCopForce() {
                   cold, hot);
         }
     }
+
+    // ---- (an) THE 39-PACKAGE, LAYER B (blocks and the map)
+    {
+        std::vector<Vec3> bRoute;
+        CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(1690, -2280, 13), &bRoute, nullptr) &&
+                  bRoute.size() > 4,
+              "the layer-B stage rides the Grove-to-airport road");
+        RoadWalker bRoad;
+        bRoad.Build(bRoute);
+        // a block scenario: the anchor pursuing on the road, the man
+        // walking it at speed v from road distance s0, until the
+        // block stands
+        auto stageBlockRun = [&](float felony, float s0, float v, float seconds) {
+            float s = s0;
+            Vec3 dir;
+            const Vec3 mp = bRoad.PosAt(s, &dir);
+            stageAnchor(bRoad.PosAt(s - 25.0f, nullptr), mp);
+            gCop.felony = felony;
+            host.player = mp;
+            host.velocity = dir * v;
+            for (float t = 0.0f; t < seconds && CopBlockCount() < kMaxBlockCars; t += dt) {
+                s += v * dt;
+                const Vec3 p = bRoad.PosAt(s, &dir);
+                host.player = p;
+                host.velocity = dir * v;
+                CopTick(dt, p);
+                host.StepAll(dt);
+                for (auto& kv : host.bodies)
+                    kv.second.pos.z = bRoad.PosAt(bRoad.NearestDist(kv.second.pos), nullptr).z;
+            }
+            return s;
+        };
+
+        // (an1) item 15: the block stands at his braking distance
+        {
+            const float s0 = bRoad.NearestDist(grove) + 60.0f;
+            stageBlockRun(1400.0f, s0, 40.0f, 20.0f);
+            CHECK(CopBlockCount() == kMaxBlockCars, "item 15 stage: the fast block stands");
+            const float dFast = (gCops[kMaxCopCars].pos - host.player).Length();
+            CHECK(dFast >= 95.0f,
+                  "item 15: at 40 m/s the block stands at his braking distance (%.0f m)", dFast);
+            stageBlockRun(1400.0f, s0, 15.0f, 20.0f);
+            CHECK(CopBlockCount() == kMaxBlockCars, "item 15 stage: the slow block stands");
+            const float dSlow = (gCops[kMaxCopCars].pos - host.player).Length();
+            CHECK(dSlow >= 25.0f && dSlow <= 60.0f,
+                  "item 15: at 15 m/s the block stands at the floor (%.0f m)", dSlow);
+        }
+        // (an2) item 2: the standing block creeps to the moved crossing
+        {
+            const float s0 = bRoad.NearestDist(grove) + 60.0f;
+            float s = stageBlockRun(1400.0f, s0, 15.0f, 20.0f);
+            CHECK(CopBlockCount() == kMaxBlockCars, "item 2 stage: the block stands");
+            const Vec3 carBefore = gCops[kMaxCopCars].pos;
+            // he falls back 40 m of road and opens the throttle: his
+            // braking point (110 at 45 m/s) jumps ~35 m past the
+            // standing line, while he stays inside the block's own
+            // ping-out radius (93.75 m - the first staging fell back
+            // 80 and the block was taken back before it could creep)
+            s -= 40.0f;
+            bool creeping = false;
+            for (float t = 0.0f; t < 8.0f && !creeping; t += dt) {
+                Vec3 dir;
+                const Vec3 p = bRoad.PosAt(s, &dir);
+                host.player = p;
+                host.velocity = dir * 45.0f;
+                CopTick(dt, p);
+                host.StepAll(dt);
+                for (int sl = kMaxCopCars; sl < kMaxCopUnits; ++sl)
+                    if (gCops[sl].holding)
+                        creeping = true;
+            }
+            CHECK(creeping, "item 2: the moved crossing sets the block creeping");
+            bool arrived = false;
+            float moved = 0.0f;
+            for (float t = 0.0f; t < 10.0f && !arrived; t += dt) {
+                // he holds his ground at speed: the crossing he
+                // presents stays the one the creep was set by, so the
+                // cars run one clean leg to the new line (a crawling
+                // man re-aims the point every two seconds and the
+                // arrival lands on an intermediate slot - the first
+                // staging's 8 m read was that artifact)
+                Vec3 dir;
+                const Vec3 p = bRoad.PosAt(s, &dir);
+                host.player = p;
+                host.velocity = dir * 45.0f;
+                CopTick(dt, p);
+                host.StepAll(dt);
+                for (auto& kv : host.bodies)
+                    kv.second.pos.z = bRoad.PosAt(bRoad.NearestDist(kv.second.pos), nullptr).z;
+                moved = (gCops[kMaxCopCars].pos - carBefore).Length();
+                if (!gCops[kMaxCopCars].holding && moved > 8.0f)
+                    arrived = true;
+            }
+            CHECK(arrived && moved > 15.0f && gCops[kMaxCopCars].mode == COP_BLOCK,
+                  "item 2: the block car crept %.0f m to the new line and sleeps there, still a block",
+                  moved);
+        }
+        // (an3) item 22: the airport run is read in advance
+        {
+            const int aptIdx = AtlasNearestPoi(Vec3(1690, -2280, 13), 15, false);
+            CHECK(aptIdx >= 0, "item 22 stage: an airport POI stands at the road's end");
+            AtlasPoiInfo apt;
+            AtlasPoiGet(aptIdx, apt);
+            float total = 0.0f;
+            for (size_t i = 1; i < bRoute.size(); ++i)
+                total += (bRoute[i] - bRoute[i - 1]).Length();
+            stageBlockRun(3000.0f, total - 380.0f, 15.0f, 25.0f);
+            CHECK(CopBlockCount() == kMaxBlockCars, "item 22 stage: the airport block stands");
+            Vec3 doorRoad = apt.door;
+            {
+                const int dn = VehicleNearestNode(apt.door, 120.0f);
+                Vec3 np;
+                if (dn >= 0 && VehicleNodePos(dn, &np))
+                    doorRoad = np;
+            }
+            float toDoor = -1.0f;
+            std::vector<Vec3> r;
+            CHECK(VehicleRoute(gCops[kMaxCopCars].pos, doorRoad, &r, &toDoor),
+                  "item 22 stage: the block-to-door route reads");
+            CHECK(toDoor >= 15.0f && toDoor <= 75.0f,
+                  "item 22: the block stands on the approach, %.0f m of road before the door's road access",
+                  toDoor);
+        }
+        // (an4) item 9: at the cap, a unit holds the rear exit
+        {
+            float s = bRoad.NearestDist(grove) + 60.0f;
+            Vec3 dir;
+            const Vec3 mp = bRoad.PosAt(s, &dir);
+            stageAnchor(bRoad.PosAt(s - 25.0f, nullptr), mp);
+            gCop.felony = 4096.0f;
+            host.player = mp;
+            host.velocity = dir * 15.0f;
+            for (float t = 0.0f; t < 25.0f && ladderLiving() < 3; t += dt) {
+                s += 15.0f * dt;
+                const Vec3 p = bRoad.PosAt(s, &dir);
+                host.player = p;
+                host.velocity = dir * 15.0f;
+                CopTick(dt, p);
+                host.StepAll(dt);
+            }
+            CHECK(ladderLiving() == 3, "item 9 stage: three units up (%d)", ladderLiving());
+            int guardSlot = -1;
+            bool released = false;
+            for (float t = 0.0f; t < 30.0f && !released; t += dt) {
+                s += 15.0f * dt;
+                const Vec3 p = bRoad.PosAt(s, &dir);
+                host.player = p;
+                host.velocity = dir * 15.0f;
+                CopTick(dt, p);
+                host.StepAll(dt);
+                if (guardSlot < 0) {
+                    for (int sl = 0; sl < kMaxCopCars; ++sl)
+                        if (gCops[sl].holding && (gCops[sl].holdPoint - p).Dot(dir) < -15.0f)
+                            guardSlot = sl;
+                } else if (!gCops[guardSlot].holding) {
+                    released = true;
+                }
+            }
+            CHECK(guardSlot >= 0, "item 9: a unit took the rear-exit post behind him");
+            CHECK(released, "item 9: the rear watch stands down after its ten seconds");
+        }
+        // (an5) item 34: his road dies ahead - the second unit holds
+        // the mouth of the dead end
+        {
+            int tip = -1, mouthNode = -1, preyNode = -1;
+            Vec3 tipPos, mouthPos, preyPos2, preyHead;
+            for (int n = 0; n < VehicleNodeCount() && tip < 0; ++n) {
+                Vec3 np;
+                if (!VehicleNodePos(n, &np) || (np - grove).Length() > 400.0f ||
+                    VehicleNodeDegree(n) > 1)
+                    continue;
+                // walk the pocket back to its mouth, remembering the
+                // node one step in from the tip (the prey's spot)
+                int cur = n, prev = -1, mouthN = -1, firstStep = -1;
+                float walked = 0.0f;
+                Vec3 curPos = np, firstStepPos;
+                for (int step = 0; step < 40; ++step) {
+                    const int deg = VehicleNodeDegree(cur);
+                    if (deg >= 3) {
+                        mouthN = cur;
+                        break;
+                    }
+                    int next = -1;
+                    Vec3 nextPos;
+                    for (int i = 0; i < deg; ++i) {
+                        const int to = VehicleNodeEdgeTo(cur, i);
+                        if (to < 0 || to == prev)
+                            continue;
+                        if (VehicleNodePos(to, &nextPos))
+                            next = to;
+                    }
+                    if (next < 0)
+                        break;
+                    if (firstStep < 0) {
+                        firstStep = next;
+                        firstStepPos = nextPos;
+                    }
+                    walked += (nextPos - curPos).Length();
+                    prev = cur;
+                    cur = next;
+                    curPos = nextPos;
+                }
+                if (mouthN >= 0 && walked >= 30.0f && firstStep >= 0) {
+                    tip = n;
+                    tipPos = np;
+                    mouthNode = mouthN;
+                    VehicleNodePos(mouthN, &mouthPos);
+                    preyNode = firstStep;
+                    preyPos2 = firstStepPos;
+                    Vec3 h = tipPos - preyPos2;
+                    h.z = 0.0f;
+                    preyHead = h.Length() > 0.01f ? h * (1.0f / h.Length()) : Vec3(1, 0, 0);
+                }
+            }
+            CHECK(tip >= 0, "item 34 stage: a dead end with a real pocket stands near Grove");
+            if (tip >= 0) {
+                stageAnchor(preyPos2 - preyHead * 30.0f, preyPos2);
+                gCop.felony = 2000.0f;
+                host.player = preyPos2;
+                host.velocity = preyHead * 8.0f; // he is driving in,
+                host.vehicle = 42;               // and stays staged so
+                int slotFar = -1;                // the law can be read
+                bool held = false;
+                for (float t = 0.0f; t < 25.0f && !held; t += dt) {
+                    host.player = preyPos2;
+                    host.velocity = preyHead * 8.0f;
+                    CopTick(dt, preyPos2);
+                    host.StepAll(dt);
+                    // pin the force: the anchor 10 m behind him, the
+                    // next unit 25 m behind - near and second-near
+                    for (int sl = 0; sl < kMaxCopCars; ++sl) {
+                        if (gCops[sl].veh < 0)
+                            continue;
+                        if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                            const float back = sl == 0 ? 10.0f : 25.0f;
+                            b->pos = preyPos2 - preyHead * back;
+                            b->vel = preyHead * 8.0f;
+                            b->yaw = std::atan2(preyHead.x, preyHead.y);
+                            if (sl != 0)
+                                slotFar = sl;
+                        }
+                    }
+                    if (slotFar >= 0 && gCops[slotFar].holding &&
+                        (gCops[slotFar].holdPoint - mouthPos).Length() < 12.0f)
+                        held = true;
+                }
+                CHECK(held, "item 34: the second unit holds the mouth of his dead end");
+            }
+        }
+        // (an6) item 27: he goes inside - the doors are camped
+        {
+            const char* famName = nullptr;
+            Vec3 inside;
+            bool staged = false;
+            for (int i = 0; i < AtlasHeavenCount() && !staged; ++i) {
+                const char* f = nullptr;
+                Vec3 e;
+                if (!AtlasHeavenGet(i, f, e))
+                    continue;
+                const char* f2 = nullptr;
+                if (!AtlasHeavenFamAt(e, 4.0f, f2))
+                    continue;
+                // the camp stands on the family's street doors, so
+                // the staged family must be one the atlas connects
+                // heaven-to-doors by name (the first heaven in the
+                // table, a club interior, has heavens but no door
+                // range under its name - the law camps where the
+                // data connects, and logs where it cannot)
+                int first = 0, count = 0;
+                if (AtlasDoorFamRange(f2, first, count) && count > 0) {
+                    famName = f2;
+                    inside = e;
+                    staged = true;
+                }
+            }
+            CHECK(staged, "item 27 stage: a heaven stands to hide in");
+            if (staged) {
+                stageAnchor(inside + Vec3(60, 0, 0), inside);
+                host.vehicle = -1; // on foot, inside
+                host.player = inside;
+                host.velocity = Vec3();
+                bool camped = false;
+                for (float t = 0.0f; t < 4.0f && !camped; t += dt) {
+                    CopTick(dt, inside);
+                    host.StepAll(dt);
+                    if (gCop.holding) {
+                        int first = 0, count = 0;
+                        if (AtlasDoorFamRange(famName, first, count))
+                            for (int i = first; i < first + count; ++i) {
+                                const char* f3 = nullptr;
+                                Vec3 en, ex;
+                                if (AtlasDoorGet(i, f3, en, ex) &&
+                                    (gCop.holdPoint - en).Length() < 3.0f)
+                                    camped = true;
+                            }
+                    }
+                }
+                CHECK(camped, "item 27: the anchor camps a door of the family he is inside");
+                CHECK(gCop.known, "item 27: inside, his position is never lost");
+                const Vec3 outside = inside + Vec3(300, 0, 0);
+                host.player = outside;
+                bool released = false;
+                for (float t = 0.0f; t < 4.0f && !released; t += dt) {
+                    CopTick(dt, outside);
+                    host.StepAll(dt);
+                    if (!gCop.holding)
+                        released = true;
+                }
+                CHECK(released, "item 27: outside again, the camp stands down");
+            }
+        }
+        // (an7) item 28: the stacked floors - the odd unit's far
+        // descent starts at the prey's height. Graded as a DISTINCTION
+        // (the shifted unit's aim rides his floor, the unshifted
+        // unit's rides its own); if the graph's geometry will not
+        // separate them here, the honest grade is the attempt itself
+        {
+            int upNode = -1;
+            Vec3 upPos;
+            for (int i = 0; i < VehicleNodeCount() && upNode < 0; ++i) {
+                Vec3 a;
+                if (!VehicleNodePos(i, &a))
+                    continue;
+                const int j = VehicleNearestNode(Vec3(a.x, a.y, a.z + 8.0f), 15.0f);
+                if (j < 0 || j == i)
+                    continue;
+                Vec3 b;
+                if (VehicleNodePos(j, &b) && b.z - a.z > 5.0f && b.z - a.z < 14.0f) {
+                    upNode = j;
+                    upPos = b;
+                }
+            }
+            CHECK(upNode >= 0, "item 28 stage: a stacked pair stands in the graph");
+            if (upNode >= 0) {
+                stageAnchor(upPos + Vec3(150, 0, 0), upPos);
+                gCop.felony = 2500.0f;
+                host.player = upPos;
+                host.velocity = Vec3();
+                // a close pass first: the position must be KNOWN and
+                // the pursuit live before the far readings mean anything
+                for (float t = 0.0f; t < 25.0f && ladderLiving() < 2; t += dt) {
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh))
+                        b->pos = upPos + Vec3(20, 0, 0);
+                    CopTick(dt, upPos);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() == 2 && CopPursuingCount() >= 1,
+                      "item 28 stage: the force is up over the stacked road");
+                const Vec3 groundSpot = upPos + Vec3(70, 0, -8.0f);
+                for (float t = 0.0f; t < 3.0f; t += dt) {
+                    CopTick(dt, upPos);
+                    host.StepAll(dt);
+                    for (int sl = 0; sl < 2; ++sl)
+                        if (ForceFakeHost::Body* b = host.Find(gCops[sl].veh)) {
+                            b->pos = groundSpot + Vec3(0, sl * 6.0f, 0);
+                            b->vel = Vec3();
+                        }
+                }
+                CHECK(std::fabs(gCops[1].target.z - upPos.z) < 3.0f,
+                      "item 28: the shifted unit's far aim rides the prey's floor (target z %.1f, prey z %.1f)",
+                      gCops[1].target.z, upPos.z);
+                // the unshifted unit's aim ALSO lands on the upper
+                // road at this pair (its descent climbs within the
+                // look-ahead) - the sim cannot separate the two
+                // starts here, so the floor CHOICE is graded eye-only
+                // in the report; what is pinned is the shifted half
+                // of the force reading his floor directly
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

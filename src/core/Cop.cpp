@@ -1,7 +1,9 @@
 #include "Cop.h"
 
 #include <cmath>
+#include <cstring>
 
+#include "Atlas.h"
 #include "CopTest.h"
 #include "Host.h"
 #include "NavGraph.h"
@@ -353,6 +355,19 @@ bool sTurnStrike = false; // |turn rate| past the strike line, with a
                           // pursuer close enough to spend it
 float sHeadPrev = 0.0f;   // the yaw witness's last heading
 bool sHeadOk = false;
+// layer B's posts and block state
+float sPostsT = 0.0f;     // the posts tick's cadence (items 9/27/34)
+float sRearT = 0.0f;      // item 9: the rear-exit guard's watch left
+int sRearSlot = -1;
+float sRearCool = 0.0f;   // and the quiet after a spent watch
+float sMouthT = 0.0f;     // item 34: the dead-end mouth watch left
+int sMouthSlot = -1;
+bool sIndoor = false;     // item 27: the prey is inside a family
+char sIndoorFam[64] = ""; // the family's name, for the release
+Vec3 sBlockPoint;         // item 2: the standing block's anchor point
+Vec3 sBlockDir(0, 1, 0);  // and its road direction
+float sCreepT = 0.0f;     // item 2: the living block's cadence
+bool sBlockLive = false;  // a block stands (its point means something)
 float sWallOpenSide = 0.0f; // item 13: -1/+1 = the prey's open side
                           // (the other has world geometry within 9 m),
                           // 0 = both open or both walled
@@ -972,6 +987,50 @@ void PursuitFeed(CopState& c, const Vec3& target) {
 // scale - a unit beyond the manager's cutOffDistance reads his tables
 // at cutOffPowerScale, one half, exactly where the original applies it
 // (the front-zone desire, before the pacing blend).
+// ---------------------------------------------------------------------------
+// The hold controller (the 39-package's post law): a unit with a post
+// drives to it by the feed like any far drive, at a distance-shaped
+// cruise, and stands there when it arrives. Items 2 (the block
+// creep), 9 (the rear-exit guard), 27 (the door camps), 34 (the
+// dead-end mouth) - and layer C's ring, ambush and shore posts - all
+// spend this one mechanism; a post is a place, not a new brain.
+void HoldControl(CopState& c, float dt) {
+    Vec3 to = c.holdPoint - c.pos;
+    to.z = 0.0f;
+    const float dist = to.Length();
+    c.target = c.holdPoint;
+    if (dist < 2.2f) {
+        c.holdArrived = true;
+        c.desiredSpeed = 0.0f;
+        c.feedLive = false;
+        if (c.mode == COP_BLOCK)
+            c.holding = false; // a crept block car sleeps at its new
+                               // slot - the post is spent on arrival
+        StandDrive(c);
+        return;
+    }
+    c.holdArrived = false;
+    const float cruise = Clamp(dist * 0.8f, 3.0f, 20.0f);
+    c.desiredSpeed = cruise;
+    c.feedPoint = c.holdPoint; // the post is an arrival, not a
+    c.feedCruise = cruise;     // through-point: no projection past it
+    c.feedLive = true;
+    // the pedal word stays a sane proportional one toward the post -
+    // the mirror host drives by the feed, but no channel is left
+    // saying something the feed does not mean
+    Vec3 f = c.fwd;
+    f.z = 0.0f;
+    float steer = 0.0f;
+    if (f.Length() > 0.01f && dist > 0.01f) {
+        f = f * (1.0f / f.Length());
+        const Vec3 dir = to * (1.0f / dist);
+        steer = Clamp((f.x * dir.y - f.y * dir.x) * 2.0f, -1.0f, 1.0f);
+    }
+    const float gas = c.speed < cruise ? 0.7f : 0.0f;
+    const float brake = c.speed > cruise + 3.0f ? 0.5f : 0.0f;
+    Drive(c, gas, brake, steer, true);
+}
+
 void CopControl(CopState& c, float dt) {
     const bool playerInCar = gThreat.playerInVehicle;
     const Vec3 pPos = gThreat.playerPos;
@@ -1279,9 +1338,21 @@ void CopControl(CopState& c, float dt) {
         const float ahead = FeedLookAhead(c.speed);
         Vec3 far, farther;
         bool straight = false;
-        if (Page().fieldOk && VehicleFieldDescent(c.pos, ahead, &far)) {
+        // item 28, the stacked floors: when the prey stands more
+        // than a storey above or below this unit, every second unit
+        // starts its descent from a point at the PREY's height - the
+        // nearest-node snap then lands on his floor's road instead
+        // of crawling the ramps up from its own. (Most stacked nodes
+        // in the graph are crossings and underpasses, where the same
+        // law simply reads the crossing's upper road - named, not
+        // hidden: a multi-storey car park is the case it serves,
+        // the crossings are the cost it pays.)
+        Vec3 from = c.pos;
+        if (std::fabs(pPos.z - c.pos.z) > 4.0f && ((&c - gCops) % 2 == 1))
+            from.z = pPos.z;
+        if (Page().fieldOk && VehicleFieldDescent(from, ahead, &far)) {
             target = far;
-            if (VehicleFieldDescent(c.pos, ahead * 2.2f, &farther)) {
+            if (VehicleFieldDescent(from, ahead * 2.2f, &farther)) {
                 Vec3 a = far - c.pos;
                 Vec3 b = farther - far;
                 a.z = 0.0f;
@@ -1662,7 +1733,72 @@ bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out, const Vec3* prefer = nul
 // tipped ~25 degrees back toward the traffic, the original's angled
 // second row (piece 2 shipped one row and named this as its follow-up;
 // the complete update carries it in).
-bool PlaceRoadblock(const Vec3& playerPos) {
+// item 15: the block stands at his BRAKING distance, not a fixed
+// 48 m: v^2/(2a) at a = 6.5 m/s^2, a hard stop on asphalt - a fast
+// man meets the line where he can no longer stop short of it, a
+// slow man's block stays a meeting. Floored at 35 (the old band's
+// near end) and capped at 110, where the graph runs out
+float BlockAheadFor(float preySpeedMps) {
+    return Clamp(preySpeedMps * preySpeedMps / (2.0f * 6.5f), 35.0f, 110.0f);
+}
+
+// one block car's slot around a block point - PlaceRoadblock's row
+// geometry, extracted whole: item 2's creep re-reads the same slots
+// around a moved point, and item 22's airport row stands by it
+void BlockSlotPos(const Vec3& at, const Vec3& segDir, int idx, Vec3* carAt, Vec3* face) {
+    const Vec3 lateral(segDir.y, -segDir.x, 0.0f); // across the lanes
+    const int row = idx / 2, col = idx % 2;
+    if (row == 0) {
+        const float side = col == 0 ? 2.3f : -2.3f;
+        *carAt = at + lateral * side;
+        // the nose turns across the road, toward the far side: the
+        // two cars meet nose-outward across the lanes between them
+        *face = *carAt - lateral * (side > 0.0f ? 5.0f : -5.0f);
+    } else {
+        // the second row: 6 m of road back toward the player (segDir
+        // runs with his travel), staggered to the opposite laterals,
+        // noses across the road AND tipped back toward the traffic -
+        // the angled row: a driver who threads the first gap meets a
+        // nose, not a lane
+        const float side = col == 0 ? -1.4f : 1.4f;
+        *carAt = at - segDir * 6.0f + lateral * side;
+        *face = *carAt - lateral * (side > 0.0f ? 5.0f : -5.0f) - segDir * 2.2f;
+    }
+}
+
+// stand a block row at a point: the spawn half of every placement
+// (the plain roadblock, item 22's airport approach, and - at one
+// fewer car - item 30's wreck-discounted row in layer C)
+int PlaceBlockAt(const Vec3& at, const Vec3& segDir, int maxCars) {
+    int placed = 0;
+    for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed < maxCars; ++slot) {
+        if (UnitLiving(gCops[slot]))
+            continue;
+        const int idx = placed;
+        Vec3 carAt, face;
+        BlockSlotPos(at, segDir, idx, &carAt, &face);
+        if (SpawnUnit(slot, carAt, face, true)) {
+            ++placed;
+            Log("cop: roadblock car asleep across the road at (%.0f, %.0f) (row %d)",
+                carAt.x, carAt.y, idx / 2 + 1);
+        }
+    }
+    if (placed > 0) {
+        sBlockPoint = at;
+        sBlockDir = segDir;
+        sBlockLive = true;
+    }
+    return placed;
+}
+
+// the block point on the prey's road, `ahead` metres along the found
+// route (PlaceRoadblock's fan and walk, extracted for items 2/15/22).
+// With preferBridge (item 9) the fan keeps looking past the first
+// workable route for a point standing over water: a bridge is a wall
+// on both sides - the one crossing he cannot leave, and no verge to
+// run. The first workable point is kept as the fallback
+bool BlockRoutePoint(const Vec3& playerPos, float ahead, Vec3* outAt, Vec3* outSegDir,
+                     bool preferBridge) {
     Vec3 pDir(0, 1, 0);
     {
         Vec3 v = gThreat.playerVel;
@@ -1679,16 +1815,24 @@ bool PlaceRoadblock(const Vec3& playerPos) {
         }
     }
     static const float kFanDeg[9] = { 0, 10, -10, 20, -20, 35, -35, 55, -55 };
+    bool have = false;
+    Vec3 fallbackAt, fallbackDir;
     for (int fi = 0; fi < 9; ++fi) {
         const float a = kFanDeg[fi] * 0.0174533f;
         const float ca = std::cos(a), sa = std::sin(a);
         const Vec3 dir(pDir.x * ca - pDir.y * sa, pDir.x * sa + pDir.y * ca, 0.0f);
-        const Vec3 dest = playerPos + dir * 64.0f;
+        // the fan's reach must cover the point it hunts, with the
+        // road's own winding on top: at item 15's braking distances
+        // (up to 110 m of ROAD) a 64 m fan crowned the block at the
+        // route's end instead, and even a 140 m fan read 85 where
+        // 110 was the law - the reach is the distance, half again,
+        // and a margin
+        const Vec3 dest = playerPos + dir * (ahead * 1.6f + 30.0f);
         std::vector<Vec3> route;
         float roadLen = 0.0f;
         if (!VehicleRoute(playerPos, dest, &route, &roadLen) || route.size() < 2 || roadLen < 35.0f)
             continue;
-        // the block point: kBlockAhead metres of road along the route
+        // the point: `ahead` metres of road along the route
         float covered = 0.0f;
         Vec3 at = route.back();
         Vec3 segDir = pDir;
@@ -1696,8 +1840,8 @@ bool PlaceRoadblock(const Vec3& playerPos) {
             Vec3 seg = route[i] - route[i - 1];
             seg.z = 0.0f;
             const float sl = seg.Length();
-            if (covered + sl >= kBlockAhead) {
-                const float t = sl > 0.001f ? (kBlockAhead - covered) / sl : 0.0f;
+            if (covered + sl >= ahead) {
+                const float t = sl > 0.001f ? (ahead - covered) / sl : 0.0f;
                 at = route[i - 1] + (route[i] - route[i - 1]) * t;
                 if (sl > 0.001f)
                     segDir = seg * (1.0f / sl);
@@ -1708,44 +1852,133 @@ bool PlaceRoadblock(const Vec3& playerPos) {
                 segDir = seg * (1.0f / sl);
             at = route[i];
         }
-        const Vec3 lateral(segDir.y, -segDir.x, 0.0f); // across the lanes
-        int placed = 0;
-        for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed < kMaxBlockCars; ++slot) {
-            if (UnitLiving(gCops[slot]))
-                continue;
-            const int row = placed / 2, col = placed % 2;
-            Vec3 carAt, face;
-            if (row == 0) {
-                const float side = col == 0 ? 2.3f : -2.3f;
-                carAt = at + lateral * side;
-                // the nose turns across the road, toward the far side:
-                // the two cars meet nose-outward across the lanes
-                // between them
-                face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f);
-            } else {
-                // the second row: 6 m of road back toward the player
-                // (segDir runs with his travel), staggered to the
-                // opposite laterals, noses across the road AND tipped
-                // back toward the traffic - the angled row: a driver
-                // who threads the first gap meets a nose, not a lane
-                const float side = col == 0 ? -1.4f : 1.4f;
-                carAt = at - segDir * 6.0f + lateral * side;
-                face = carAt - lateral * (side > 0.0f ? 5.0f : -5.0f) - segDir * 2.2f;
-            }
-            if (SpawnUnit(slot, carAt, face, true)) {
-                ++placed;
-                Log("cop: roadblock car asleep across the road at (%.0f, %.0f) (row %d)",
-                    carAt.x, carAt.y, row + 1);
-            }
-        }
-        if (placed > 0) {
-            Log("cop: ROADBLOCK placed %.0f m ahead of the player (%d car%s)",
-                kBlockAhead, placed, placed > 1 ? "s" : "");
+        if (!preferBridge) {
+            *outAt = at;
+            *outSegDir = segDir;
             return true;
         }
-        return false; // the road was found but no block slot is free
+        if (!have) {
+            have = true;
+            fallbackAt = at;
+            fallbackDir = segDir;
+        }
+        float wl = 0.0f;
+        if (TheHost().WaterLevel(at, &wl) && wl < at.z - 1.0f && wl > at.z - 30.0f) {
+            *outAt = at; // over water, not in it: a bridge deck
+            *outSegDir = segDir;
+            Log("cop: the block takes the bridge - water under the road at the crossing");
+            return true;
+        }
     }
-    Log("cop: roadblock wanted but no road ahead of the player took it");
+    if (have) {
+        *outAt = fallbackAt;
+        *outSegDir = fallbackDir;
+        return true;
+    }
+    return false;
+}
+
+bool PlaceRoadblock(const Vec3& playerPos) {
+    const float ahead = BlockAheadFor(gThreat.playerVel.Length()); // item 15
+    Vec3 at, segDir;
+    if (!BlockRoutePoint(playerPos, ahead, &at, &segDir,
+                         Page().felony >= 1638.0f)) { // item 9's bridge taste
+        Log("cop: roadblock wanted but no road ahead of the player took it");
+        return false;
+    }
+    const int placed = PlaceBlockAt(at, segDir, kMaxBlockCars);
+    if (placed > 0) {
+        Log("cop: ROADBLOCK placed %.0f m ahead of the player (%d car%s)",
+            ahead, placed, placed > 1 ? "s" : "");
+        return true;
+    }
+    return false; // the road was found but no block slot is free
+}
+
+// item 22: the airport run, read in advance. At the ladder's top,
+// when he is driving AT an airport (his heading carries him to it
+// and it is near enough to be the run's end), the block does not
+// stand on his road at braking distance - it stands on the approach
+// itself, 40 m of road before the door, where the airport's own
+// roads give him no second way in. (Stations: the atlas carries no
+// station kind - named in the report, not invented here.)
+bool TryAirportBlock(const Vec3& playerPos) {
+    if (Page().felony < 2457.0f)
+        return false;
+    Vec3 v = gThreat.playerVel;
+    v.z = 0.0f;
+    if (v.Length() < 4.0f)
+        return false;
+    const Vec3 vd = v * (1.0f / v.Length());
+    int best = -1;
+    float bestD = 550.0f;
+    AtlasPoiInfo poi;
+    for (int i = 0; i < AtlasPoiCount(); ++i) {
+        if (!AtlasPoiGet(i, poi) || poi.kind != 15)
+            continue;
+        Vec3 to = poi.at - playerPos;
+        to.z = 0.0f;
+        const float d = to.Length();
+        if (d < 60.0f || d > 550.0f)
+            continue;
+        // a loose gate on purpose: the LS approach road bends some
+        // 64 degrees off the anchor mid-run (the suite's staging
+        // read dot 0.44 at the fire moment and a 0.5 gate silently
+        // declined) - the ROUTE to the door's road access, checked
+        // below, is the commitment proof; the snapshot heading only
+        // excludes a man driving away
+        if (to.Dot(vd) < 0.25f * d)
+            continue;
+        if (d < bestD) {
+            bestD = d;
+            best = i;
+        }
+    }
+    if (best < 0 || !AtlasPoiGet(best, poi))
+        return false;
+    // the run's end is the door's ROAD ACCESS: an airport's anchor
+    // stands on its runways, where no road route exists (the suite's
+    // first staging routed at the anchor and silently declined) -
+    // the approach a car actually drives ends at the nearest road
+    // point to the door
+    Vec3 doorRoad = poi.door;
+    {
+        const int dn = VehicleNearestNode(poi.door, 120.0f);
+        Vec3 np;
+        if (dn >= 0 && VehicleNodePos(dn, &np))
+            doorRoad = np;
+    }
+    std::vector<Vec3> route;
+    float roadLen = 0.0f;
+    if (!VehicleRoute(playerPos, doorRoad, &route, &roadLen) || route.size() < 2 ||
+        roadLen < 80.0f)
+        return false;
+    const float want = roadLen - 40.0f;
+    float covered = 0.0f;
+    Vec3 at = route.back();
+    Vec3 segDir = vd;
+    for (size_t i = 1; i < route.size(); ++i) {
+        Vec3 seg = route[i] - route[i - 1];
+        seg.z = 0.0f;
+        const float sl = seg.Length();
+        if (covered + sl >= want) {
+            const float t = sl > 0.001f ? (want - covered) / sl : 0.0f;
+            at = route[i - 1] + (route[i] - route[i - 1]) * t;
+            if (sl > 0.001f)
+                segDir = seg * (1.0f / sl);
+            break;
+        }
+        covered += sl;
+        if (sl > 0.001f)
+            segDir = seg * (1.0f / sl);
+        at = route[i];
+    }
+    const int placed = PlaceBlockAt(at, segDir, kMaxBlockCars);
+    if (placed > 0) {
+        Log("cop: the airport run is read - the block stands on his approach to %s, 40 m of road before the door",
+            poi.name);
+        return true;
+    }
     return false;
 }
 
@@ -1873,6 +2106,239 @@ void TacticsTick(const Vec3& preyPos) {
         gCops[flankL].role = 2;
 }
 
+// ---------------------------------------------------------------------------
+// The posts tick (the 39-package, layer B): once a second, the force
+// is given its PLACES - the doors of the building he is hiding in
+// (item 27), the rear exit he just came through (item 9), the mouth
+// of the dead end he is driving into (item 34). Posts are held
+// through the one hold mechanism; nothing here drives either.
+void PostsTick(const Vec3& preyPos) {
+    CopState& page = Page();
+    // ---- item 27: the man is indoors. He is SOMEWHERE KNOWN - the
+    // building - so his position is never "lost" while he is inside,
+    // and the force camps the family's street doors: whichever door
+    // he comes out of, a car is standing at it
+    const char* fam = nullptr;
+    if (AtlasHeavenFamAt(preyPos, 4.0f, fam)) {
+        page.known = true;
+        page.unseenT = 0.0f;
+        if (!sIndoor || std::strcmp(sIndoorFam, fam) != 0 != 0) {
+            std::snprintf(sIndoorFam, sizeof(sIndoorFam), "%s", fam);
+            Log("cop: the prey went inside (%s) - the force camps its doors", fam);
+        }
+        sIndoor = true;
+        int first = 0, count = 0;
+        if (AtlasDoorFamRange(fam, first, count) && count > 0) {
+            // the family's street doors, nearest first (door counts
+            // per family are small; a plain insertion pass serves)
+            int order[16];
+            int nd = count < 16 ? count : 16;
+            for (int i = 0; i < nd; ++i)
+                order[i] = first + i;
+            for (int i = 1; i < nd; ++i) {
+                const int o = order[i];
+                const char* f2;
+                Vec3 eO, xO, eJ, xJ;
+                AtlasDoorGet(o, f2, eO, xO);
+                int j = i - 1;
+                while (j >= 0) {
+                    AtlasDoorGet(order[j], f2, eJ, xJ);
+                    if ((eJ - preyPos).Length() <= (eO - preyPos).Length())
+                        break;
+                    order[j + 1] = order[j];
+                    --j;
+                }
+                order[j + 1] = o;
+            }
+            int assigned = 0;
+            for (int slot = 0; slot < kMaxCopCars && assigned < nd && assigned < 4; ++slot) {
+                CopState& c = gCops[slot];
+                if (!UnitLiving(c) || (c.mode != COP_PURSUE && c.mode != COP_IDLE))
+                    continue;
+                const char* f3;
+                Vec3 entry, ex;
+                if (!AtlasDoorGet(order[assigned], f3, entry, ex))
+                    break;
+                c.holdPoint = entry;
+                c.holding = true;
+                ++assigned;
+            }
+        }
+        return; // while he is inside, the doors are the only posts
+    }
+    if (sIndoor) {
+        sIndoor = false;
+        int first = 0, count = 0;
+        if (AtlasDoorFamRange(sIndoorFam, first, count)) {
+            for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+                CopState& c = gCops[slot];
+                if (!c.holding)
+                    continue;
+                for (int i = first; i < first + count; ++i) {
+                    const char* f4;
+                    Vec3 entry, ex;
+                    if (AtlasDoorGet(i, f4, entry, ex) &&
+                        (c.holdPoint - entry).Length() < 3.0f) {
+                        c.holding = false;
+                        break;
+                    }
+                }
+            }
+        }
+        Log("cop: the prey is outside again - the door camps stand down");
+    }
+
+    Vec3 pFwd(0, 1, 0);
+    {
+        Vec3 flat = gThreat.playerVel;
+        flat.z = 0.0f;
+        if (flat.Length() > 2.0f)
+            pFwd = flat * (1.0f / flat.Length());
+    }
+    // ---- item 9, the rear-exit guard: at the felony cap, while he
+    // runs, one pursuer is re-tasked for ten seconds to hold the road
+    // point 30 m BEHIND him - the exit he just came through is a door
+    // too, and it stays watched while the pack presses from the front
+    if (sRearSlot >= 0) {
+        sRearT -= 1.0f;
+        if (sRearT <= 0.0f) {
+            if (sRearSlot < kMaxCopUnits && gCops[sRearSlot].holding)
+                gCops[sRearSlot].holding = false;
+            sRearSlot = -1;
+            sRearCool = 5.0f; // a spent watch is spent: five seconds
+                // before another is posted, or the release is a
+                // fiction the same tick re-picks over (the suite's
+                // stand-down read convicted exactly that)
+        }
+    }
+    if (sRearCool > 0.0f)
+        sRearCool -= 1.0f;
+    if (sRearSlot < 0 && sRearCool <= 0.0f && page.felony >= kFelonyCap - 1.0f &&
+        gThreat.playerInVehicle) {
+        int pick = -1;
+        float farD = -1.0f;
+        for (int slot = 0; slot < kMaxCopCars; ++slot) {
+            const CopState& c = gCops[slot];
+            if (!UnitLiving(c) || c.mode != COP_PURSUE || c.holding)
+                continue;
+            const float d = (c.pos - preyPos).Length();
+            if (d > farD) {
+                farD = d;
+                pick = slot;
+            }
+        }
+        if (pick >= 0) {
+            const Vec3 backPt = preyPos - pFwd * 30.0f;
+            const int node = VehicleNearestNode(backPt, 45.0f);
+            Vec3 np;
+            if (node >= 0 && VehicleNodePos(node, &np)) {
+                gCops[pick].holdPoint = np;
+                gCops[pick].holding = true;
+                gCops[pick].holdArrived = false;
+                sRearSlot = pick;
+                sRearT = 10.0f;
+                Log("cop: one unit holds the rear exit - the road behind him stays watched");
+            }
+        }
+    }
+    // ---- item 34, the dead-end trap: walk his road forward the way
+    // he is driving it; if it dies (a degree-1 tip) with a real
+    // pocket behind it, the second unit holds the last junction -
+    // the mouth - and the pocket has one way out, past a waiting car
+    if (sMouthSlot >= 0) {
+        sMouthT -= 1.0f;
+        if (sMouthT <= 0.0f) {
+            if (sMouthSlot < kMaxCopUnits && gCops[sMouthSlot].holding)
+                gCops[sMouthSlot].holding = false;
+            sMouthSlot = -1;
+        }
+    }
+    if (sMouthSlot < 0 && page.felony >= 1638.0f && gThreat.playerInVehicle &&
+        gThreat.playerVel.Length() > 3.0f) {
+        const int start = VehicleNearestNode(preyPos, 30.0f);
+        if (start >= 0) {
+            Vec3 vd = gThreat.playerVel;
+            vd.z = 0.0f;
+            vd = vd * (1.0f / vd.Length());
+            int cur = start, prev = -1, mouth = start, tip = -1;
+            float walked = 0.0f;
+            Vec3 curPos;
+            VehicleNodePos(cur, &curPos);
+            for (int step = 0; step < 40; ++step) {
+                const int deg = VehicleNodeDegree(cur);
+                if (deg >= 3)
+                    mouth = cur;
+                if (deg <= 1 && cur != start) {
+                    tip = cur;
+                    break;
+                }
+                int next = -1;
+                float bestAlign = -2.0f;
+                Vec3 nextPos;
+                for (int i = 0; i < deg; ++i) {
+                    const int to = VehicleNodeEdgeTo(cur, i);
+                    if (to < 0 || to == prev)
+                        continue;
+                    Vec3 tp;
+                    if (!VehicleNodePos(to, &tp))
+                        continue;
+                    Vec3 dirv = tp - curPos;
+                    dirv.z = 0.0f;
+                    const float l = dirv.Length();
+                    if (l < 0.01f)
+                        continue;
+                    const float al = dirv.Dot(vd) / l;
+                    if (al > bestAlign) {
+                        bestAlign = al;
+                        next = to;
+                        nextPos = tp;
+                    }
+                }
+                if (next < 0)
+                    break; // the road loops on - a junction, no pocket
+                walked += (nextPos - curPos).Length();
+                prev = cur;
+                cur = next;
+                curPos = nextPos;
+                if (walked > 160.0f)
+                    break;
+            }
+            if (tip >= 0 && walked >= 25.0f) {
+                // the second-nearest pursuer takes the mouth (the
+                // lead stays on him - a trap with nobody inside it
+                // pressing is just a parked car)
+                int near1 = -1, near2 = -1;
+                float d1 = 1e18f, d2 = 1e18f;
+                for (int slot = 0; slot < kMaxCopCars; ++slot) {
+                    const CopState& c = gCops[slot];
+                    if (!UnitLiving(c) || c.mode != COP_PURSUE || c.holding)
+                        continue;
+                    const float d = (c.pos - preyPos).Length();
+                    if (d < d1) {
+                        d2 = d1;
+                        near2 = near1;
+                        d1 = d;
+                        near1 = slot;
+                    } else if (d < d2) {
+                        d2 = d;
+                        near2 = slot;
+                    }
+                }
+                Vec3 mp;
+                if (near2 >= 0 && VehicleNodePos(mouth, &mp)) {
+                    gCops[near2].holdPoint = mp;
+                    gCops[near2].holding = true;
+                    gCops[near2].holdArrived = false;
+                    sMouthSlot = near2;
+                    sMouthT = 8.0f;
+                    Log("cop: his road dies %.0f m ahead - a unit holds the mouth of the dead end",
+                        walked);
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 void CopReset() {
@@ -1901,6 +2367,16 @@ void CopReset() {
     sTurnStrike = false;
     sHeadOk = false;
     sWallOpenSide = 0.0f;
+    sPostsT = 0.0f;
+    sRearT = 0.0f;
+    sRearSlot = -1;
+    sRearCool = 0.0f;
+    sMouthT = 0.0f;
+    sMouthSlot = -1;
+    sIndoor = false;
+    sIndoorFam[0] = '\0';
+    sCreepT = 0.0f;
+    sBlockLive = false;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
     gThreat.felony = 0.0f;
@@ -2537,6 +3013,8 @@ void CopTick(float dt, const Vec3& playerPos) {
             if ((wantPursue && d < kBlockWakeDist) || struckRamU[slot] > 0.5f ||
                 struckShotU[slot] > 0.5f) {
                 c.mode = COP_PURSUE;
+                c.holding = false; // a woken block is a pursuit, not a post
+                c.holdArrived = false;
                 c.fairStartT = kCopFairStart; // a waking unit is a fresh
                     // drive order too (fix round 5)
                 Log("cop: the roadblock wakes - its unit is in the pursuit now, book and brain his own");
@@ -2674,6 +3152,13 @@ void CopTick(float dt, const Vec3& playerPos) {
         sTacticsT = 1.0f;
         TacticsTick(preyPos);
     }
+    // the posts tick (layer B): the force's places - door camps, the
+    // rear-exit guard, the dead-end mouth - on the same 1 s cadence
+    sPostsT -= dt;
+    if (sPostsT <= 0.0f) {
+        sPostsT = 1.0f;
+        PostsTick(preyPos);
+    }
 
     // the spawn clock (ControlNumberOfCops): while the ladder is short,
     // the delay shrinks with the felony - 64 ticks at felony 0, half
@@ -2736,10 +3221,51 @@ void CopTick(float dt, const Vec3& playerPos) {
             for (int slot = 0; slot < kMaxCopUnits; ++slot)
                 if (UnitLiving(gCops[slot]) && gCops[slot].mode == COP_PURSUE)
                     pursuing = true;
-            if (pursuing && page.felony >= kBlockFireFelony)
-                PlaceRoadblock(preyPos);
+            if (pursuing && page.felony >= kBlockFireFelony) {
+                if (!TryAirportBlock(preyPos)) // item 22 reads the
+                    PlaceRoadblock(preyPos);   // airport run first
+            }
             sBlockTimer = BlockDelay();
         }
+    }
+
+    // item 2, the living block: while a block stands asleep and the
+    // man is still far from it, his crossing is recomputed on a 2 s
+    // cadence - if his braking point has moved on by a real margin,
+    // the cars creep to their slots around the new point at a street
+    // pace. A woken block is a pursuit, not a post, and the creep
+    // never runs under his nose (55 m) where the wake owns them
+    if (sBlockLive && CopBlockCount() > 0) {
+        sCreepT -= dt;
+        if (sCreepT <= 0.0f) {
+            sCreepT = 2.0f;
+            bool allAsleep = true;
+            for (int slot = kMaxCopCars; slot < kMaxCopUnits; ++slot)
+                if (UnitLiving(gCops[slot]) && gCops[slot].mode != COP_BLOCK)
+                    allAsleep = false;
+            if (allAsleep && (preyPos - sBlockPoint).Length() > 55.0f) {
+                Vec3 at, segDir;
+                if (BlockRoutePoint(preyPos, BlockAheadFor(gThreat.playerVel.Length()),
+                                    &at, &segDir, false) &&
+                    (at - sBlockPoint).Length() > 12.0f) {
+                    for (int slot = kMaxCopCars; slot < kMaxCopUnits; ++slot) {
+                        CopState& c = gCops[slot];
+                        if (!UnitLiving(c) || c.mode != COP_BLOCK)
+                            continue;
+                        Vec3 carAt, face;
+                        BlockSlotPos(at, segDir, slot - kMaxCopCars, &carAt, &face);
+                        c.holdPoint = carAt;
+                        c.holding = true;
+                        c.holdArrived = false;
+                    }
+                    sBlockPoint = at;
+                    sBlockDir = segDir;
+                    Log("cop: the block creeps - his crossing moved on, the cars roll to the new line");
+                }
+            }
+        }
+    } else {
+        sCreepT = 0.0f;
     }
 
     // ---- the shared road field, refreshed ONCE for the whole force
@@ -2768,14 +3294,25 @@ void CopTick(float dt, const Vec3& playerPos) {
             SpikeDrive(dt);
             break;
         case COP_PURSUE:
-            CopControl(c, dt);
+            if (c.holding)
+                HoldControl(c, dt);
+            else
+                CopControl(c, dt);
             break;
         case COP_LEAVE:
             LeaveDrive(c, dt, preyPos);
             break;
         case COP_IDLE:
+            if (c.holding)
+                HoldControl(c, dt);
+            else
+                StandDrive(c);
+            break;
         case COP_BLOCK:
-            StandDrive(c);
+            if (c.holding)
+                HoldControl(c, dt); // item 2: the living block creeps
+            else
+                StandDrive(c);
             break;
         default:
             break;
