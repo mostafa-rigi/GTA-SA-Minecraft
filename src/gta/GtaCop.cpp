@@ -435,6 +435,57 @@ void StampDrive(CVehicle* veh, CopBodyState& b) {
     // orders). The stamp is the body's first word of control; the
     // switch opens with it, seated or not
     veh->bIsHandbrakeOn = false;
+    // THE FOURTH WORD (2026-11-08): clear the park latch. The
+    // missing-link session's census (17:29, shape-(b) build
+    // 39d43e9e) convicted the one field that never moved while
+    // everything else answered our words: m_fBrakeCount
+    // (CAutomobile 0x804, CBike 0x740 - "the brake integrator" of
+    // the census table above) sat pinned at exactly 20.00, its
+    // cap, for a full minute of gas 1.00 at brake pedal 0.00 -
+    // gear 1, the rev counter climbing 0.50 -> 1.00, and the
+    // wheel speeds dead at -0.0 on every wheel. A value held at
+    // its cap against a zero brake pedal is not decaying physics
+    // residue; something tops it up each frame on a body whose
+    // mission reads NONE, and the only per-frame writer we run
+    // on this body with a stand-still brief is the original at
+    // this very desk, speaking just before us under shape (b).
+    // While the latch stands, physics lets no drive force reach
+    // the wheels - the engine revs against a parked car. So the
+    // stamp clears it, in this same call, after the original:
+    // whenever the stored command carries DRIVE INTENT. Intent
+    // in the core's own pedal language is: gas above the
+    // threshold (forward), or a brake word while the body is at
+    // rest or already rolling backward (on this host a held
+    // brake at a standstill IS the reverse gear - StandDrive's
+    // law in the core, and the recovery's extraction rides the
+    // same field out of a wedged stop). The threshold is 0.05:
+    // five times under the smallest deliberate drive word the
+    // core ever sends (the pursuit blend's gas floors at 0.25;
+    // deliberate brake words are 0.6-class) and above the idle
+    // defaults (gas 0.0 - and this stamp only runs under
+    // haveCmd, so the stored brake default never reaches here).
+    // The exception is the HOLD: a command with no drive intent
+    // (gassing nowhere, braking only while rolling in to slow,
+    // or the standstill words) leaves the latch alone - a unit
+    // the core is braking onto a post and holding there WANTS
+    // the park latch; there it works for us, not against us.
+    // If a writer after this desk in the pass re-tops the latch,
+    // the census shows bc back at 20.00 under drive orders next
+    // session and names that instead - the clear stands where
+    // the evidence puts the top-up: before physics, after the
+    // original, at the desk physics reads.
+    {
+        const CVector& mv = veh->m_vecMoveSpeed;
+        const float spd2 = mv.x * mv.x + mv.y * mv.y;
+        const bool driveIntent =
+            b.gas > 0.05f || (b.brake > 0.05f && spd2 <= 0.25f);
+        if (driveIntent) {
+            if (b.bike)
+                static_cast<CBike*>(veh)->m_fBrakeCount = 0.0f;
+            else
+                static_cast<CAutomobile*>(veh)->m_fBrakeCount = 0.0f;
+        }
+    }
     if (b.seated) {
         veh->bEngineOn = true;
         veh->m_autoPilot.m_nCarMission = MISSION_NONE;
