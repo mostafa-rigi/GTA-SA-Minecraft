@@ -330,11 +330,55 @@ int sPreyVeh = -1;
 int sPreyPed = -1;
 bool PreyOverrideOn() { return sPreyVeh >= 0 || sPreyPed >= 0; }
 
+// ---- the 39-package's force-level state. The tactics tick (1 s
+// cadence, TacticsTick below) owns the assignments; the per-tick
+// trackers in CopTick own the windows. All of it resets in CopReset.
+float sTacticsT = 0.0f;   // the tactics cadence's clock
+float sPursuitT = 0.0f;   // item 21: continuous seconds of pursuit at
+                          // the felony cap - the heat clock
+int sHeat = 0;            // item 21: escalation steps, 0..5
+float sPreyTopSeen = 0.0f; // item 26: the prey's measured top speed
+                          // this pursuit (m/s) - spawns price off it
+bool sHandover = false;   // item 16: a pursuer fell - the ladder
+                          // replaces him NOW, near where he fell
+Vec3 sHandoverPos;
+float sHandoverT = 0.0f;
+float sCrashT = 0.0f;     // item 31: the prey just crashed - the
+                          // strike window, seconds left
+float sSpdOld = 0.0f;     // the crash witness's older speed sample
+float sSpdAge = 1e9f;     // seconds since that sample was taken
+float sSyncT = 0.0f;      // item 11: the synchronised-hit window
+float sTurnRate = 0.0f;   // item 12: the prey's smoothed yaw rate
+bool sTurnStrike = false; // |turn rate| past the strike line, with a
+                          // pursuer close enough to spend it
+float sHeadPrev = 0.0f;   // the yaw witness's last heading
+bool sHeadOk = false;
+float sWallOpenSide = 0.0f; // item 13: -1/+1 = the prey's open side
+                          // (the other has world geometry within 9 m),
+                          // 0 = both open or both walled
+
+float WreckLineOf(const CopState& c) {
+    return c.wreckLine > 0.0f ? c.wreckLine : kWreckLine;
+}
+// item 21's pace: each full minute of max-felony pursuit buys the
+// force 8% more pace, five steps deep - time works for the force,
+// never for the man (the user's escalation order).
+float HeatPace() { return 1.0f + 0.08f * (float)sHeat; }
+// The one multiplier every pace-row reading rides: the cutoff's
+// scale (the original's), the counter-pick's (item 26) and the
+// heat's (item 21) compose here so no call site can forget one.
+float PaceMul(const CopState& c) {
+    return c.powerScale * c.paceScale * HeatPace();
+}
+
 float BlockDelay() {
     // THE 5x UPDATE: the whole armed count is divided by five, the
     // random tail included (pressure x5) - the hardest row's
-    // 800..1055 ticks (16..21 s) become 3.2..4.2 s.
-    return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick / 5.0f;
+    // 800..1055 ticks (16..21 s) become 3.2..4.2 s. THE 39-PACKAGE:
+    // item 21's heat divides it again - the longer a max-felony chase
+    // runs, the faster the next block is laid over his road.
+    return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick / 5.0f /
+           (1.0f + (float)sHeat);
 }
 
 int LadderWanted(float felony) {
@@ -903,9 +947,11 @@ void PursuitFeed(CopState& c, const Vec3& target) {
         // the pacing blend is dead there (CopControl's front zone),
         // and the feed says the same law in its own channel - a side
         // zone's manoeuvre desire does not get to feed a crawl while
-        // the felony stands at the ladder's top
-        if (c.batter)
-            c.feedCruise = std::fmax(c.feedCruise, kSpeed1[kDifficulty] * c.powerScale);
+        // the felony stands at the ladder's top. THE 39-PACKAGE: the
+        // crash window (item 31) buys the same floor - a crashed prey
+        // is fed at batter pace for as long as the window stands
+        if (c.batter || sCrashT > 0.0f)
+            c.feedCruise = std::fmax(c.feedCruise, kSpeed1[kDifficulty] * PaceMul(c));
     } else {
         Vec3 to = target - c.pos;
         to.z = 0.0f;
@@ -930,6 +976,35 @@ void CopControl(CopState& c, float dt) {
     const bool playerInCar = gThreat.playerInVehicle;
     const Vec3 pPos = gThreat.playerPos;
     const Vec3 pVel = gThreat.playerVel;
+
+    // the prey's frame, hoisted (the 39-package): his nose follows
+    // his velocity on the road; standing still, the host's own pose
+    // answers (the tail only needs a direction to stand behind - at
+    // a standstill any error is a metre, inside the pacing blend's
+    // own slack). The intercept below aims in this frame, and the
+    // package's aim laws - roles, the PIT, the head-on, the front
+    // unit's brake-check - read it after, so it is computed once.
+    Vec3 pFwd(0, 1, 0);
+    {
+        Vec3 flat = pVel;
+        flat.z = 0.0f;
+        if (flat.Length() > 2.0f) {
+            pFwd = flat * (1.0f / flat.Length());
+        } else if (playerInCar && sPreyVeh < 0 && sPreyPed < 0) {
+            // (the pose verb answers for the PLAYER's own car; under
+            // a /coptest prey override the prey is a decoy, whose
+            // standing nose the velocity fallback above already
+            // covers as well as a standstill allows)
+            Vec3 cc, f, chest, v;
+            if (TheHost().PlayerVehiclePose(&cc, &f, &chest, &v)) {
+                f.z = 0.0f;
+                if (f.Length() > 0.01f)
+                    pFwd = f * (1.0f / f.Length());
+            }
+        }
+    }
+    const Vec3 pRight(pFwd.y, -pFwd.x, 0.0f);
+    bool headOn = false; // item 19, set in the aim laws below
 
     // the bumper corners, probed every 8 ticks like the original: a point
     // 400 units ahead and 150 to the side (1.56 m / 0.59 m) - the original
@@ -1097,30 +1172,6 @@ void CopControl(CopState& c, float dt) {
                 frames = frames * 3.0f / 4.0f;
         }
         const Vec3 intercept = pPos + pVel * (frames * kTick);
-        // his nose: a moving car's nose follows its velocity on the road;
-        // standing still, the host's own pose answers (the tail only needs
-        // a direction to stand behind - at a standstill any error is a
-        // metre, inside the pacing blend's own slack)
-        Vec3 pFwd(0, 1, 0);
-        {
-            Vec3 flat = pVel;
-            flat.z = 0.0f;
-            if (flat.Length() > 2.0f) {
-                pFwd = flat * (1.0f / flat.Length());
-            } else if (playerInCar && sPreyVeh < 0 && sPreyPed < 0) {
-                // (the pose verb answers for the PLAYER's own car; under
-                // a /coptest prey override the prey is a decoy, whose
-                // standing nose the velocity fallback above already
-                // covers as well as a standstill allows)
-                Vec3 cc, f, chest, v;
-                if (TheHost().PlayerVehiclePose(&cc, &f, &chest, &v)) {
-                    f.z = 0.0f;
-                    if (f.Length() > 0.01f)
-                        pFwd = f * (1.0f / f.Length());
-                }
-            }
-        }
-        const Vec3 pRight(pFwd.y, -pFwd.x, 0.0f);
         if (!playerInCar)
             target = intercept; // SA adaptation, the user's order
                 // (2026-11-07): the hunt binds to the MAN, never to his
@@ -1143,6 +1194,67 @@ void CopControl(CopState& c, float dt) {
                 // the matrix arithmetic of the original lands at ~2.5 m
         else
             target = intercept - pFwd * 2.5f; // the CarTail: behind his rear
+        // ---- the 39-package's aim laws, laid over the original's
+        // target (car prey only - the man on foot is aimed at himself
+        // at every felony, the zero-mercy amendment above, and no
+        // role or manoeuvre in this package moves that point)
+        if (playerInCar) {
+            Vec3 relU = c.pos - pPos;
+            relU.z = 0.0f;
+            const float distU = relU.Length();
+            const float latU = relU.Dot(pRight);
+            const float fwdU = relU.Dot(pFwd);
+            // item 19, the head-on: he is driving AT this unit (the
+            // unit stands in his forward cone, closing) - the unit
+            // does not take the tail or a flank; it takes his centre
+            // (the desire press rides in the front zone below).
+            // Chicken is a two-player game only if both play. THE
+            // GATE'S SECOND HALF is the suite's own conviction: the
+            // unit must not already be OUTRUNNING him - a unit that
+            // overshoots ahead of the prey in the ordinary dance sits
+            // in his forward cone too, and the first staging of this
+            // law read that as a head-on forever: floored at the
+            // straight row it fled the chase at full pace and lost
+            // him. A head-on is a MEETING - it ends the moment the
+            // unit is the faster one running away.
+            // (and the unit must not be the tactics tick's posted
+            // FRONT unit: that unit stands in his forward cone BY
+            // ASSIGNMENT, brake-check post in hand - the head-on
+            // pattern is for a unit he drives at by circumstance,
+            // and letting it override the post collapses the front
+            // unit's aim onto his centre, which the suite's roles
+            // staging convicted on sight)
+            headOn = pVel.Length() > 8.0f && distU > 2.0f && distU < 70.0f &&
+                     fwdU > 0.6f * distU && c.vel.Length() < pVel.Length() + 6.0f &&
+                     c.role != 3;
+            if (headOn || sSyncT > 0.0f || c.lastRamT > 0.0f) {
+                // the head-on, the synchronised hit (item 11: the
+                // flank aim collapses to the centre for the window)
+                // and the dying unit's last ram (item 8) all aim at
+                // the man himself, dead centre
+                target = intercept;
+            } else if (c.batter && distU < 15.0f) {
+                // item 6, the PIT: at batter, close, the aim is his
+                // rear quarter on THIS unit's own side - the hit that
+                // turns him, priced again in the kick's spin
+                const float side = latU >= 0.0f ? 1.0f : -1.0f;
+                target = intercept - pFwd * 1.9f + pRight * (side * 0.95f);
+            } else if (c.role == 1) {
+                target = intercept + pRight * 3.4f; // item 1: the
+                    // right flank rides at his door, not his centre
+            } else if (c.role == 2) {
+                target = intercept - pRight * 3.4f; // the left flank
+            } else if (c.role == 3) {
+                target = intercept + pFwd * 9.0f; // item 1: the front
+                    // unit runs ahead of him, to brake-check him
+            }
+            // item 24/25's aim override (a traffic car in the
+            // corridor to be shoved into him, a wounded friend to be
+            // pushed into the fight) outranks every pattern above:
+            // the tactics tick only sets it for one tick at a time
+            if (c.aimOverrideOn)
+                target = c.aimOverride;
+        }
     } else {
         // FAR: WibbleDownTheRoad - walk the field's descent from where he
         // stands by his speed and 680 units of road, and aim at the point
@@ -1181,7 +1293,14 @@ void CopControl(CopState& c, float dt) {
             target = pPos; // no road field (graph absent): the original's
                            // own fallback aims at the man himself
         }
-        c.desiredSpeed = (straight ? kSpeed2[kDifficulty] : kSpeed1[kDifficulty]) * c.powerScale;
+        c.desiredSpeed = (straight ? kSpeed2[kDifficulty] : kSpeed1[kDifficulty]) * PaceMul(c);
+        // the 39-package's far floors: a prey mid-turn (item 12) or a
+        // unit spending its last ram (item 8) never reads the far
+        // desire under the strike rows
+        if (sTurnStrike)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed1[kDifficulty] * PaceMul(c));
+        if (c.lastRamT > 0.0f)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed2[kDifficulty] * PaceMul(c));
         // (pathStraight is consumed by the speed choice and the thrust
         // bonus below; it is recomputed with the target every far tick)
         c.target = target;
@@ -1253,7 +1372,7 @@ void CopControl(CopState& c, float dt) {
     }
     float wantWheel;
     if (zone == ZONE_FRONT) {
-        c.desiredSpeed = kSpeed1[kDifficulty] * c.powerScale;
+        c.desiredSpeed = kSpeed1[kDifficulty] * PaceMul(c);
         // the anti-rear-end pacing: close and not battering, blend the
         // desire toward just under the man's own speed. Car-to-car only:
         // on foot the man gets the full pressure speed (the same user
@@ -1262,8 +1381,12 @@ void CopControl(CopState& c, float dt) {
         // words: at felony >= 2457 (c.batter) the blend is DEAD - his
         // speed is never tied to the prey's again, and PursuitFeed
         // floors the fed cruise at the batter pace to match. Below
-        // batter the original's blend stands as it was.
-        if (cost < kPaceCost && !c.batter && playerInCar) {
+        // batter the original's blend stands as it was. THE 39-PACKAGE
+        // adds its own two deaths to the blend: a prey mid-turn (item
+        // 12) and a prey in his crash window (item 31) are struck at
+        // full pace, never paced - those are the two moments he
+        // cannot answer, and tying our speed to his then is mercy.
+        if (cost < kPaceCost && !c.batter && playerInCar && sCrashT <= 0.0f && !sTurnStrike) {
             const float pSpeed = pVel.Length();
             const float w = cost / kPaceCost;
             const float paced = std::fmax(pSpeed - 20 * kV, 20 * kV);
@@ -1271,6 +1394,35 @@ void CopControl(CopState& c, float dt) {
             if (c.desiredSpeed < 0.0f)
                 c.desiredSpeed = 0.0f;
         }
+        // the 39-package's front-zone rulings, after the blend:
+        // item 1's brake-check - the FRONT unit, standing ahead of
+        // him on his own line and close, caps his desire just under
+        // the prey's own speed: the prey may brake, or he may hit
+        // the unit; running through the gap is the one answer he is
+        // not offered
+        if (c.role == 3 && playerInCar) {
+            Vec3 relU = c.pos - pPos;
+            relU.z = 0.0f;
+            if (relU.Dot(pFwd) > 2.0f && relU.Length() < 16.0f)
+                c.desiredSpeed = std::fmin(c.desiredSpeed,
+                                           std::fmax(pVel.Length() - 2.0f, 8.0f));
+        }
+        // item 19's head-on desire: his own pace, pressed a fifth
+        // harder - the unit meets him coming, it does not flee him
+        // at the straight row (the same conviction as the gate: a
+        // full-row floor here swung the unit's turn so wide at the
+        // overshoot that it left the road and the chase)
+        if (headOn)
+            c.desiredSpeed = std::fmax(c.desiredSpeed,
+                                       pVel.Length() * 1.2f / (25.0f / 138.0f) * PaceMul(c));
+        // items 12/31's strike floors and item 8's last ram, again:
+        // whatever the blend or the brake-check just said, a turning
+        // or crashed prey is struck at the rows, and a dying unit
+        // spends its window at the straight row
+        if (sTurnStrike || sCrashT > 0.0f)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed1[kDifficulty] * PaceMul(c));
+        if (c.lastRamT > 0.0f)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed2[kDifficulty] * PaceMul(c));
         wantWheel = t > 0.5f ? Clamp(n * 512.0f / t, -512.0f, 512.0f)
                              : (n >= 0.0f ? 512.0f : -512.0f);
     } else if (zone == ZONE_BACK) {
@@ -1278,6 +1430,17 @@ void CopControl(CopState& c, float dt) {
         wantWheel = ((n < 0.0f) != (c.speed < 0.0f)) ? -284.0f : 284.0f;
     } else {
         c.desiredSpeed = kSideSpeed;
+        // the strike floors ride the side zones too (items 12/31/8):
+        // a unit swinging around the prey's side when the window
+        // opens does not get to keep manoeuvre pace - the strike is
+        // struck at the rows in every forward zone. The BACK zone
+        // alone is exempt: its reverse is a mechanical extraction,
+        // not a pace decision, and flooring it would floor the
+        // turnaround itself
+        if (sTurnStrike || sCrashT > 0.0f)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed1[kDifficulty] * PaceMul(c));
+        if (c.lastRamT > 0.0f)
+            c.desiredSpeed = std::fmax(c.desiredSpeed, kSpeed2[kDifficulty] * PaceMul(c));
         wantWheel = (zone == ZONE_LEFT ? -512.0f : 512.0f);
         if (((n < 0.0f) != (c.speed < 0.0f)))
             wantWheel = -wantWheel; // the original flips the lock by the
@@ -1380,6 +1543,21 @@ bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
     CopState& c = gCops[slot];
     c.veh = veh;
     c.pos = at;
+    c.wreckLine = kWreckLine;
+    // item 26's counter-pick: the replacement is measured against
+    // the prey this pursuit has actually seen, not the standard
+    // unit. The scale is his DEMONSTRATED ceiling against his
+    // present pace (both m/s, read at the spawn): a man who has
+    // shown 45 m/s and now cruises at 20 gets a unit scaled to the
+    // fastest version of him (45 x 1.12 / 20), capped at half again.
+    // The first spawn of a pursuit, before any measurement, rides
+    // 1.0. Under the 5x rows the absolute desire is already far past
+    // any prey - this scale's real work is keeping the unit's
+    // prey-relative pacing honest against the fastest him on record
+    {
+        const float nowMps = gThreat.playerVel.Length();
+        c.paceScale = Clamp(sPreyTopSeen * 1.12f / std::fmax(nowMps, 12.0f), 1.0f, 1.5f);
+    }
     c.blockUnit = block;
     c.mode = block ? COP_BLOCK : COP_IDLE;
     c.fairStartT = kCopFairStart; // a fresh body is a fresh drive
@@ -1395,7 +1573,7 @@ bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
 // full; the first in-band node wins, with a preference for the half of
 // the ring behind the player's motion (the spawner seats cars where the
 // player is not looking - ours approximates the looking with his vel).
-bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out) {
+bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out, const Vec3* prefer = nullptr) {
     Vec3 back(0, -1, 0);
     {
         Vec3 v = gThreat.playerVel;
@@ -1422,6 +1600,23 @@ bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out) {
         const float dl = dirv.Length();
         const float behind = dl > 0.5f ? (dirv * (1.0f / dl)).Dot(back) : 0.0f;
         float score = behind * 100.0f - std::fabs(d - kSpawnRing);
+        // item 16's handover preference: among the in-band candidates
+        // the one nearest the fallen unit's spot scores up - the band
+        // itself (50..95 m from the man, on the road) is NOT widened:
+        // a replacement still never lands in his face, it just takes
+        // the side of the ring the pressure was lost on. While a
+        // handover is active the preference REPLACES the generic
+        // behind score rather than bidding against it: the behind
+        // rule is a cold spawn's guess at where pressure belongs,
+        // and at a standstill its default facing (south) is no
+        // information at all - the suite's first staging of this
+        // law watched a south default outvote an east fall by
+        // construction, every time
+        if (prefer) {
+            Vec3 dp = np - *prefer;
+            dp.z = 0.0f;
+            score = -std::fabs(d - kSpawnRing) - dp.Length() * 1.5f;
+        }
         // THE PRESENCE TUNE (the user's ابهت order, 2026-11-08): a
         // point a living unit already stands on is worth less - each
         // unit within 30 m of the candidate costs it 60 of score, so
@@ -1554,6 +1749,130 @@ bool PlaceRoadblock(const Vec3& playerPos) {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// The tactics tick (the 39-package): once a second, the force is given
+// its shape - who leads, who flanks, who brake-checks from the front
+// (item 1); which side of the prey is walled, so the batter comes from
+// the open side and throws him at the wall (item 13); and whether two
+// units stand on opposite sides of him in range of the synchronised
+// hit (item 11). CopControl reads the assignments; nothing here drives.
+void TacticsTick(const Vec3& preyPos) {
+    int ps[kMaxCopUnits];
+    int n = 0;
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        CopState& c = gCops[slot];
+        if (!UnitLiving(c))
+            continue;
+        c.role = 0;
+        if (c.mode == COP_PURSUE && c.bailState == 0 && !c.holding)
+            ps[n++] = slot;
+    }
+    if (n == 0) {
+        sWallOpenSide = 0.0f;
+        return;
+    }
+    // the prey's frame: his nose follows his velocity on the road
+    Vec3 pFwd(0, 1, 0);
+    {
+        Vec3 flat = gThreat.playerVel;
+        flat.z = 0.0f;
+        if (flat.Length() > 2.0f)
+            pFwd = flat * (1.0f / flat.Length());
+    }
+    const Vec3 pRight(pFwd.y, -pFwd.x, 0.0f);
+    auto latOf = [&](int slot) {
+        Vec3 rel = gCops[slot].pos - preyPos;
+        rel.z = 0.0f;
+        return rel.Dot(pRight);
+    };
+    auto fwdOf = [&](int slot) {
+        Vec3 rel = gCops[slot].pos - preyPos;
+        rel.z = 0.0f;
+        return rel.Dot(pFwd);
+    };
+    auto distOf = [&](int slot) {
+        Vec3 rel = gCops[slot].pos - preyPos;
+        rel.z = 0.0f;
+        return rel.Length();
+    };
+    // the lead: the nearest pursuer, always
+    int lead = ps[0];
+    for (int i = 1; i < n; ++i)
+        if (distOf(ps[i]) < distOf(lead))
+            lead = ps[i];
+    // item 13: the wall reading - solid world within 9 m on either
+    // side of the man. The open side is where the batter wants to be:
+    // a hit struck FROM the open side throws him AT the wall.
+    sWallOpenSide = 0.0f;
+    if (gThreat.playerInVehicle) {
+        const bool wR = TheHost().LineBlockedWorld(preyPos + pRight * 9.0f, preyPos);
+        const bool wL = TheHost().LineBlockedWorld(preyPos - pRight * 9.0f, preyPos);
+        if (wR && !wL)
+            sWallOpenSide = -1.0f;
+        else if (wL && !wR)
+            sWallOpenSide = 1.0f;
+    }
+    // item 11: the synchronised hit - two pursuers inside 20 m on
+    // OPPOSITE sides of him, both genuinely beside him (|lat| > 2):
+    // for the window's length their flank aim collapses to his centre
+    // and they arrive together
+    for (int i = 0; i < n && sSyncT <= 0.0f; ++i) {
+        if (distOf(ps[i]) > 20.0f || std::fabs(latOf(ps[i])) < 2.0f)
+            continue;
+        for (int j = i + 1; j < n; ++j) {
+            if (distOf(ps[j]) > 20.0f || std::fabs(latOf(ps[j])) < 2.0f)
+                continue;
+            if ((latOf(ps[i]) > 0.0f) != (latOf(ps[j]) > 0.0f)) {
+                sSyncT = 1.5f;
+                Log("cop: two units stand on opposite sides of him - the synchronised hit is armed");
+                break;
+            }
+        }
+    }
+    if (n < 3)
+        return; // lead alone (or lead + one): no flanks to assign
+    // the front (item 1): with three or more, the unit standing
+    // furthest AHEAD of him on his own road - if he truly is ahead -
+    // takes the brake-check role
+    int front = -1;
+    float frontBest = 4.0f;
+    for (int i = 0; i < n; ++i) {
+        if (ps[i] == lead)
+            continue;
+        const float f = fwdOf(ps[i]);
+        if (f > frontBest) {
+            frontBest = f;
+            front = ps[i];
+        }
+    }
+    if (front >= 0)
+        gCops[front].role = 3;
+    // the flanks: the strongest lateral stands on each side, among
+    // those with no other role. A flank on the prey's WALLED side is
+    // stood down to a second lead - the batter belongs on the open
+    // side (item 13), and a man hugging a wall is not flanked into it.
+    int flankR = -1, flankL = -1;
+    float latR = 0.5f, latL = -0.5f;
+    for (int i = 0; i < n; ++i) {
+        const int s = ps[i];
+        if (s == lead || s == front)
+            continue;
+        const float l = latOf(s);
+        if (l > latR) {
+            latR = l;
+            flankR = s;
+        }
+        if (l < latL) {
+            latL = l;
+            flankL = s;
+        }
+    }
+    if (flankR >= 0 && sWallOpenSide >= 0.0f)
+        gCops[flankR].role = 1;
+    if (flankL >= 0 && sWallOpenSide <= 0.0f)
+        gCops[flankL].role = 2;
+}
+
 } // namespace
 
 void CopReset() {
@@ -1568,6 +1887,20 @@ void CopReset() {
     sBlockTimer = 0.0f;
     sPreyVeh = -1;
     sPreyPed = -1;
+    sTacticsT = 0.0f;
+    sPursuitT = 0.0f;
+    sHeat = 0;
+    sPreyTopSeen = 0.0f;
+    sHandover = false;
+    sHandoverT = 0.0f;
+    sCrashT = 0.0f;
+    sSpdOld = 0.0f;
+    sSpdAge = 1e9f;
+    sSyncT = 0.0f;
+    sTurnRate = 0.0f;
+    sTurnStrike = false;
+    sHeadOk = false;
+    sWallOpenSide = 0.0f;
     gThreat.copAlive = false;
     gThreat.copPursuing = false;
     gThreat.felony = 0.0f;
@@ -1639,6 +1972,7 @@ bool CopSummon(const Vec3& at, const Vec3& playerPos) {
     c.veh = veh;
     c.mode = COP_SPIKE;
     c.pos = at;
+    c.wreckLine = kWreckLine;
     // piece 0's route: a block of Grove's own streets, out and to a second
     // point the road graph itself connects - the same streets, the same
     // graph the atlas round proved (Grove rides to the airport on it)
@@ -1732,6 +2066,7 @@ void CopTick(float dt, const Vec3& playerPos) {
     float struckShotU[kMaxCopUnits] = {};
     float struckDriverU[kMaxCopUnits] = {};
     bool anySeen = false;
+    bool blastNoted = false; // item 33: one blast, one felony jump
     for (int slot = 0; slot < kMaxCopUnits; ++slot) {
         CopState& c = gCops[slot];
         if (c.veh < 0 || c.mode == COP_NONE)
@@ -1793,7 +2128,33 @@ void CopTick(float dt, const Vec3& playerPos) {
             playerDeltaPts *= deltaBill / rawDeltaPts;
         c.playerBookDamage += playerDeltaPts +
                               (fightContact ? impactPrice : 0.0f);
-        c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
+        c.health = Clamp(1.0f - c.totalDamage / WreckLineOf(c), 0.0f, 1.0f);
+        // item 33: a blast-class billing (the tick's health-delta
+        // channels hit the one-blast cap whole) is the heavy-weapon
+        // signature - and the answer is FELONY.C's own type 11,
+        // whose placid value IS the cap (4096): the felony jumps
+        // straight to the ceiling the moment a blast lands on a
+        // unit, it does not climb the ladder. Once per tick, however
+        // many units the same blast caught.
+        if (deltaBill >= kBlastPrice * 0.99f && !blastNoted) {
+            blastNoted = true;
+            if (page.felony < kFelonyCap) {
+                page.felony = kFelonyCap;
+                Log("cop: a blast-class hit on a unit - the felony jumps straight to the cap (his own type 11)");
+            }
+        }
+        // item 8: the dying unit's last ram - past 80% of his book
+        // he stops preserving himself: one window of full-pace,
+        // centre-aimed attack, his throws priced half again, and
+        // then he is spent either way
+        if (c.mode == COP_PURSUE && !c.lastRamDone && c.lastRamT <= 0.0f &&
+            c.totalDamage > 0.8f * WreckLineOf(c)) {
+            c.lastRamT = 4.0f;
+            Log("cop: unit %d is dying (book %.0f%% spent) - one last ram at full pace",
+                slot, 100.0f * c.totalDamage / WreckLineOf(c));
+        }
+        if (c.lastRamT > 0.0f)
+            c.lastRamT -= dt;
         // the book is DISPLAYED on the body (step 1's display band): the
         // host shows smoke and fire off its own health, his law decides
         // when he is out - the body never enters the host's burn band
@@ -1804,10 +2165,19 @@ void CopTick(float dt, const Vec3& playerPos) {
                 shown = 0.38f + 0.62f * shown;
             TheHost().CopBodySetHealth(c.veh, shown);
         }
-        if (c.totalDamage > kWreckLine && c.mode != COP_WRECKED) {
+        if (c.totalDamage > WreckLineOf(c) && c.mode != COP_WRECKED) {
+            const bool wasPursuing = c.mode == COP_PURSUE;
             c.mode = COP_WRECKED;
             Log("cop: a unit's book is spent (%.0f of his points) - he retires and burns as one unit, car and driver together",
                 c.totalDamage);
+            if (wasPursuing) {
+                // item 16: the handover is armed - the ladder's next
+                // spawn ignores its timer and enters near the fall,
+                // so the pressure never actually lets go of him
+                sHandover = true;
+                sHandoverPos = c.pos;
+                sHandoverT = 3.0f;
+            }
             if (c.playerBookDamage * 2.0f >= c.totalDamage) {
                 ThreatNoteOurUnitLost();
                 Log("cop: that retirement was the player's work - ourUnitsLost = %d (the replacement step's counter)",
@@ -1869,8 +2239,46 @@ void CopTick(float dt, const Vec3& playerPos) {
                                     // approach may throw again
             if (c.mode == COP_PURSUE && c.kickArmed && kickDist <= band) {
                 float spin = 0.0f, closing = 0.0f;
-                const Vec3 dv = KickCompute(c.vel, gThreat.playerVel, relKick, &spin, &closing);
+                Vec3 dv = KickCompute(c.vel, gThreat.playerVel, relKick, &spin, &closing);
                 if (dv.Length() > 0.01f) {
+                    // the 39-package's throw multipliers, all priced
+                    // on the same contact the formula just read:
+                    // item 6 (the PIT): a contact in the prey's rear
+                    // half - this unit behind his centre plane - is a
+                    // hit meant to turn him, so its spin is priced
+                    // half again (the linear throw is untouched: the
+                    // square-on pin in the suite grades exactly it);
+                    // item 4: the heavy unit throws a quarter again;
+                    // item 8: a dying unit's last ram throws half
+                    // again, and spending it closes his window.
+                    if (gThreat.playerInVehicle) {
+                        Vec3 pf = gThreat.playerVel;
+                        pf.z = 0.0f;
+                        if (pf.Length() > 2.0f) {
+                            pf = pf * (1.0f / pf.Length());
+                            Vec3 behind = c.pos - gThreat.playerPos;
+                            behind.z = 0.0f;
+                            if (behind.Dot(pf) < -0.5f)
+                                spin *= 1.6f;
+                        }
+                    }
+                    float tScale = 1.0f;
+                    if (c.heavyUnit)
+                        tScale *= 1.25f;
+                    if (c.lastRamT > 0.0f) {
+                        tScale *= 1.5f;
+                        c.lastRamT = 0.0f;
+                        c.lastRamDone = true;
+                        Log("cop: unit %d spent his last ram on the contact", slot);
+                    }
+                    if (tScale != 1.0f) {
+                        dv = dv * tScale;
+                        if (dv.Length() > 36.0f)
+                            dv = dv * (36.0f / dv.Length()); // the
+                                // sanity cap, raised a fifth for the
+                                // multipliers and no further
+                        spin = Clamp(spin * tScale, -kKickSpinCap * 1.5f, kKickSpinCap * 1.5f);
+                    }
                     c.kickArmed = false;
                     ++c.kickCount;
                     struckHim = true;
@@ -1985,6 +2393,105 @@ void CopTick(float dt, const Vec3& playerPos) {
         }
     }
     gThreat.felony = page.felony;
+
+    // ---- the 39-package's per-tick trackers (the tactics tick below
+    // spends what these measure)
+    {
+        const float preySpeed = gThreat.playerVel.Length();
+        bool anyPursuer = false;
+        float nearPursuer = 1e9f;
+        for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+            const CopState& u = gCops[slot];
+            if (UnitLiving(u) && u.mode == COP_PURSUE) {
+                anyPursuer = true;
+                const float d = (u.pos - preyPos).Length();
+                if (d < nearPursuer)
+                    nearPursuer = d;
+            }
+        }
+        // item 12: the prey's yaw rate, off his own velocity - a man
+        // swinging his car around is a man whose car is unbalanced,
+        // and that is when the strike lands
+        if (preySpeed > 5.0f && dt > 0.0f) {
+            const float head = std::atan2(gThreat.playerVel.x, gThreat.playerVel.y);
+            if (sHeadOk) {
+                float dh = head - sHeadPrev;
+                while (dh > 3.14159265f)
+                    dh -= 6.2831853f;
+                while (dh < -3.14159265f)
+                    dh += 6.2831853f;
+                sTurnRate = sTurnRate * 0.7f + (dh / dt) * 0.3f;
+            }
+            sHeadPrev = head;
+            sHeadOk = true;
+        } else {
+            sTurnRate *= 0.9f;
+        }
+        // the strike line is a SWING - a hard correction, a spin
+        // recovery, the start of a U-turn: at 1.0 rad/s the car is
+        // genuinely unbalanced. Ordinary road curvature at chase
+        // speed reads 0.2-0.4 rad/s and must NOT trip this: the first
+        // staging of this law at 0.45 killed the pacing blend on
+        // every bend of the suite's road and the anchor rammed its
+        // own book dry mid-chase - the line is the conviction that
+        // came back from that run
+        sTurnStrike = std::fabs(sTurnRate) > 1.0f && anyPursuer && nearPursuer < 30.0f;
+        // item 31: the crash witness - his speed against the sample
+        // from half a second ago. A drop past 7 m/s is a crash (a
+        // wall, a spin, a wreck he is still gathering up), and the
+        // window that opens is when the force strikes hardest
+        sSpdAge += dt;
+        if (sSpdAge >= 0.5f) {
+            sSpdOld = preySpeed;
+            sSpdAge = 0.0f;
+        }
+        if (sCrashT > 0.0f)
+            sCrashT -= dt;
+        // the window opens on a drop AND a crawl: a crash leaves the
+        // man stopped or gathering himself up at walking pace, while
+        // plain braking to a cruise is not a crash and buys him no
+        // such moment (the suite's own chase steps 35 -> 20 m/s at
+        // its start; the first staging of this witness, drop alone,
+        // read that step as a crash and spent the anchor's book on
+        // full-pace rams - the crawl condition is that run's lesson)
+        if (anyPursuer && page.felony > kFelonyTrigger && sSpdOld - preySpeed > 7.0f &&
+            preySpeed < 8.0f && sCrashT <= 0.0f) {
+            sCrashT = 3.0f;
+            for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+                CopState& u = gCops[slot];
+                if (UnitLiving(u) && (u.pos - preyPos).Length() < 45.0f) {
+                    u.stuckT = 0.0f; // his gathering-up is not their
+                    u.fairStartT = 0.0f; // standing still - no witness
+                }                        // may call this moment stuck
+            }
+            Log("cop: the prey crashed (%.0f -> %.0f m/s) - the strike window opens",
+                sSpdOld, preySpeed);
+        }
+        // item 21's heat clock and item 26's measurement share the
+        // pursuit's life: both run only while a pursuit is actually
+        // on, the heat only at the felony cap, and both die with it
+        if (anyPursuer) {
+            if (preySpeed > sPreyTopSeen)
+                sPreyTopSeen = preySpeed;
+            if (page.felony >= kFelonyCap - 1.0f) {
+                sPursuitT += dt;
+                sHeat = (int)(sPursuitT / 60.0f);
+                if (sHeat > 5)
+                    sHeat = 5;
+            }
+        } else {
+            sPursuitT = 0.0f;
+            sHeat = 0;
+            sPreyTopSeen = 0.0f;
+        }
+        if (sSyncT > 0.0f)
+            sSyncT -= dt;
+        if (sHandoverT > 0.0f) {
+            sHandoverT -= dt;
+            if (sHandoverT <= 0.0f)
+                sHandover = false;
+        }
+    }
 
     // ---- the manager: pursuit transitions, the ladder, the cutoff
     const bool wantPursue = page.felony > kFelonyTrigger && page.known;
@@ -2158,27 +2665,46 @@ void CopTick(float dt, const Vec3& playerPos) {
         }
     }
 
+    // the tactics tick (the 39-package): roles, the wall reading and
+    // the synchronised-hit window, refreshed on a 1 s cadence - the
+    // assignments are strategy, not steering, and the cadence keeps
+    // their probes off the per-tick bill
+    sTacticsT -= dt;
+    if (sTacticsT <= 0.0f) {
+        sTacticsT = 1.0f;
+        TacticsTick(preyPos);
+    }
+
     // the spawn clock (ControlNumberOfCops): while the ladder is short,
     // the delay shrinks with the felony - 64 ticks at felony 0, half
     // that at the cap, through the named stand-in scale (the 5x
     // update's divided base: the whole ladder fills inside ~2-3 s of
     // a felony jump, which is the arrival the presence order wants).
     // When the clock runs out and a ladder slot is free, the unit
-    // enters at range.
+    // enters at range. THE 39-PACKAGE: item 21's heat divides the
+    // delay again (a long max-felony chase refills faster and
+    // faster), and item 16's handover skips the clock entirely - a
+    // fallen pursuer is replaced on the next tick, entering near
+    // where he fell, so the pressure never actually lets go.
     if (livingLadder < sWanted) {
         sRespawnT += dt;
-        const float delayTicks = kRespawnTicks * (1.0f - page.felony * kRespawnScale / kFelonyCap);
-        if (sRespawnT >= delayTicks * kTick) {
+        const float delayTicks = kRespawnTicks * (1.0f - page.felony * kRespawnScale / kFelonyCap) /
+                                 (1.0f + (float)sHeat);
+        if (sHandover || sRespawnT >= delayTicks * kTick) {
             sRespawnT = 0.0f;
             for (int slot = 0; slot < kMaxCopCars; ++slot) {
                 if (UnitLiving(gCops[slot]))
                     continue;
                 Vec3 at;
-                if (LadderSpawnPoint(preyPos, &at)) {
+                if (LadderSpawnPoint(preyPos, &at, sHandover ? &sHandoverPos : nullptr)) {
                     if (SpawnUnit(slot, at, preyPos, false)) {
                         Log("cop: the ladder sends another unit - he enters at %.0f m on the road (felony %.0f, wanted %d)",
                             (at - preyPos).Length(), page.felony, sWanted);
                         ++livingLadder;
+                        if (sHandover) {
+                            sHandover = false;
+                            Log("cop: the handover is spent - the replacement entered near the fall");
+                        }
                     }
                 } else {
                     Log("cop: the ladder wants a unit but no road position took him this tick");

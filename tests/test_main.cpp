@@ -2,6 +2,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <map>
 
@@ -10495,17 +10496,59 @@ static void TestCop() {
         // the book itself crosses its line - and then he burns, as one
         // unit. THE 5x UPDATE: the line is 135000 now (the prices that
         // fill it never moved), so the same bullet stream needs ~150
-        // ticks past this block's earlier damage, not ~35
+        // ticks past this block's earlier damage, not ~35. THE
+        // 39-PACKAGE restages the reading: item 33 jumped this block's
+        // felony to the cap at its first blast, and item 16's handover
+        // now refills a fallen pursuer's slot inside the very tick he
+        // falls - so the retirement is read off the host's burn flags
+        // (they land with the fall itself), and the line's exactness
+        // is pinned separately below, on a stage where nothing can
+        // ram and nothing can refill
         {
             int ticks = 0;
-            while (CopActive() && ticks < 400) {
+            while (!host.burnedOut && ticks < 400) {
                 host.struckShotQ = 30.0f;
                 tickChase(dt);
                 ++ticks;
             }
-            CHECK(!CopActive() && host.burnedOut && host.driverDown,
-                  "bullets retired him at his book's total, burning as one unit (book %.0f)", gCop.totalDamage);
-            CHECK(gCop.totalDamage > 135000.0f, "the retirement line is the 5x book's 135000 (%.0f)", gCop.totalDamage);
+            CHECK(host.burnedOut && host.driverDown,
+                  "sustained bullets retired him, burning as one unit");
+            CHECK(ticks > 60, "he did not retire early under the bullet stream (ticks %d)", ticks);
+        }
+        // the line itself, exact: a fresh anchor, the man 500 m off
+        // (no contact is possible inside the window, so every point in
+        // the book is a bullet point), the same 30-points-a-tick
+        // stream. The book sampled after every tick must stand at or
+        // under the line until the burn tick - and the burn tick's own
+        // 810 must be the step that crosses it
+        {
+            CopReset();
+            host.burnedOut = false;
+            host.driverDown = false;
+            host.PlaceCar(copAt, std::atan2(dir.x, dir.y) * 57.29578f);
+            CHECK(CopSummon(copAt, road.PosAt(copS + 25.0f, nullptr)), "the book-line cop stands up");
+            gCop.mode = COP_IDLE;
+            gCop.steerCalDone = true;
+            gCop.steerFlip = true;
+            gCop.spikeDone = true;
+            host.vehicle = 42;
+            host.velocity = Vec3();
+            const Vec3 farMan = road.PosAt(copS + 500.0f, nullptr);
+            host.player = farMan;
+            float peak = 0.0f;
+            int ticks = 0;
+            while (!host.burnedOut && ticks < 400) {
+                host.struckShotQ = 30.0f;
+                CopTick(dt, farMan);
+                host.StepCar(dt);
+                ++ticks;
+                if (!host.burnedOut)
+                    peak = gCop.totalDamage;
+            }
+            CHECK(host.burnedOut && host.driverDown,
+                  "the distant bullet stream retired him too, as one unit");
+            CHECK(peak <= 135000.0f && peak + 810.0f > 135000.0f,
+                  "the book crossed its 135000 line on a bullet tick, never early (peak %.0f)", peak);
         }
     }
 
@@ -10542,7 +10585,14 @@ static void TestCop() {
         };
         auto oneTick = [&]() {
             Vec3 md;
-            const Vec3 mp = road.PosAt(road.NearestDist(host.carPos) + 25.0f, &md);
+            // THE 39-PACKAGE: the man is re-placed 60 m ahead, not 25 -
+            // item 33 puts this block's felony at the cap from the
+            // first blast, the anchor batters at full pace, and at
+            // 25 m he closed and rammed between blasts, polluting the
+            // per-blast deltas this block pins to the point. At 60 m
+            // re-placed every tick, no contact is ever made and every
+            // point in the book is a blast point
+            const Vec3 mp = road.PosAt(road.NearestDist(host.carPos) + 60.0f, &md);
             host.velocity = md * 15.0f;
             host.player = mp;
             CopTick(dt, mp);
@@ -10560,14 +10610,23 @@ static void TestCop() {
             const float before = gCop.totalDamage;
             host.struckShotQ = 1019.0f; // the host body stripped whole, and below
             oneTick();
-            CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
-                  "blast %d billed one blast-class price, not the raw frame (%.0f)",
-                  hit, gCop.totalDamage - before);
-            if (hit < 17)
+            if (hit < 17) {
+                CHECK(std::fabs(gCop.totalDamage - before - 8100.0f) < 1.0f,
+                      "blast %d billed one blast-class price, not the raw frame (%.0f)",
+                      hit, gCop.totalDamage - before);
                 CHECK(CopActive() && !host.burnedOut, "blast %d of 17 does not retire him", hit);
+            }
         }
-        CHECK(!CopActive() && host.burnedOut,
+        // THE 39-PACKAGE: the seventeenth blast's own delta can no
+        // longer be read off the slot - item 16's handover refills a
+        // fallen pursuer inside his fall tick, so by the time the sim
+        // looks, the slot may already hold his replacement with a
+        // fresh book. The retirement's witness is the burn itself,
+        // and the slot shows either the wreck or the fresh handover
+        CHECK(host.burnedOut,
               "the seventeenth blast retires him - ~17 RPG-class hits at the 5x book, never one");
+        CHECK(gCop.mode == COP_WRECKED || gCop.totalDamage < 8100.0f,
+              "the fallen book is spent: the slot holds the wreck or his fresh replacement");
         // a blast that strips car and driver in the SAME frame is one blast
         stageBlastCop();
         {
@@ -11207,6 +11266,22 @@ struct ForceFakeHost : TestHost {
     };
     std::map<int, Body> bodies;
     int nextId = 100;
+    // item 13's staged wall: one segment the core's world probes can
+    // read, off unless a sim stages it
+    bool wallOn = false;
+    Vec3 wallA, wallB;
+    bool LineBlockedWorld(const Vec3& a, const Vec3& b) override {
+        if (!wallOn)
+            return false;
+        auto cr = [](const Vec3& u, const Vec3& v) { return u.x * v.y - u.y * v.x; };
+        const Vec3 r = b - a, s = wallB - wallA;
+        const float d = cr(r, s);
+        if (std::fabs(d) < 1e-9f)
+            return false;
+        const Vec3 qp = wallA - a;
+        const float t = cr(qp, s) / d, u = cr(qp, r) / d;
+        return t > 0.02f && t < 0.98f && u > 0.0f && u < 1.0f;
+    }
     float lastSpawnDist = -1.0f; // from the staged player, at the last spawn
     std::vector<Vec3> spawnPts;  // every spawn point, in order - the
                                  // presence pin reads the ladder's fan
@@ -11435,31 +11510,43 @@ static void TestCopForce() {
         // intent here is unchanged (shot channel = the player's work,
         // world = not). THE 5x UPDATE: the line is 135000, so the
         // staging needs seventeen capped ticks, not four - the loop
-        // bound is 24 for margin.
-        for (int i = 0; i < 24 && gCops[slotA].veh >= 0; ++i) {
-            if (ForceFakeHost::Body* b = host.Find(gCops[slotA].veh))
+        // bound is 24 for margin. THE 39-PACKAGE restages the ending:
+        // item 16's handover refills a fallen PURSUER's slot inside
+        // the very tick he falls, so "the slot stands empty" is no
+        // longer the retirement's signature - the loss count and the
+        // vanished body are, and the refill itself is pinned as the
+        // handover working. The loop breaks on the loss count itself
+        // so the handover's spawn distance is read before any later
+        // spawn can overwrite it.
+        const int vehA = gCops[slotA].veh;
+        const int vehB = gCops[slotB].veh;
+        for (int i = 0; i < 24 && gThreat.ourUnitsLost == 0; ++i) {
+            if (ForceFakeHost::Body* b = host.Find(vehA))
                 b->qShot = 1200.0f;
             tick(dt);
         }
-        CHECK(gCops[slotA].veh < 0, "the shot-spent unit retired");
         CHECK(gThreat.ourUnitsLost == 1, "a player-caused retirement counted (%d)", gThreat.ourUnitsLost);
+        CHECK(host.Find(vehA) == nullptr, "the shot-spent unit's body is gone");
+        CHECK(gCops[slotA].veh >= 0 && gCops[slotA].totalDamage < 20000.0f,
+              "item 16: the handover refilled the fallen pursuer's slot in his fall tick, book fresh");
+        CHECK(host.lastSpawnDist >= 45.0f && host.lastSpawnDist <= 100.0f,
+              "the handover replacement entered at range, not in the player's face (%.0f m)",
+              host.lastSpawnDist);
         // the world spends the second: nothing of it is the player's
-        for (int i = 0; i < 24 && gCops[slotB].veh >= 0; ++i) {
-            if (ForceFakeHost::Body* b = host.Find(gCops[slotB].veh))
+        for (int i = 0; i < 24 && host.Find(vehB) != nullptr; ++i) {
+            if (ForceFakeHost::Body* b = host.Find(vehB))
                 b->qWorld = 1200.0f;
             tick(dt);
         }
-        CHECK(gCops[slotB].veh < 0, "the world-spent unit retired");
+        CHECK(host.Find(vehB) == nullptr, "the world-spent unit retired");
         CHECK(gThreat.ourUnitsLost == 1, "a world-caused retirement did NOT count (%d)", gThreat.ourUnitsLost);
-        // replacements ride the respawn timer in, at range
-        host.lastSpawnDist = -1.0f;
-        for (float t = 0.0f; t < 9.0f && ladderLiving() < 2; t += dt) {
+        // and the force stands whole again: handover refills plus the
+        // spawn clock bring the ladder back to its want
+        for (float t = 0.0f; t < 9.0f && ladderLiving() < 3; t += dt) {
             CopTick(dt, host.player);
             host.StepAll(dt);
         }
-        CHECK(ladderLiving() >= 2, "a replacement arrived on the timer (%d)", ladderLiving());
-        CHECK(host.lastSpawnDist >= 45.0f && host.lastSpawnDist <= 100.0f,
-              "the replacement entered at range, not in the player's face (%.0f m)", host.lastSpawnDist);
+        CHECK(ladderLiving() >= 3, "the force refilled after its losses (%d)", ladderLiving());
     }
 
     // ---- (iv) the roadblock: felony past 1318 arms the count; the block
@@ -11567,9 +11654,13 @@ static void TestCopForce() {
                       "the nearest pursuer fights at full power (%.2f)", gCops[nearSlot].powerScale);
                 CHECK(gCops[farSlot].powerScale == 0.5f,
                       "the far pursuer is cut to the half scale (%.2f)", gCops[farSlot].powerScale);
-                CHECK(gCops[farSlot].desiredSpeed <= 133.5f,
-                      "the far unit's desired speed rides the half scale of the 5x straight row (%.1f m/s)",
-                      gCops[farSlot].desiredSpeed);
+                // THE 39-PACKAGE: the far unit may carry item 26's
+                // counter-pick scale from this pursuit's own record -
+                // the cutoff pin is about the CUTOFF's half, so it is
+                // read divided by the unit's own pace scale
+                CHECK(gCops[farSlot].desiredSpeed / gCops[farSlot].paceScale <= 134.5f,
+                      "the far unit's desired speed rides the half scale of the 5x straight row (%.1f m/s at pace %.2f)",
+                      gCops[farSlot].desiredSpeed, gCops[farSlot].paceScale);
                 int full = 0;
                 for (int s = 0; s < kMaxCopUnits; ++s)
                     if (gCops[s].veh >= 0 && gCops[s].mode == COP_PURSUE && gCops[s].powerScale == 1.0f)
@@ -11696,6 +11787,366 @@ static void TestCopForce() {
             }
             CHECK(distinct >= 2, "the spawns did not all stack on one node (%d distinct points)", distinct);
             CHECK(maxPair >= 25.0f, "the fan spans the ring (widest pair %.0f m)", maxPair);
+        }
+    }
+
+    // ---- (am) THE 39-PACKAGE, LAYER A (tactics, windows, the book's
+    // new laws). The staging discipline throughout: bodies are PINNED
+    // to staged offsets after every host step, so the geometry the
+    // brain reads is the geometry the sim means - the brain thinks,
+    // the sim holds the world still around its thinking.
+    {
+        const Vec3 man0(2496.0f, -1666.0f, 13.5f);
+        // the formation stage rides the REAL road (a RoadWalker over
+        // the Grove-to-airport route, the (iv) road): the first
+        // staging drove the man in a straight line east and off the
+        // graph within seconds - the front unit's field read failed
+        // and its target fell back to the man's raw position, which
+        // is the fake lying about the world, not the brain failing.
+        // Pins also set the body's YAW to the travel direction: a
+        // teleported body keeps its summon heading in this fake, and
+        // a car sitting astern with a stale nose is a car mid-turn -
+        // the core rightly reverses it out (ZONE_BACK), which is the
+        // second conviction these pins carry
+        std::vector<Vec3> amRoute;
+        CHECK(VehicleRoute(Vec3(2480, -1660, 13), Vec3(1690, -2280, 13), &amRoute, nullptr) &&
+                  amRoute.size() > 4,
+              "the 39-package stage rides the Grove-to-airport road");
+        RoadWalker amRoad;
+        amRoad.Build(amRoute);
+        float amS = 0.0f;
+        Vec3 amDir(1, 0, 0);
+        auto amMan = [&]() { return amRoad.PosAt(amS, &amDir); };
+        auto amRight = [&]() { return Vec3(amDir.y, -amDir.x, 0); };
+        auto amLeft = [&]() { return Vec3(-amDir.y, amDir.x, 0); };
+        auto rLatOf = [&](const Vec3& p) { return (p - host.player).Dot(amRight()); };
+        auto rFwdOf = [&](const Vec3& p) { return (p - host.player).Dot(amDir); };
+        auto stageFormation = [&](float felony, int units) {
+            amS = amRoad.NearestDist(grove) + 60.0f;
+            const Vec3 mp = amMan();
+            stageAnchor(amRoad.PosAt(amS - 30.0f, nullptr), mp);
+            gCop.felony = felony;
+            host.velocity = amDir * 15.0f;
+            for (float t = 0.0f; t < 25.0f && ladderLiving() < units; t += dt) {
+                amS += 15.0f * dt;
+                const Vec3 p = amMan();
+                host.player = p;
+                host.velocity = amDir * 15.0f;
+                CopTick(dt, p);
+                host.StepAll(dt);
+            }
+        };
+        auto roadPinTick = [&](const Vec3 offs[4], int units, float seconds,
+                               const std::function<bool()>& done) {
+            for (float t = 0.0f; t < seconds; t += dt) {
+                amS += 15.0f * dt;
+                const Vec3 p = amMan();
+                host.player = p;
+                host.velocity = amDir * 15.0f;
+                CopTick(dt, p);
+                if (done && done())
+                    return true;
+                host.StepAll(dt);
+                for (int s = 0; s < units; ++s)
+                    if (ForceFakeHost::Body* b = host.Find(gCops[s].veh)) {
+                        b->pos = p + amDir * offs[s].x + amLeft() * offs[s].y;
+                        b->vel = host.velocity;
+                        b->yaw = std::atan2(amDir.x, amDir.y); // the fake yaw is radians (MirrorStep)
+                    }
+            }
+            return false;
+        };
+        // the straight-line pin stage (single-unit sims whose reads
+        // are zone/window arithmetic, in the graph-dense Grove blocks)
+        auto pinTick = [&](const Vec3 offs[4], int units, float seconds,
+                           const std::function<bool()>& done) {
+            for (float t = 0.0f; t < seconds; t += dt) {
+                host.player = host.player + host.velocity * dt;
+                CopTick(dt, host.player);
+                if (done && done())
+                    return true;
+                host.StepAll(dt);
+                for (int s = 0; s < units; ++s)
+                    if (ForceFakeHost::Body* b = host.Find(gCops[s].veh)) {
+                        b->pos = host.player + offs[s];
+                        b->vel = host.velocity;
+                        if (host.velocity.Length() > 1.0f)
+                            b->yaw = std::atan2(host.velocity.x, host.velocity.y);
+                    }
+            }
+            return false;
+        };
+
+        // (am1) item 1, the roles: lead nearest, flanks at his doors,
+        // the front unit ahead to brake-check - read off the units'
+        // own targets after a tactics tick
+        {
+            const Vec3 offs[4] = {Vec3(-4, 0, 0), Vec3(-19, -9, 0), Vec3(-19, 9, 0), Vec3(19, 0, 0)};
+            stageFormation(2500.0f, 4);
+            CHECK(ladderLiving() == 4, "the roles stage stands at four units (%d)", ladderLiving());
+            const bool assigned = roadPinTick(offs, 4, 3.5f, [&]() {
+                return gCops[1].role == 1 && gCops[2].role == 2 && gCops[3].role == 3 &&
+                       rFwdOf(gCops[3].target) > 5.0f; // and its aim is live,
+            });                                 // not a cold-spawn fallback
+            CHECK(assigned, "item 1: the tactics tick dealt the roles (r %d %d %d %d)",
+                  gCops[0].role, gCops[1].role, gCops[2].role, gCops[3].role);
+            CHECK(rLatOf(gCops[1].target) > 1.5f && rLatOf(gCops[1].target) < 6.0f,
+                  "item 1: the right flank aims at his right door (lat %.1f)", rLatOf(gCops[1].target));
+            CHECK(rLatOf(gCops[2].target) < -1.5f && rLatOf(gCops[2].target) > -6.0f,
+                  "item 1: the left flank aims at his left door (lat %.1f)", rLatOf(gCops[2].target));
+            CHECK(rFwdOf(gCops[3].target) > 5.0f,
+                  "item 1: the front unit aims ahead of him, to brake-check (fwd %.1f)",
+                  rFwdOf(gCops[3].target));
+        }
+        // (am1b) item 13: a wall on his right stands the right flank
+        // down - the batter belongs on the open side
+        {
+            const Vec3 offs[4] = {Vec3(-4, 0, 0), Vec3(-19, -9, 0), Vec3(-19, 9, 0), Vec3(19, 0, 0)};
+            stageFormation(2500.0f, 4);
+            host.wallOn = true;
+            const bool read = roadPinTick(offs, 4, 3.5f, [&]() {
+                host.wallA = host.player + amRight() * 8.5f - amDir * 30.0f;
+                host.wallB = host.player + amRight() * 8.5f + amDir * 30.0f;
+                return gCops[2].role == 2 && gCops[1].role == 0;
+            });
+            host.wallOn = false;
+            CHECK(read && gCops[1].role == 0,
+                  "item 13: with his right walled, the right flank stands down (roles %d %d)",
+                  gCops[1].role, gCops[2].role);
+        }
+        // (am2) item 11: two flank units close on opposite sides -
+        // their aim collapses to his centre for the window
+        {
+            const Vec3 offs[4] = {Vec3(-4, 0, 0), Vec3(0, -6, 0), Vec3(0, 6, 0), Vec3()};
+            stageFormation(1700.0f, 3);
+            const bool collapsed = roadPinTick(offs, 3, 3.5f, [&]() {
+                return gCops[1].role == 1 && gCops[2].role == 2 &&
+                       std::fabs(rLatOf(gCops[1].target)) < 1.2f &&
+                       std::fabs(rLatOf(gCops[2].target)) < 1.2f;
+            });
+            CHECK(collapsed, "item 11: opposite flanks close in - both aims sit on his centre (lat %.1f / %.1f)",
+                  rLatOf(gCops[1].target), rLatOf(gCops[2].target));
+        }
+        // (am3) item 6, the PIT aim: at batter, close, the aim is his
+        // rear quarter on the unit's own side - not the flank point,
+        // not the tail point
+        {
+            amS = amRoad.NearestDist(grove) + 60.0f;
+            {
+                const Vec3 mp = amMan();
+                stageAnchor(amRoad.PosAt(amS - 30.0f, nullptr), mp);
+            }
+            gCop.felony = 3000.0f;
+            const Vec3 offs[4] = {Vec3(-4, 2.5f, 0), Vec3(), Vec3(), Vec3()};
+            roadPinTick(offs, 1, 0.5f, nullptr);
+            CHECK(rLatOf(gCop.target) < -0.4f && rLatOf(gCop.target) > -1.6f,
+                  "item 6: the PIT aims at his rear quarter on the unit's side (lat %.2f)",
+                  rLatOf(gCop.target));
+            CHECK(rFwdOf(gCop.target) > -2.5f && rFwdOf(gCop.target) < 3.5f,
+                  "item 6: the PIT point sits at his rear wheel, not his tail (fwd %.1f)",
+                  rFwdOf(gCop.target));
+        }
+        // (am4) item 12: mid-swing, the pacing dies and the strike
+        // floor rules the desire
+        {
+            stageAnchor(grove, man0);
+            gCop.felony = 1400.0f;
+            host.velocity = Vec3(15, 0, 0);
+            const Vec3 offs[4] = {Vec3(-8, 0, 0), Vec3(), Vec3(), Vec3()};
+            float calm = 0.0f;
+            {
+                int n = 0;
+                for (float t = 0.0f; t < 0.6f; t += dt) {
+                    host.player = host.player + host.velocity * dt;
+                    CopTick(dt, host.player);
+                    host.StepAll(dt);
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = host.player + offs[0];
+                        b->vel = host.velocity;
+                    }
+                    if (t > 0.3f) {
+                        calm += gCop.desiredSpeed;
+                        ++n;
+                    }
+                }
+                calm = n ? calm / n : 0.0f; // the steady paced desire, not
+            }                              // one tick's zone transient
+            float swung = 0.0f;
+            for (float t = 0.0f; t < 0.5f; t += dt) {
+                const float cs = std::cos(0.30f), sn = std::sin(0.30f);
+                const Vec3 v = host.velocity;
+                host.velocity = Vec3(v.x * cs - v.y * sn, v.x * sn + v.y * cs, 0);
+                host.player = host.player + host.velocity * dt;
+                CopTick(dt, host.player);
+                if (gCop.desiredSpeed > swung)
+                    swung = gCop.desiredSpeed;
+                host.StepAll(dt);
+                if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                    const Vec3 f = host.velocity * (1.0f / host.velocity.Length());
+                    b->pos = host.player - f * 8.0f;
+                    b->vel = host.velocity;
+                    b->yaw = std::atan2(f.x, f.y);
+                }
+            }
+            CHECK(swung >= 185.0f && swung > calm + 60.0f,
+                  "item 12: the swing kills the pacing - desire %.0f over the calm %.0f", swung, calm);
+        }
+        // (am5) item 31: the crash window feeds the strike at batter
+        // pace while he gathers himself up
+        {
+            stageAnchor(grove, man0);
+            gCop.felony = 1400.0f;
+            host.velocity = Vec3(25, 0, 0);
+            const Vec3 offs[4] = {Vec3(-10, 0, 0), Vec3(), Vec3(), Vec3()};
+            pinTick(offs, 1, 1.2f, nullptr);
+            const float before = gCop.feedCruise;
+            host.velocity = Vec3(2, 0, 0); // the wall he did not see
+            float fed = 0.0f;
+            for (float t = 0.0f; t < 1.2f; t += dt) {
+                host.player = host.player + host.velocity * dt;
+                CopTick(dt, host.player);
+                if (gCop.feedCruise > fed)
+                    fed = gCop.feedCruise;
+                host.StepAll(dt);
+                if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                    b->pos = host.player + Vec3(-10, 0, 0);
+                    b->vel = host.velocity;
+                    b->yaw = std::atan2(host.velocity.x, host.velocity.y);
+                }
+            }
+            CHECK(before < 160.0f && fed >= 185.0f && fed > before + 40.0f,
+                  "item 31: the crash opens the window - fed cruise %.0f over the paced %.0f",
+                  fed, before);
+        }
+        // (am6) item 33: one blast-class tick on a unit and the
+        // felony is the cap - the ladder never gets a say
+        {
+            stageAnchor(grove, man0);
+            gCop.felony = 1000.0f;
+            tick(0.5f);
+            if (ForceFakeHost::Body* b = host.Find(gCop.veh))
+                b->qShot = 100.0f; // 2700 of his points: a hard hit, no blast
+            const float felonyBefore = gCop.felony;
+            tick(dt);
+            CHECK(gCop.felony > felonyBefore && gCop.felony < 4096.0f,
+                  "item 33 control: a sub-blast hit notes its offence but does not jump the felony to the cap (%.0f)",
+                  gCop.felony);
+            if (ForceFakeHost::Body* b = host.Find(gCop.veh))
+                b->qShot = 300.0f; // the full blast price in one tick
+            tick(dt);
+            CHECK(gCop.felony >= 4096.0f, "item 33: a blast-class hit - the felony is the cap at once (%.0f)",
+                  gCop.felony);
+        }
+        // (am7) item 16's preference: the replacement enters on the
+        // side the pressure was lost, inside the same band as always
+        {
+            const Vec3 offs[4] = {Vec3(15, 0, 0), Vec3(-30, 10, 0), Vec3(-30, -10, 0), Vec3()};
+            stageFormation(1700.0f, 3);
+            host.velocity = Vec3(); // the man stands; the ring is read plain
+            pinTick(offs, 3, 0.3f, nullptr);
+            const size_t spawnsBefore = host.spawnPts.size();
+            for (int i = 0; i < 24 && gThreat.ourUnitsLost == 0; ++i) {
+                if (ForceFakeHost::Body* b = host.Find(gCops[0].veh))
+                    b->qShot = 1200.0f;
+                CopTick(dt, host.player);
+                host.StepAll(dt);
+                // the fall must stay the staged east fall: every unit
+                // is re-pinned to its formation spot after each step,
+                // so the handover's preference is read against the
+                // fall this sim means, not wherever the dying unit
+                // happened to wander
+                for (int s = 0; s < 3; ++s)
+                    if (ForceFakeHost::Body* b = host.Find(gCops[s].veh)) {
+                        b->pos = host.player + offs[s];
+                        b->vel = Vec3();
+                        const Vec3 toMan = offs[s] * -1.0f; // he faces the man
+                        b->yaw = std::atan2(toMan.x, toMan.y);
+                    }
+            }
+            CHECK(gThreat.ourUnitsLost == 1, "item 16 stage: the east unit fell to the man's gun");
+            CHECK(host.spawnPts.size() > spawnsBefore &&
+                      (host.spawnPts.back() - host.player).x > 10.0f,
+                  "item 16: the replacement entered on the fallen unit's side (east), not across the ring");
+            CHECK(host.lastSpawnDist >= 45.0f && host.lastSpawnDist <= 100.0f,
+                  "item 16: and still at the band's range (%.0f m)", host.lastSpawnDist);
+        }
+        // (am8) items 26 + 8: the counter-pick reads the pursuit's
+        // own record, and a book past 80% arms the last ram
+        {
+            const Vec3 offs[4] = {Vec3(-20, 0, 0), Vec3(-35, 8, 0), Vec3(), Vec3()};
+            stageAnchor(grove, man0);
+            gCop.felony = 1700.0f;
+            host.velocity = Vec3(45, 0, 0); // the fastest him on record
+            for (float t = 0.0f; t < 25.0f && ladderLiving() < 2; t += dt) {
+                host.player = host.player + host.velocity * dt;
+                CopTick(dt, host.player);
+                host.StepAll(dt);
+            }
+            pinTick(offs, 2, 2.0f, nullptr); // 45 m/s, on the record
+            host.velocity = Vec3(15, 0, 0);  // he cruises now
+            const int veh1 = gCops[1].veh;
+            for (int i = 0; i < 24 && host.Find(veh1) != nullptr; ++i) {
+                if (ForceFakeHost::Body* b = host.Find(veh1))
+                    b->qShot = 1200.0f;
+                CopTick(dt, host.player);
+                host.StepAll(dt);
+            }
+            CHECK(host.Find(veh1) == nullptr, "item 26 stage: the ladder unit fell");
+            CHECK(gCops[1].paceScale >= 1.45f,
+                  "item 26: the replacement is picked against his shown 45 m/s, not his cruising 15 (scale %.2f)",
+                  gCops[1].paceScale);
+            // item 8 rides the same stage: bill the anchor past 80%
+            if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                for (int i = 0; i < 14; ++i) {
+                    b->qShot = 300.0f;
+                    CopTick(dt, host.player);
+                    host.StepAll(dt);
+                    if (ForceFakeHost::Body* b2 = host.Find(gCop.veh))
+                        b = b2;
+                }
+            }
+            CHECK(gCop.totalDamage > 0.8f * 135000.0f && gCop.totalDamage < 135000.0f,
+                  "item 8 stage: the anchor's book stands past 80%%, unspent (%.0f)", gCop.totalDamage);
+            CHECK(gCop.lastRamT > 0.0f, "item 8: the last ram is armed (%.1f s)", gCop.lastRamT);
+            if (ForceFakeHost::Body* b = host.Find(gCop.veh))
+                b->pos = host.player + Vec3(-12, 0, 0);
+            CopTick(dt, host.player);
+            CHECK(gCop.desiredSpeed >= 250.0f,
+                  "item 8: the dying unit drives at the straight row (desire %.0f)", gCop.desiredSpeed);
+        }
+        // (am9) item 21: two minutes at the cap and the force's pace
+        // itself has risen - the far unit's desire reads the heat
+        {
+            stageAnchor(grove, man0);
+            gCop.felony = 4096.0f;
+            host.velocity = Vec3(18, 0, 0);
+            for (float t = 0.0f; t < 25.0f && ladderLiving() < 4; t += dt) {
+                host.player = host.player + host.velocity * dt;
+                CopTick(dt, host.player);
+                host.StepAll(dt);
+            }
+            auto farDesire = [&](float seconds) {
+                float best = 0.0f;
+                for (float t = 0.0f; t < seconds; t += dt) {
+                    host.player = host.player + host.velocity * dt;
+                    CopTick(dt, host.player);
+                    if (gCops[3].desiredSpeed > best)
+                        best = gCops[3].desiredSpeed;
+                    host.StepAll(dt);
+                    if (ForceFakeHost::Body* b = host.Find(gCops[3].veh)) {
+                        b->pos = host.player + Vec3(-150, 0, 0); // held far:
+                        b->vel = host.velocity;                  // the far reading
+                    }
+                }
+                return best;
+            };
+            const float cold = farDesire(2.0f);
+            farDesire(128.0f); // the long cap-felony chase itself
+            const float hot = farDesire(2.0f);
+            CHECK(cold > 150.0f, "item 21 stage: the far desire reads at all (%.0f)", cold);
+            CHECK(hot > cold * 1.08f,
+                  "item 21: after two minutes at the cap the far desire carries the heat (%.0f -> %.0f)",
+                  cold, hot);
         }
     }
 }
