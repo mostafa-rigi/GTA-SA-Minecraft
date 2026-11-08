@@ -102,9 +102,9 @@ size_t SkipTarget(const Args& a, size_t i) {
     return i;
 }
 
-const char* const kMobNames[MOB_KIND_COUNT] = { "cow", "pig", "sheep", "chicken", "creeper", "warden", "zombie", "skeleton", "spider", "soldier" };
-const char* const kMobNamesTr[MOB_KIND_COUNT] = { "İnek", "Domuz", "Koyun", "Tavuk", "Creeper", "Warden", "Zombi", "İskelet", "Örümcek", "Asker" };
-const char* const kMobNamesEn[MOB_KIND_COUNT] = { "Cow", "Pig", "Sheep", "Chicken", "Creeper", "Warden", "Zombie", "Skeleton", "Spider", "Soldier" };
+const char* const kMobNames[MOB_KIND_COUNT] = { "cow", "pig", "sheep", "chicken", "creeper", "warden", "zombie", "skeleton", "spider", "soldier", "po" };
+const char* const kMobNamesTr[MOB_KIND_COUNT] = { "İnek", "Domuz", "Koyun", "Tavuk", "Creeper", "Warden", "Zombi", "İskelet", "Örümcek", "Asker", "Po" };
+const char* const kMobNamesEn[MOB_KIND_COUNT] = { "Cow", "Pig", "Sheep", "Chicken", "Creeper", "Warden", "Zombie", "Skeleton", "Spider", "Soldier", "Po" };
 const char* const kEffectKeys[EFFECT_COUNT] = { "absorption", "regeneration", "fire_resistance", "resistance", "hunger", "poison" };
 const char* const kGameRules[] = { "keepInventory", "doMobSpawning", "mobGriefing" };
 
@@ -299,7 +299,7 @@ void CmdXp(const Args& a) {
 
 void CmdSummon(const Args& a) {
     if (a.size() < 2)
-        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider|soldier|cop> [x y z]");
+        return Fail("/summon <cow|pig|sheep|chicken|creeper|warden|zombie|skeleton|spider|soldier|po|cop> [x y z]");
     // the Driver 2 cop is not a Mob: his body is a car of the host's and
     // his brain lives in Cop.cpp. He is a San Andreas resident, so CleanSA
     // lets him through like the soldier.
@@ -325,11 +325,11 @@ void CmdSummon(const Args& a) {
     const int kind = MobByName(a[1]);
     if (kind < 0)
         return Fail(Fmt(Tr("Unknown entity: %s", "Bilinmeyen varlık: %s"), a[1].c_str()));
-    // CleanSA: the soldier is the only creature this San Andreas has; the
+    // CleanSA: the soldier and Po are the creatures this San Andreas has; the
     // refusal names the mode so the chat itself explains the empty result.
-    if (gRules.cleanSA && kind != MOB_SOLDIER)
-        return Fail(Tr("CleanSA mode: only the soldier lives in San Andreas",
-                       "CleanSA modu: San Andreas'ta yalnızca asker yaşar"));
+    if (gRules.cleanSA && kind != MOB_SOLDIER && kind != MOB_PO)
+        return Fail(Tr("CleanSA mode: only the soldier and Po live in San Andreas",
+                       "CleanSA modu: San Andreas'ta yalnızca asker ve Po yaşar"));
     Vec3 at;
     if (a.size() >= 5) {
         if (!ParsePos(a, 2, &at))

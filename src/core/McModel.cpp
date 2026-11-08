@@ -874,6 +874,12 @@ void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r,
         DrawSoldierModel(base, a.soldier, light, r, g, b);
         break;
     }
+    case MOB_PO: {
+        // Po's own model out of his own game, skinned from po.bin - the same
+        // law as the soldier's: without the model file he never spawns.
+        DrawPoModel(base, a.po, light, r, g, b);
+        break;
+    }
     case MOB_PIG: {
         st.tex = ENT_PIG;
         Pose head = Part(base, 0, 12, -6, a.headPitch, a.headYaw, 0);

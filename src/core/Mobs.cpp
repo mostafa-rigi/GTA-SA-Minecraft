@@ -55,6 +55,15 @@ const MobType kTypes[MOB_KIND_COUNT] = {
     // two tune tables (kSoldier, kBoss). (The pool was 2400 + 800 until the smart pack: the user
     // ordered more health, and the structure - kevlar absorbing half, no headshot channel - is kept.)
     { 0.6f, 1.8f, 4000.0f, 2.4f, 5.5f, SND_SOLDIER_STEP, SND_SOLDIER_HURT, SND_SOLDIER_DEATH, { 0, 0, 0 }, true },
+    // Po, the Kung Fu Panda: a guest from another game entirely, on the same
+    // road as the soldier - his own real model or nothing (PoModel). 1.5 m of
+    // panda (his baked presentation height), wide as he is round. Step 1 is
+    // presence, not a fight: 400 half hearts so a test session can poke him
+    // for a long while, a follower's walk, a charge for his run. His voice
+    // rows borrow the soldier's hurt/death grunts for now - his own voice is
+    // still inside his own game's audio, a later step; `say` never plays for
+    // a monster, and his brain plays no lines.
+    { 1.1f, 1.5f, 400.0f, 1.1f, 2.8f, SND_SOLDIER_STEP, SND_SOLDIER_HURT, SND_SOLDIER_DEATH, { 0, 0, 0 }, true },
 };
 
 uint32_t gNextMobId = 1;
@@ -3731,6 +3740,97 @@ bool SoldierBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* l
     return true; // a soldier is always on duty: patrol, talk, hunt and fight are all his
 }
 
+// ---- Po's pose bookkeeping (step 1): one whole-body category at a time,
+// cross-faded like the soldier's - on a change, the composed pose he is
+// leaving is snapshotted and the fade runs.
+static void PoSetPose(Mob& m, int category, float dt) {
+    PoDrawState& d = m.poDraw;
+    if (category != d.category) {
+        PoLocal prev[128];
+        if (PoComposeLocals(d, prev, 128)) {
+            for (int i = 0; i < 128; ++i)
+                d.prevLocals[i] = prev[i];
+            d.prevBones = PoBoneCount();
+            d.hasPrev = d.prevBones > 0;
+            d.fade = 0.0f;
+        }
+        d.category = category;
+        d.time = 0.0f;
+    }
+    if (d.fade < 1.0f)
+        d.fade = std::min(1.0f, d.fade + dt / kPoFadeSeconds);
+}
+
+// Po's step-1 brain: presence and locomotion, nothing more. He follows the
+// player (walk near, run far), stands with him when close, and throws his
+// attack clip when the player is in reach and his cooldown has run out - a
+// show, not a fight: step 1 wires the six clips to their states, the roster
+// and real combat are later steps. A hit interrupts into his flinch.
+bool PoBrain(Mob& m, float dt, const Vec3& playerPos, float* speed, bool* looking,
+             const std::vector<BeingInfo>* beings) {
+    (void)beings;
+    const MobType& t = kTypes[m.kind];
+    PoDrawState& d = m.poDraw;
+    // the gait phase runs on the ground he actually covered (last tick's
+    // velocity), at the current gait's own stride - the soldier's law, so
+    // his feet neither skate nor moon-walk at any speed the brain walks him
+    if (d.category == PP_WALK || d.category == PP_RUN) {
+        const float stride = PoStride(d.category);
+        if (stride > 0.01f) {
+            const float hv = std::sqrt(m.vel.x * m.vel.x + m.vel.y * m.vel.y);
+            d.gait += hv * dt / stride;
+        }
+    } else {
+        d.time += dt;
+    }
+    if (m.poHitT > 0.0f)
+        m.poHitT -= dt;
+    if (m.poAtkCd > 0.0f)
+        m.poAtkCd -= dt;
+    Vec3 toPlayer = playerPos - m.pos;
+    toPlayer.z = 0.0f;
+    const float dist = toPlayer.Length();
+    const float atkDur = PoPoseDuration(PP_ATTACK);
+    const bool attacking = m.poAtkCd > 1.1f; // the cooldown tail past the swing (see below)
+    bool chasing = false;
+    int want = PP_IDLE;
+    if (m.poHitT > 0.0f) {
+        want = PP_HIT;
+        m.moving = false;
+        *speed = 0.0f;
+    } else if (attacking) {
+        want = PP_ATTACK;
+        m.moving = false;
+        *speed = 0.0f;
+    } else if (dist > 3.4f) {
+        chasing = true;
+        m.goal = Flat(toPlayer);
+        m.moving = true;
+        want = dist > 10.0f ? PP_RUN : PP_WALK;
+        *speed = dist > 10.0f ? t.run : t.walk;
+    } else {
+        m.moving = false;
+        *speed = 0.0f;
+        want = PP_IDLE;
+        if (m.poAtkCd <= 0.0f && atkDur > 0.0f) {
+            // in reach and rested: the attack show starts. The cooldown word
+            // carries the swing plus the rest after it (1.1 s), so
+            // `attacking` above reads the swing part back off the same clock.
+            m.poAtkCd = atkDur + 1.1f;
+            want = PP_ATTACK;
+        }
+    }
+    if (!chasing) {
+        // standing, he turns to face the player (his head follows too)
+        const float target = std::atan2(-toPlayer.x, toPlayer.y);
+        const float dd = WrapAngle(target - m.yaw);
+        m.yaw = WrapAngle(m.yaw + Clamp(dd, -3.5f * dt, 3.5f * dt));
+        *looking = true;
+    }
+    PoSetPose(m, want, dt);
+    return chasing;
+}
+
 void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t playerHeld,
            const std::vector<BeingInfo>* beings) {
     const MobType& t = kTypes[m.kind];
@@ -3756,6 +3856,8 @@ void Think(Mob& m, float dt, bool playerOnFoot, const Vec3& playerPos, uint16_t 
             chasing = SoldierBrain(m, dt, playerPos, &speed, &looking, beings);
             sBrainMs += std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - brainT0).count();
         }
+        else if (m.kind == MOB_PO)
+            chasing = PoBrain(m, dt, playerPos, &speed, &looking, beings);
         else
             chasing = CreeperFuse(m, dt, playerPos, toPlayer, &speed, &looking, beings);
     }
@@ -3884,6 +3986,22 @@ void Kill(Mob& m) {
         m.draw.fullCategory = SP_DEATH;
         m.draw.fullVariant = m.soldierDeath;
         m.draw.fullTime = 0.0f;
+    }
+    if (m.kind == MOB_PO) {
+        // he falls out of the pose he died in, not out of a snap: the
+        // composed pose is snapshotted for the cross-fade, then his own
+        // death clip takes over (the renderer drives its clock off m.death)
+        PoLocal prev[128];
+        if (PoComposeLocals(m.poDraw, prev, 128)) {
+            for (int i = 0; i < 128; ++i)
+                m.poDraw.prevLocals[i] = prev[i];
+            m.poDraw.prevBones = PoBoneCount();
+            m.poDraw.hasPrev = m.poDraw.prevBones > 0;
+            m.poDraw.fade = 0.0f;
+        }
+        Log("po pose: DEATH (fading from cat %d)", m.poDraw.category);
+        m.poDraw.category = PP_DIE;
+        m.poDraw.time = 0.0f;
     }
     m.moving = false;
     Vec3 c = m.pos + Vec3(0, 0, MobHeight(m) * 0.5f);
@@ -4129,6 +4247,14 @@ static Mob MakeSpawnedMob(int kind, const Vec3& feet, bool persistent, bool baby
         m.draw.legYaw = m.yaw;
         m.bossState = BS_CALM;
     }
+    if (kind == MOB_PO) {
+        // a fresh Po stands in his idle, clocks at zero
+        m.poDraw.category = PP_IDLE;
+        m.poDraw.time = 0.0f;
+        m.poDraw.gait = 0.0f;
+        m.poDraw.hasPrev = false;
+        m.poDraw.fade = 1.0f;
+    }
     return m;
 }
 
@@ -4165,19 +4291,45 @@ static int ReanchorSoldier(int idx, const Vec3& feet, bool persistent) {
     return idx;
 }
 
+// The single-Po invariant, the soldier's law in miniature: one Po at a
+// time - a summon that finds him living re-anchors the same slot to the
+// summon point, fresh and whole, under the same mob id. (No bridge body
+// serves Po, so there is no reanchor word to pass; a corpse does not
+// count, exactly as with the soldier.)
+static int ReanchorPo(int idx, const Vec3& feet, bool persistent) {
+    const uint32_t id = gMobs[idx].id;
+    Mob m = MakeSpawnedMob(MOB_PO, feet, persistent, false);
+    m.id = id;
+    gMobs[idx] = m;
+    Log("summon po: he already lives - re-anchored to the summon point, fresh and whole");
+    return idx;
+}
+
 int SpawnMob(int kind, const Vec3& feet, bool persistent, bool baby) {
     if (kind < 0 || kind >= MOB_KIND_COUNT)
         return -1;
     // CleanSA: San Andreas has no Minecraft mobs in it - every spawn path in the
     // core (natural spawns, eggs, breeding, zombie reinforcements) funnels
-    // through this one door, and only the soldier may pass.
-    if (gRules.cleanSA && kind != MOB_SOLDIER)
+    // through this one door, and only the soldier and Po may pass.
+    if (gRules.cleanSA && kind != MOB_SOLDIER && kind != MOB_PO)
         return -1;
     if (kind == MOB_SOLDIER && !SoldierModelReady()) {
         // The user's law for this soldier: Counter-Strike's real model or nothing -
         // no box stand-in wearing his name. The loader already said why in the log.
         Log("summon soldier refused: cs_soldier.bin is not loaded, and a fake soldier is not an option");
         return -1;
+    }
+    if (kind == MOB_PO && !PoModelReady()) {
+        // The same law for Po: his own real model or nothing.
+        Log("summon po refused: po.bin is not loaded, and a fake Po is not an option");
+        return -1;
+    }
+    if (kind == MOB_PO) {
+        // the single-Po invariant: a second living Po must never exist -
+        // the summon re-anchors the one who lives (ReanchorPo)
+        for (size_t i = 0; i < gMobs.size(); ++i)
+            if (gMobs[i].kind == MOB_PO && gMobs[i].death < 0.0f)
+                return ReanchorPo((int)i, feet, persistent);
     }
     if (kind == MOB_SOLDIER) {
         // the single-soldier invariant: a second living soldier must never
@@ -4350,6 +4502,8 @@ void MobHurt(int index, float halfHearts, const Vec3& from, float knock) {
         m.onGround = false;
         m.goal = away;
     }
+    if (m.kind == MOB_PO && m.health > 0.0f)
+        m.poHitT = PoPoseDuration(PP_HIT); // his flinch plays; PoBrain reads the clock
     if (m.health <= 0.0f)
         Kill(m);
     else

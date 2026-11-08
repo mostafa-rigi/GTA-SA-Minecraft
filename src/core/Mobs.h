@@ -4,13 +4,14 @@
 // a herd appear (Host::SpawnGround).
 
 #include "Core.h"
+#include "PoModel.h"     // PoDrawState rides in Po's Mob
 #include "SoldierModel.h" // SoldierDrawState rides in the soldier's Mob
 
 namespace mc {
 
 struct BeingInfo; // Host.h: one of the host's own people near a point
 
-enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_ZOMBIE, MOB_SKELETON, MOB_SPIDER, MOB_SOLDIER, MOB_KIND_COUNT };
+enum MobKind { MOB_COW = 0, MOB_PIG, MOB_SHEEP, MOB_CHICKEN, MOB_CREEPER, MOB_WARDEN, MOB_ZOMBIE, MOB_SKELETON, MOB_SPIDER, MOB_SOLDIER, MOB_PO, MOB_KIND_COUNT };
 
 // The two sides of the Counter-Strike war, kept apart from the first step on: the player and whoever
 // fights at his side are TEAM_TERRORIST, the soldiers are TEAM_COUNTER. A soldier only ever goes for the
@@ -300,6 +301,12 @@ struct Mob {
     float cutT = 0.0f;          // the off-path chooser's re-evaluation clock
     bool cutting = false;       // the chooser's verdict: the direct line is
                                 // traversable, he is cutting across country
+    // ---- Po (MOB_PO), step 1: a minimal presence brain - he follows the
+    // player, plays his six own clips, and that is all (the fighting roster
+    // is later steps). His pose state rides in poDraw; the rest is clocks.
+    PoDrawState poDraw;         // Po: the whole-body pose the renderer draws
+    float poHitT = 0.0f;        // Po: seconds his hit flinch still shows (set by MobHurt)
+    float poAtkCd = 0.0f;       // Po: seconds before his next proximity attack
 };
 bool IsMonster(int kind);
 extern std::vector<Mob> gMobs;

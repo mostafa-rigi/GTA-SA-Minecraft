@@ -12,7 +12,7 @@
 namespace mc {
 
 // The host draws the models' quads, textured from entity.png (the ENT_* rectangles) or the block / item atlas.
-enum ModelTexture { MT_ENTITY = 0, MT_ATLAS, MT_SOLDIER, MT_COP = MT_SOLDIER + 3 }; // MT_SOLDIER + n: the CS soldier's own texture files (3 of them); MT_COP + n: the Driver 2 cop's own texture files
+enum ModelTexture { MT_ENTITY = 0, MT_ATLAS, MT_SOLDIER, MT_COP = MT_SOLDIER + 3, MT_PO = MT_COP + 32 }; // MT_SOLDIER + n: the CS soldier's own texture files (3 of them); MT_COP + n: the Driver 2 cop's own texture files (the bridge reserves 32 slots); MT_PO: Po's single atlas
 struct ModelSink {
     virtual ~ModelSink() = default;
     virtual void Texture(int tex) = 0; // the next quads use this ModelTexture
@@ -138,6 +138,7 @@ struct MobAnim {
     float pulse = 0.0f;    // warden: 1..0 after a heartbeat (its tendrils twitch)
     float charge = -1.0f;  // warden: seconds into a sonic boom, < 0 none
     SoldierDrawState soldier; // soldier: the brain's composed two-layer pose, whole (SoldierModel.h)
+    PoDrawState po;           // Po: the brain's whole-body pose state, whole (PoModel.h)
 };
 void DrawMob(int kind, const Pose& base, const MobAnim& a, float light, float r, float g, float b);
 
