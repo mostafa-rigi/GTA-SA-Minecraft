@@ -1,7 +1,9 @@
 #include "GtaCop.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "CCopPed.h"
 #include "CDecisionMakerTypes.h"
@@ -23,6 +25,7 @@
 
 #include "CCamera.h"   // TheCamera: CopRender's distance/frustum courtesy
 #include "Cop.h"
+#include "CopDiff.h" // the full-diff step: the region law over raw bodies
 #include "CopCarModel.h" // DrawCopCar / CopWheelCenters: his own body (piece 3)
 #include "Core.h"
 #include "GtaMobs.h"   // shared bridge utilities (the shot clock is the
@@ -163,6 +166,38 @@ struct DecoyPedState {
 DecoyPedState sDecoyPeds[2];
 constexpr int kDecoyCarModel = 445; // an Admiral: an ordinary sedan
 constexpr int kDecoyManModel = 7;   // an ordinary man
+
+// ---- the /coptest diff act's TWIN (the full-diff step): a second
+// cop-model body stood up by the anchor's own spawn/seat path - the
+// same model 596, the same CCopPed driver kind, the same pool
+// proofs, the same seat warp - but registered NOWHERE the force
+// keeps its bodies: not in sBodies (so CopBodyPre/Post never touch
+// it, ApplyCommand never writes it and the claimed desk's
+// FindBodyByPointer never finds it - its ProcessAI forwards to the
+// original untouched), and never given a mission by us beyond the
+// autopilot arm its drive verb writes. He is the control animal:
+// what the game itself does with a body built exactly like ours.
+// One twin at a time is all the act stages.
+struct TwinBodyState {
+    bool used = false;
+    CVehicle* veh = nullptr;
+    int vehRef = -1;
+    CPed* driver = nullptr;
+    int driverRef = -1;
+};
+TwinBodyState sTwin;
+CVehicle* LiveTwinVeh(const TwinBodyState& t) {
+    if (t.vehRef < 0 || !CPools::ms_pVehiclePool)
+        return nullptr;
+    CVehicle* v = CPools::ms_pVehiclePool->GetAtRef(t.vehRef);
+    return v == t.veh ? v : nullptr;
+}
+CPed* LiveTwinDriver(const TwinBodyState& t) {
+    if (t.driverRef < 0 || !CPools::ms_pPedPool)
+        return nullptr;
+    CPed* p = CPools::ms_pPedPool->GetAtRef(t.driverRef);
+    return p == t.driver ? p : nullptr;
+}
 
 DecoyCarState* FindDecoyCar(int vehRef) {
     if (vehRef < 0)
@@ -725,6 +760,7 @@ void CopSessionReset() {
         sDecoyCars[i] = DecoyCarState();
         sDecoyPeds[i] = DecoyPedState();
     }
+    sTwin = TwinBodyState();
     sPlayerVeh = nullptr;
     sPlayerVehHealth = 0.0f;
     sPlayerImpactPeak = 0.0f;
@@ -1309,13 +1345,19 @@ void GtaNearbyVehicles(const Vec3& centre, float radius, std::vector<Host::Vehic
         if (sBodies[i].used)
             if (CVehicle* v = LiveVeh(sBodies[i]))
                 mine[nMine++] = v;
-    CVehicle* decoys[4];
+    CVehicle* decoys[5];
     int nDecoys = 0;
     for (int i = 0; i < 2; ++i) {
         if (sDecoyCars[i].used) {
             if (CVehicle* v = LiveDecoyVeh(sDecoyCars[i]))
                 decoys[nDecoys++] = v;
         }
+    }
+    // the diff act's twin is a staged body too, not traffic (the
+    // plough law must never price a throw at the control animal)
+    if (sTwin.used) {
+        if (CVehicle* v = LiveTwinVeh(sTwin))
+            decoys[nDecoys++] = v;
     }
     CVehicle* pv = FindPlayerVehicle();
     const float r2 = radius * radius;
@@ -1872,6 +1914,333 @@ void GtaRetireDecoyPed(int ped) {
         delete man;
     }
     s = DecoyPedState();
+}
+
+// ---- the diff act's twin (the full-diff step) --------------------
+// The anchor's own spawn path, walked a second time for a body the
+// force will never own: same model, same driver kind, same proofs,
+// same seat warp (GtaSpawnCopBodyKind is the text this mirrors - the
+// differences are the point and they are exactly three: no sBodies
+// registration, no channel claim, no book). What the game then does
+// with him - his autopilot armed by GtaCopTwinDrive alone - is the
+// control reading the anchor is diffed against.
+int GtaSpawnCopTwin(const Vec3& at, float headingDeg, const Vec3& face) {
+    (void)headingDeg; // the face point decides the nose, as at the anchor's spawn
+    if (sTwin.used) {
+        Log("cop twin: a twin already stands - spawn refused");
+        return -1;
+    }
+    TwinBodyState& s = sTwin;
+    s = TwinBodyState();
+    s.used = true;
+    Command<Commands::REQUEST_MODEL>(kCopCarModel);
+    Command<Commands::REQUEST_MODEL>(kCopDriverModel);
+    Command<Commands::LOAD_ALL_MODELS_NOW>();
+    if (!Command<Commands::HAS_MODEL_LOADED>(kCopCarModel) ||
+        !Command<Commands::HAS_MODEL_LOADED>(kCopDriverModel)) {
+        s = TwinBodyState();
+        return -1;
+    }
+    bool found = false;
+    float gz = CWorld::FindGroundZFor3DCoord(at.x, at.y, at.z + 2.0f, &found, nullptr);
+    if (!found)
+        gz = at.z;
+    int handle = 0;
+    Command<Commands::CREATE_CAR>(kCopCarModel, at.x, at.y, gz + 0.6f, &handle);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kCopCarModel);
+    // the handle is a pool REF, as at every spawn in this file:
+    // resolve through GetAtRef and prove the identity round-trips
+    auto* vpool = CPools::ms_pVehiclePool;
+    CVehicle* veh = (vpool && handle > 0) ? vpool->GetAtRef(handle) : nullptr;
+    if (!veh) {
+        Log("cop twin: CREATE_CAR handle %d resolves to no vehicle - spawn refused", handle);
+        s = TwinBodyState();
+        return -1;
+    }
+    const int vidx = vpool->GetIndex(veh);
+    if (vidx < 0 || vidx >= vpool->m_nSize || vpool->IsFreeSlotAtIndex(vidx) ||
+        vpool->GetRef(veh) != handle) {
+        Log("cop twin: handle %d resolved but the pool identity does not round-trip (slot %d) - spawn refused",
+            handle, vidx);
+        s = TwinBodyState();
+        return -1;
+    }
+    if (!veh->m_matrix)
+        veh->AllocateMatrix();
+    if (!veh->m_matrix) {
+        Log("cop twin: the new car has no matrix and AllocateMatrix gave none - spawn refused");
+        CWorld::Remove(veh);
+        delete veh;
+        s = TwinBodyState();
+        return -1;
+    }
+    Vec3 d = face - at;
+    d.z = 0.0f;
+    const float dl = d.Length();
+    Vec3 fwd = dl > 0.01f ? d * (1.0f / dl) : Vec3(0, 1, 0);
+    CMatrix& m = *veh->m_matrix;
+    m.right = CVector(fwd.y, -fwd.x, 0.0f);
+    m.up = CVector(fwd.x, fwd.y, 0.0f);
+    m.at = CVector(0.0f, 0.0f, 1.0f);
+    m.pos = CVector(at.x, at.y, gz + 0.6f);
+    veh->UpdateRwMatrix();
+    const CVector& back = veh->m_matrix->pos;
+    if (std::fabs(back.x - at.x) > 0.01f || std::fabs(back.y - at.y) > 0.01f ||
+        std::fabs(back.z - (gz + 0.6f)) > 0.01f) {
+        Log("cop twin: the basis write does not read back (got %.2f, %.2f, %.2f) - spawn refused",
+            back.x, back.y, back.z);
+        CWorld::Remove(veh);
+        delete veh;
+        s = TwinBodyState();
+        return -1;
+    }
+    s.veh = veh;
+    s.vehRef = vpool->GetRef(veh);
+    if (LiveTwinVeh(s) != veh) {
+        Log("cop twin: the stored ref does not resolve back to the new car - spawn refused");
+        CWorld::Remove(veh);
+        delete veh;
+        s = TwinBodyState();
+        return -1;
+    }
+    // NO channel claim here, on purpose: the desk claim belongs to
+    // the force's bodies. This car's ProcessAI must stay the game's
+    // own - if the claim already happened (the anchor spawned
+    // first, as the act stages it), the replacement forwards him
+    // to the saved original because he is in no body table; if it
+    // has not, his table is simply unpatched. Either way he is
+    // driven by the original alone.
+    auto* ppool = CPools::ms_pPedPool;
+    if (!ppool) {
+        CWorld::Remove(veh);
+        delete veh;
+        s = TwinBodyState();
+        return -1;
+    }
+    CCopPed* cop = new CCopPed(COP_TYPE_CITYCOP);
+    CPed* driver = cop;
+    if (!driver) {
+        CWorld::Remove(veh);
+        delete veh;
+        s = TwinBodyState();
+        return -1;
+    }
+    driver->SetModelIndex(kCopDriverModel);
+    Command<Commands::MARK_MODEL_AS_NO_LONGER_NEEDED>(kCopDriverModel);
+    driver->SetCharCreatedBy(kCreatedByMission);
+    driver->ClearWeapons();
+    CWorld::Add(driver);
+    const int idx = ppool->GetIndex(driver);
+    if (idx < 0 || idx >= ppool->m_nSize || ppool->GetAt(idx) != driver || ppool->IsFreeSlotAtIndex(idx)) {
+        CWorld::Remove(driver);
+        delete driver;
+        CWorld::Remove(veh);
+        delete veh;
+        Log("cop twin: the driver did not land in the ped pool (index %d) - spawn refused", idx);
+        s = TwinBodyState();
+        return -1;
+    }
+    if (driver->m_pIntelligence) {
+        driver->m_pIntelligence->SetPedDecisionMakerType(eDecisionMakerType::PED_EMPTY);
+        driver->m_pIntelligence->SetSeeingRange(0.0f);
+        driver->m_pIntelligence->SetHearingRange(0.0f);
+    }
+    driver->m_fMaxHealth = 1000.0f;
+    driver->m_fHealth = 1000.0f;
+    driver->bExplosionProof = true;
+    driver->bFireProof = true;
+    const CVector door(at.x - fwd.y * 1.3f, at.y + fwd.x * 1.3f, gz + 1.0f);
+    if (driver->m_matrix) {
+        driver->m_matrix->pos = door;
+        driver->UpdateRwMatrix();
+    } else {
+        driver->SetPosn(door);
+    }
+    Command<Commands::TASK_WARP_CHAR_INTO_CAR_AS_DRIVER>(CPools::GetPedRef(driver),
+                                                         CPools::GetVehicleRef(veh));
+    s.driver = driver;
+    s.driverRef = ppool->GetRef(driver);
+    PedSkinsExcludePed(driver);
+    Log("cop twin: car %d up at (%.0f, %.0f) with its driver - host-driven, no brain, no desk",
+        s.vehRef, at.x, at.y);
+    return s.vehRef;
+}
+
+void GtaCopTwinDrive(int veh, const Vec3& at, float cruiseMps) {
+    if (!sTwin.used || sTwin.vehRef != veh)
+        return;
+    CVehicle* v = LiveTwinVeh(sTwin);
+    if (!v)
+        return;
+    // the game's own autopilot, written plainly every call - the
+    // decoy's recipe byte for byte (the v7-era feed's shape, which
+    // provably drove host cars): a straight GOTO, the cruise pair,
+    // engine on, handbrake off. Nothing else on this body is ever
+    // written by us: no pedals, no mission forcing, no stamps
+    CAutoPilot& ap = v->m_autoPilot;
+    ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
+    ap.m_nCarDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
+    ap.m_vecDestinationCoors = CVector(at.x, at.y, at.z);
+    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 127.0f);
+    ap.m_fMaxTrafficSpeed = cruiseMps;
+    v->bEngineOn = true;
+    v->bIsHandbrakeOn = false;
+}
+
+bool GtaCopTwinReport(int veh, Vec3* pos, Vec3* vel) {
+    if (!sTwin.used || sTwin.vehRef != veh || !pos || !vel)
+        return false;
+    CVehicle* v = LiveTwinVeh(sTwin);
+    if (!v || !v->m_matrix)
+        return false;
+    *pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
+    *vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
+    return true;
+}
+
+void GtaRetireCopTwin(int veh) {
+    if (!sTwin.used || sTwin.vehRef != veh)
+        return;
+    TwinBodyState& s = sTwin;
+    if (CPed* driver = LiveTwinDriver(s)) {
+        CWorld::Remove(driver);
+        delete driver;
+    }
+    if (CVehicle* v = LiveTwinVeh(s)) {
+        CWorld::Remove(v);
+        delete v;
+    }
+    s = TwinBodyState();
+}
+
+// ---- the full diff + adoption (the full-diff step) ---------------
+// One call, inside one frame callback: snapshot both bodies whole,
+// diff them through the core engine (CopDiff: the region law over
+// the SDK's own layout), print the diff to the log, and land the
+// adoption - the twin's drive-state words onto the anchor, nothing
+// else, nowhere else. The twin is never written. Guards first, and
+// every refusal is a printed line, not a silence.
+bool GtaCopBodyDiffAdopt(int anchorVeh, int twinVeh, Host::DiffAdopt* out) {
+    if (!out)
+        return false;
+    *out = Host::DiffAdopt();
+    CopBodyState* ab = FindBody(anchorVeh);
+    if (!ab) {
+        Log("cop diff: anchor %d is not a body of ours - refused", anchorVeh);
+        return false;
+    }
+    if (ab->bike) {
+        Log("cop diff: anchor %d is the bike - the diff is a car instrument, refused", anchorVeh);
+        return false;
+    }
+    CVehicle* anchor = LiveVeh(*ab);
+    if (!sTwin.used || sTwin.vehRef != twinVeh) {
+        Log("cop diff: twin %d does not resolve - refused", twinVeh);
+        return false;
+    }
+    CVehicle* twin = LiveTwinVeh(sTwin);
+    if (!anchor || !twin) {
+        Log("cop diff: a body no longer resolves (anchor %p, twin %p) - refused",
+            (void*)anchor, (void*)twin);
+        return false;
+    }
+    // the same-class proof: the diff is only meaningful over one
+    // layout - both bodies must carry the same vtable word (both
+    // are our own 596 spawns, and this is the mechanical check)
+    static_assert(sizeof(CAutomobile) == kCopBodyExtent,
+                  "the diff extent is the SDK's CAutomobile size");
+    if (*reinterpret_cast<void**>(anchor) != *reinterpret_cast<void**>(twin)) {
+        Log("cop diff: the two bodies are not the same class (vtables differ) - refused");
+        return false;
+    }
+    // snapshots: the whole extent, taken now; the adoption below
+    // writes from the twin SNAPSHOT, so the list the log prints and
+    // the words that land are one and the same reading
+    static unsigned char snapA[kCopBodyExtent];
+    static unsigned char snapT[kCopBodyExtent];
+    std::memcpy(snapA, anchor, kCopBodyExtent);
+    std::memcpy(snapT, twin, kCopBodyExtent);
+    static CopDiffWord words[kCopBodyWords];
+    int totalDiff = 0, adoptable = 0;
+    const int filled = CopBodyDiffWords(snapA, snapT, kCopBodyExtent,
+                                        (unsigned)(uintptr_t)anchor,
+                                        (unsigned)(uintptr_t)twin,
+                                        words, (int)kCopBodyWords,
+                                        &totalDiff, &adoptable);
+    out->wordsTotal = (int)kCopBodyWords;
+    out->wordsDiffer = totalDiff;
+    for (int i = 0; i < filled; ++i)
+        if (words[i].cls >= 0 && words[i].cls < CD_COUNT)
+            ++out->classDiffer[words[i].cls];
+    Log("cop diff: anchor %d vs twin %d - %d of %d words differ; classes:"
+        " drive %d, header %d, structural %d, pointer %d, autopilot %d,"
+        " identity %d, health %d, contact %d; adoptable %d",
+        anchorVeh, twinVeh, totalDiff, (int)kCopBodyWords,
+        out->classDiffer[CD_DRIVE], out->classDiffer[CD_HEADER],
+        out->classDiffer[CD_STRUCT], out->classDiffer[CD_POINTER],
+        out->classDiffer[CD_AUTOPILOT], out->classDiffer[CD_IDENTITY],
+        out->classDiffer[CD_HEALTH], out->classDiffer[CD_CONTACT],
+        adoptable);
+    // the print: every differing word the name table knows gets its
+    // own line whatever its class (the famous fields are the ones a
+    // reader hunts first); every ADOPTABLE word gets its own line
+    // (the list is the deliverable); the unnamed rest group into
+    // runs of consecutive offsets of one class. Values print as hex,
+    // plus a float reading when the bits make a sane one.
+    auto valStr = [](unsigned w, char* buf, size_t n) {
+        float f;
+        std::memcpy(&f, &w, 4);
+        if (f == f && std::fabs(f) > 1e-6f && std::fabs(f) < 1e7f)
+            std::snprintf(buf, n, "%08X (%g)", w, f);
+        else
+            std::snprintf(buf, n, "%08X", w);
+    };
+    int adoptLines = 0;
+    for (int i = 0; i < filled; ++i) {
+        const CopDiffWord& w = words[i];
+        const char* name = CopBodyWordName(w.offset);
+        if (!w.adoptable && !name)
+            continue;
+        if (w.adoptable && !name && adoptLines >= 240)
+            continue; // the cap: the summary line below carries the count
+        char va[40], vt[40];
+        valStr(w.anchor, va, sizeof va);
+        valStr(w.twin, vt, sizeof vt);
+        Log("cop diff: +0x%03X %-30s anchor %-18s twin %-18s %s [%s]",
+            w.offset, name ? name : "", va, vt,
+            w.adoptable ? "-> ADOPT" : "kept", CopBodyClassName(w.cls));
+        if (w.adoptable && !name)
+            ++adoptLines;
+    }
+    for (int i = 0; i < filled;) {
+        const CopDiffWord& w0 = words[i];
+        if (w0.adoptable || CopBodyWordName(w0.offset)) {
+            ++i;
+            continue;
+        }
+        unsigned lo = w0.offset, hi = w0.offset;
+        const int cls = w0.cls;
+        int n = 0;
+        while (i < filled && !words[i].adoptable &&
+               !CopBodyWordName(words[i].offset) && words[i].cls == cls &&
+               words[i].offset <= hi + 4) {
+            hi = words[i].offset;
+            ++n;
+            ++i;
+        }
+        Log("cop diff: +0x%03X..+0x%03X %s (%d words) - not adopted",
+            lo, hi, CopBodyClassName(cls), n);
+    }
+    // the adoption: the engine writes the twin snapshot's word at
+    // every adoptable offset, onto the live anchor, in this call
+    out->adopted = CopBodyAdoptWords(reinterpret_cast<unsigned char*>(anchor),
+                                     snapT, words, filled,
+                                     out->adoptedOffsets, 96);
+    out->adoptedListed = out->adopted < 96 ? out->adopted : 96;
+    out->ok = true;
+    Log("cop diff: adoption landed - %d words of the twin's drive state now stand on the anchor",
+        out->adopted);
+    return true;
 }
 
 // ---- the momentum channel's hands (the 5x update): the core prices

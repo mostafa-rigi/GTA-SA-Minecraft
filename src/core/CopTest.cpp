@@ -28,6 +28,7 @@ enum Phase {
     PH_NONE,
     PH_SPIKE,
     PH_DIRECT,
+    PH_DIFF,
     PH_PURSUIT,
     PH_RUNOVER,
     PH_RING,
@@ -53,8 +54,10 @@ Phase sPhase = PH_NONE;
 bool sEntered = false;
 float sPhaseT = 0.0f;
 float sTotalT = 0.0f;
-Result sResults[14]; // the root step's "direct" act makes thirteen
-                     // graded outcomes; one spare slot stands guard
+Result sResults[16]; // the root step's "direct" act made thirteen
+                     // graded outcomes; the full-diff step's "diff"
+                     // act makes fourteen - two spare slots stand
+                     // guard over the count
 int sResultN = 0;
 float sSavedFelony = 0.0f;
 
@@ -101,6 +104,25 @@ int sDirHookLast = -1;     // the anchor's stamp count at the last tick
 float sDirHookStallT = 0.0f; // seconds of ordered drive, no new stamp
 bool sDirHookBad = false;  // the door stood silent under orders
 int sDirHookTotal = 0;     // stamps landed across the whole act
+// diff (THE FULL-DIFF STEP's bench act: the anchor against a
+// host-driven twin, whole-body diff, adoption, and the re-spike)
+int sTwin = -1;            // the twin's host number (-1: none stands)
+Vec3 sTwinAt, sTwinFwd;    // where the twin was stood, and his nose
+Vec3 sTwinFarFeed;         // the raw far feed when no route laid
+int sDiffStage = 0;        // 0 settle, 1 before-spike, 2 stop,
+                           // 3 velocity probe, 4 twin drive-up,
+                           // 5 adopt (one tick), 6 after-spike
+float sDiffStageT = 0.0f;
+float sDiffSum = 0.0f, sDiffWt = 0.0f, sDiffPeak = 0.0f; // the running
+                           // spike sampler (stages 1 and 6 share it)
+Vec3 sDiffStart;           // the running spike's start position
+float sDiffBAvg = 0.0f, sDiffBPeak = 0.0f, sDiffBDisp = 0.0f; // BEFORE
+bool sProbeKicked = false;
+Vec3 sProbeStart;
+float sProbeMax = 0.0f, sProbeEnd = 0.0f;
+float sTwinFastT = 0.0f, sTwinBest = 0.0f; // the twin's sustained-
+                           // speed witness and its best reading
+Host::DiffAdopt sDiffRes;  // the adoption's summary, for the grade
 // pursuit
 float sStartDist = 0.0f;
 bool sPursuitOpen = false;
@@ -195,8 +217,8 @@ void Grade(const char* name, bool pass, bool counted, const char* fmt, ...) {
     va_start(ap, fmt);
     std::vsnprintf(nums, sizeof nums, fmt, ap);
     va_end(ap);
-    if (sResultN < 14) { // the arrays' own bound (they grew to 14
-                         // when the direct act made thirteen grades;
+    if (sResultN < 16) { // the arrays' own bound (they grew to 16
+                         // when the diff act made fourteen grades;
                          // this guard silently stayed at 12 for a run
                          // and the soak grade printed PASS while never
                          // landing on the sheet - the suite's by-name
@@ -347,6 +369,46 @@ void DriveDecoy(float cruise) {
     TheHost().DecoyCarDrive(sDecoyCar, feed, cruise);
 }
 
+// drive the diff act's twin along the same route machinery: the
+// game's own autopilot, fed a look-ahead point down the route, the
+// way DriveDecoy feeds its car. With no route laid (the graph would
+// not draw one here), the feed is the raw far point down the twin's
+// own nose that the stage computed - GOTOCOORDS_STRAIGHT needs no
+// graph, and the twin's stage is a straight road by construction
+void DriveTwin(float cruise) {
+    if (sTwin < 0)
+        return;
+    Vec3 pos, vel;
+    if (!TheHost().CopTwinReport(sTwin, &pos, &vel))
+        return;
+    if (sRoute.empty()) {
+        TheHost().CopTwinDrive(sTwin, sTwinFarFeed, cruise);
+        return;
+    }
+    for (int guard = 0; guard < 8; ++guard) {
+        Vec3 d = sRoute[sRouteIdx] - pos;
+        d.z = 0.0f;
+        if (d.Length() < 9.0f)
+            sRouteIdx = (sRouteIdx + 1) % sRoute.size();
+        else
+            break;
+    }
+    Vec3 feed = sRoute[sRouteIdx];
+    Vec3 prev = pos;
+    float covered = 0.0f;
+    for (size_t k = 0; k < sRoute.size(); ++k) {
+        const Vec3& p = sRoute[(sRouteIdx + k) % sRoute.size()];
+        Vec3 seg = p - prev;
+        seg.z = 0.0f;
+        covered += seg.Length();
+        feed = p;
+        prev = p;
+        if (covered >= 18.0f)
+            break;
+    }
+    TheHost().CopTwinDrive(sTwin, feed, cruise);
+}
+
 Vec3 DecoyPos() {
     Vec3 p(0, 0, 0), v;
     if (sDecoyCar >= 0)
@@ -370,6 +432,10 @@ void Cleanup() {
         TheHost().RetireDecoy(sDecoyCar);
         sDecoyCar = -1;
     }
+    if (sTwin >= 0) {
+        TheHost().RetireCopTwin(sTwin);
+        sTwin = -1;
+    }
     if (sDecoyPed >= 0) {
         TheHost().RetireDecoyPed(sDecoyPed);
         sDecoyPed = -1;
@@ -382,7 +448,7 @@ void Cleanup() {
 }
 
 // the last run's sheet, kept for the suite's hook after Finish
-Result sSheet[14];
+Result sSheet[16];
 int sSheetN = 0;
 
 void Finish() {
@@ -727,6 +793,266 @@ void PhaseDirect(float dt) {
             sDecoyCar = -1;
         }
         GoPhase(PH_PURSUIT);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// THE FULL-DIFF STEP's bench act. Four live builds proved the pedal
+// channel byte-for-byte and the car still never moved, so this act
+// stops hand-picking fields: it stands a TWIN beside the anchor - a
+// second cop body built by the anchor's own spawn/seat path, left
+// purely host-driven (autopilot armed, never stamped, mission never
+// forced) - grades that the twin actually drives, then diffs the two
+// bodies' WHOLE automobile extent word by word and ADOPTS the twin's
+// drive-state words onto the anchor (the CopDiff region law: scalar
+// state inside CVehicle/CAutomobile only; pointers, the autopilot
+// block, identity, health, structural objects and contact caches
+// never cross). The anchor's full-gas straight spike runs BEFORE
+// and AFTER the adoption on the same ground, so the sheet prints
+// the cure or its absence in one line. Between them rides the
+// velocity probe: 10 m/s written straight onto the anchor's
+// velocity for a 2 s coast - a car that travels was stepped by
+// physics and its gate is torque; a car that hangs was never
+// stepped at all. The act commands the anchor's pedals through the
+// host verb directly (it benches the BODY, not the brain - the
+// brain is the direct act's grade, two acts up); CopTestTick runs
+// after the tick's mode drive, so these words are the frame's last
+// stored command, the same seat the sheet's other staging uses.
+void PhaseDiff(float dt) {
+    CopState& a = gCop;
+    if (!sEntered) {
+        sEntered = true;
+        Say("coptest: --- diff: a host-driven twin beside the anchor - whole-body diff, adoption, re-spike ---");
+        sDiffStage = 0;
+        sDiffStageT = 0.0f;
+        sTwin = -1;
+        sDiffRes = Host::DiffAdopt();
+        const Vec3 p = PlayerNow();
+        GuardDismiss();
+        if (!GuardSummon(p + Vec3(6, 0, 0), p)) {
+            Grade("diff", false, true, "the anchor's body could not be made");
+            GoPhase(PH_PLAYER1);
+            return;
+        }
+        CopPreyOverride(-1, -1);
+        CopForceFelony(0.0f);
+        return;
+    }
+    // the way out, on every exit: the twin retires; nothing else is
+    // owed. This act sits after the roadblock, last before the
+    // player phases, on purpose: the player phase behind it stages
+    // the whole force from nothing (dismiss, fresh summon), so the
+    // bench's leftovers - a driven-off anchor, a stood-down force -
+    // cost the later grades nothing. Run earlier (the first cut ran
+    // it after the direct act), its fresh summon and its spikes'
+    // end state perturbed the pursuit/run-over/ring chain, which
+    // stages each act off whatever the previous one left standing.
+    auto leaveDiff = [&]() {
+        if (sTwin >= 0) {
+            TheHost().RetireCopTwin(sTwin);
+            sTwin = -1;
+        }
+    };
+    sDiffStageT += dt;
+    if (sPhaseT > 110.0f) {
+        Grade("diff", false, true,
+              "the diff act timed out at stage %d (twin best %.1f m/s, probe coast %.1f m)",
+              sDiffStage, sTwinBest, sProbeMax);
+        leaveDiff();
+        GoPhase(PH_PLAYER1);
+        return;
+    }
+    // park the anchor unless a spike stage owns its pedals this tick
+    auto parkAnchor = [&]() {
+        if (a.veh >= 0)
+            TheHost().CopBodyDrive(a.veh, 0.0f, 0.0f, 0.0f, false);
+    };
+    if (sDiffStage == 0) {
+        // settle: the fresh anchor parks (the spike law's own
+        // driving is overridden by the park words every tick - this
+        // act benches a standing body), calibration reads what it
+        // reads, and once the page is calibrated and the body is
+        // still, the twin stands 7 m off his right flank, nose the
+        // same way - beside him, never in his spike line
+        parkAnchor();
+        if ((sDiffStageT > 1.2f && a.steerCalDone && std::fabs(a.speed) < 0.5f) ||
+            sDiffStageT > 12.0f) {
+            Vec3 f = a.fwd;
+            f.z = 0.0f;
+            f = f.Length() > 0.01f ? f * (1.0f / f.Length()) : Vec3(0, 1, 0);
+            const Vec3 right(f.y, -f.x, 0.0f);
+            sTwinAt = a.pos + right * 7.0f;
+            sTwinFwd = f;
+            const float heading = std::atan2(f.x, f.y) * 57.29578f;
+            sTwin = TheHost().SpawnCopTwin(sTwinAt, heading, sTwinAt + f * 50.0f);
+            if (sTwin < 0) {
+                Grade("diff", false, true,
+                      "no twin could be staged - the comparison has no control body");
+                leaveDiff();
+                GoPhase(PH_PLAYER1);
+                return;
+            }
+            sTwinFarFeed = sTwinAt + f * 300.0f;
+            SayQuiet("coptest: diff - the twin stands at (%.0f, %.0f); the before-spike runs",
+                     sTwinAt.x, sTwinAt.y);
+            sDiffSum = sDiffWt = sDiffPeak = 0.0f;
+            sDiffStart = a.pos;
+            sDiffStage = 1;
+            sDiffStageT = 0.0f;
+        }
+        return;
+    }
+    if (sDiffStage == 1 || sDiffStage == 6) {
+        // a spike stage: full gas, straight wheel, four seconds -
+        // the summon's nose is west, down the road's own line, so
+        // the run ends on the same street it started, graph under
+        // it. Sampled off the body's own report, like every grade
+        // here.
+        if (a.veh >= 0)
+            TheHost().CopBodyDrive(a.veh, 1.0f, 0.0f, 0.0f, false);
+        const float spd = std::fabs(a.speed);
+        sDiffSum += spd * dt;
+        sDiffWt += dt;
+        if (spd > sDiffPeak)
+            sDiffPeak = spd;
+        if (sDiffStageT >= 4.0f) {
+            const float avg = sDiffWt > 0.5f ? sDiffSum / sDiffWt : 0.0f;
+            const float disp = (a.pos - sDiffStart).Length();
+            if (sDiffStage == 1) {
+                sDiffBAvg = avg;
+                sDiffBPeak = sDiffPeak;
+                sDiffBDisp = disp;
+                SayQuiet("coptest: diff before-spike - avg %.1f m/s, max %.1f, displacement %.1f m",
+                         avg, sDiffPeak, disp);
+                sDiffStage = 2;
+                sDiffStageT = 0.0f;
+            } else {
+                Grade("diff", avg >= 5.0f && disp >= 20.0f, true,
+                      "twin drove %.1f m/s sustained | probe: 10 m/s written on the anchor,"
+                      " coasted %.1f m in 2 s | body diff: %d words differ, %d adopted"
+                      " | full-gas 4 s BEFORE avg %.1f max %.1f disp %.1f m"
+                      " -> AFTER avg %.1f max %.1f disp %.1f m (bar: after avg >=5 m/s, disp >=20 m)",
+                      sTwinBest, sProbeMax, sDiffRes.wordsDiffer, sDiffRes.adopted,
+                      sDiffBAvg, sDiffBPeak, sDiffBDisp, avg, sDiffPeak, disp);
+                leaveDiff();
+                GoPhase(PH_PLAYER1);
+            }
+        }
+        return;
+    }
+    if (sDiffStage == 2) {
+        // stop him where the before-spike left him (StandDrive's
+        // law: a held brake at a standstill is reverse on this host,
+        // so he brakes only while he rolls)
+        if (a.veh >= 0)
+            TheHost().CopBodyDrive(a.veh, 0.0f, std::fabs(a.speed) > 1.0f ? 0.7f : 0.0f,
+                                   0.0f, false);
+        if (std::fabs(a.speed) < 0.3f || sDiffStageT > 3.0f) {
+            sProbeKicked = false;
+            sProbeMax = 0.0f;
+            sProbeEnd = 0.0f;
+            sDiffStage = 3;
+            sDiffStageT = 0.0f;
+        }
+        return;
+    }
+    if (sDiffStage == 3) {
+        // the velocity probe: one written velocity, then two
+        // seconds of no orders at all - the coast (or the hang) is
+        // physics' own testimony, separated from the torque gate
+        if (!sProbeKicked) {
+            sProbeKicked = true;
+            Vec3 f = a.fwd;
+            f.z = 0.0f;
+            f = f.Length() > 0.01f ? f * (1.0f / f.Length()) : Vec3(0, 1, 0);
+            if (a.veh >= 0)
+                TheHost().KickVehicle(a.veh, f * 10.0f, 0.0f);
+            sProbeStart = a.pos;
+        }
+        parkAnchor();
+        const float gone = (a.pos - sProbeStart).Length();
+        if (gone > sProbeMax)
+            sProbeMax = gone;
+        sProbeEnd = std::fabs(a.speed);
+        if (sDiffStageT >= 2.0f) {
+            SayQuiet("coptest: diff probe - 10 m/s written on the anchor: travelled %.1f m"
+                     " in 2 s, speed ends %.1f m/s (travel = physics steps and the gate is"
+                     " torque; a hang = physics never steps this body)",
+                     sProbeMax, sProbeEnd);
+            // the twin's road: a straight there-and-back along his
+            // nose if the graph lays it; the raw far feed otherwise
+            sRoute.clear();
+            sRouteIdx = 0;
+            BuildStraight(sTwinAt, sTwinFwd);
+            sTwinFastT = 0.0f;
+            sTwinBest = 0.0f;
+            sDiffStage = 4;
+            sDiffStageT = 0.0f;
+        }
+        return;
+    }
+    if (sDiffStage == 4) {
+        // the twin drives up: the act's control must PROVE itself a
+        // moving car before any diff is read - >5 m/s sustained a
+        // full second. A twin that never drives convicts the spawn
+        // path itself (both bodies are built by it), and the act
+        // says so instead of diffing two parked cars
+        parkAnchor();
+        DriveTwin(11.0f);
+        Vec3 tp, tv;
+        if (sTwin >= 0 && TheHost().CopTwinReport(sTwin, &tp, &tv)) {
+            const float spd = tv.Length();
+            if (spd > sTwinBest)
+                sTwinBest = spd;
+            if (spd > 5.0f)
+                sTwinFastT += dt;
+            else
+                sTwinFastT = 0.0f;
+        }
+        if (sTwinFastT >= 1.0f) {
+            sDiffStage = 5;
+            sDiffStageT = 0.0f;
+            return;
+        }
+        if (sDiffStageT > 25.0f) {
+            Grade("diff", false, true,
+                  "the TWIN never drove (best %.1f m/s in 25 s) - a body built by the"
+                  " anchor's own spawn path does not move under the game's own autopilot"
+                  " either: the hunt re-points at the spawn path itself, and no diff"
+                  " was read off two parked cars",
+                  sTwinBest);
+            leaveDiff();
+            GoPhase(PH_PLAYER1);
+        }
+        return;
+    }
+    // stage 5: the diff + adoption, one call while the twin is
+    // mid-drive - then the after-spike grades what the adoption did
+    parkAnchor();
+    {
+        Host::DiffAdopt res;
+        if (!TheHost().CopBodyDiffAdopt(a.veh, sTwin, &res)) {
+            Grade("diff", false, false,
+                  "the host cannot diff raw bodies - the instrument is host-domain and"
+                  " this host has no raw body memory; stated, not dressed as a result");
+            leaveDiff();
+            GoPhase(PH_PLAYER1);
+            return;
+        }
+        sDiffRes = res;
+        char list[640];
+        int n = 0;
+        for (int i = 0; i < res.adoptedListed && n < 600; ++i)
+            n += std::snprintf(list + n, sizeof list - n, "%s+0x%03X",
+                               i ? " " : "", res.adoptedOffsets[i]);
+        list[n] = '\0';
+        SayQuiet("coptest: diff - %d of %d words differ, %d adopted onto the anchor: %s%s",
+                 res.wordsDiffer, res.wordsTotal, res.adopted, list,
+                 res.adopted > res.adoptedListed ? " ..." : "");
+        sDiffSum = sDiffWt = sDiffPeak = 0.0f;
+        sDiffStart = a.pos;
+        sDiffStage = 6;
+        sDiffStageT = 0.0f;
     }
 }
 
@@ -1292,7 +1618,7 @@ void PhaseBlock(float dt) {
         GuardDismiss();
         if (!GuardSummon(p + Vec3(6, 0, 0), p)) {
             Grade("roadblock", false, false, "the force could not be restaged");
-            GoPhase(PH_PLAYER1);
+            GoPhase(PH_DIFF);
             return;
         }
         Vec3 fwd = gCop.fwd;
@@ -1303,7 +1629,7 @@ void PhaseBlock(float dt) {
         if (!SpawnDecoyCarNear(gCop.pos, 68.0f, fwd) ||
             (!BuildStraight(DecoyPos(), fwd) && !BuildLoop(DecoyPos()))) {
             Grade("roadblock", false, false, "no decoy could be staged");
-            GoPhase(PH_PLAYER1);
+            GoPhase(PH_DIFF);
             return;
         }
         CopPreyOverride(sDecoyCar, -1);
@@ -1322,7 +1648,7 @@ void PhaseBlock(float dt) {
     Vec3 dp, dv;
     if (!TheHost().DecoyReport(sDecoyCar, &dp, &dv)) {
         Grade("roadblock", false, false, "the decoy was lost mid-scenario");
-        GoPhase(PH_PLAYER1);
+        GoPhase(PH_DIFF);
         return;
     }
     if (CopBlockCount() > 0)
@@ -1339,7 +1665,7 @@ void PhaseBlock(float dt) {
             Grade("roadblock", true, true,
                   "%d cars placed, a block unit woke with the decoy %.0f m out",
                   CopBlockCount(), d);
-            GoPhase(PH_PLAYER1);
+            GoPhase(PH_DIFF);
             return;
         }
     }
@@ -1350,7 +1676,7 @@ void PhaseBlock(float dt) {
         else
             Grade("roadblock", false, true,
                   "placed but never woke (closest decoy pass %.0f m)", sBlockMinDist);
-        GoPhase(PH_PLAYER1);
+        GoPhase(PH_DIFF);
     }
 }
 
@@ -1485,7 +1811,7 @@ void CopTestReset() {
         // Finish prints DONE and cleans up as always. The sheet must
         // ALWAYS end in DONE.
         Say("coptest: the world reset under a running test - grading what stands and finishing the sheet");
-        static const char* const kCounted[] = { "spike", "direct", "arrival", "ram", "siren",
+        static const char* const kCounted[] = { "spike", "direct", "diff", "arrival", "ram", "siren",
                                                 "runover", "ring", "recovery", "player-felony", "bailout",
                                                 "radio" };
         for (const char* name : kCounted)
@@ -1528,6 +1854,10 @@ bool CopTestVerdictForTest(const char* name, bool* passOut, bool* countedOut) {
     return false;
 }
 
+int CopTestPhaseForTest() {
+    return sRunning ? (int)sPhase : -1;
+}
+
 void CopTestTick(float dt) {
     if (!sRunning)
         return;
@@ -1541,6 +1871,7 @@ void CopTestTick(float dt) {
     switch (sPhase) {
     case PH_SPIKE: PhaseSpike(dt); break;
     case PH_DIRECT: PhaseDirect(dt); break;
+    case PH_DIFF: PhaseDiff(dt); break;
     case PH_PURSUIT: PhasePursuit(dt); break;
     case PH_RUNOVER: PhaseRunover(dt); break;
     case PH_RING: PhaseRing(dt); break;

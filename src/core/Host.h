@@ -382,6 +382,39 @@ struct Host {
     // his displacement from where he was put).
     virtual bool DecoyPedReport(int ped, Vec3* pos, float* health) { return false; }
     virtual void RetireDecoyPed(int ped) {}
+    // ---- the /coptest diff act's TWIN and ADOPTION (the full-diff
+    // step, 2026-11-08): a second cop-model body stood up by the
+    // anchor's own spawn/seat path but left PURELY host-driven - its
+    // autopilot armed with a far GOTO, never stamped at the claimed
+    // desk, its mission never forced - so one session can compare a
+    // car the game drives against our stamped anchor word by word,
+    // and then copy the twin's drive-state words onto the anchor
+    // (the adoption) in the same session. SpawnCopTwin returns the
+    // host's number for the twin's car, -1 when no body could be
+    // made; the drive verb mirrors DecoyCarDrive's recipe on the
+    // twin's own autopilot; the report is the plain pos/vel pair.
+    virtual int SpawnCopTwin(const Vec3& at, float headingDeg, const Vec3& face) { return -1; }
+    virtual void CopTwinDrive(int veh, const Vec3& at, float cruiseMps) {}
+    virtual bool CopTwinReport(int veh, Vec3* pos, Vec3* vel) { return false; }
+    virtual void RetireCopTwin(int veh) {}
+    // The diff + adoption itself, as one call: snapshot both bodies'
+    // whole automobile extent, print every differing word (labelled
+    // by the CopDiff classes) to the log, then write the twin's
+    // DRIVE-STATE words (the CopDiff region law) onto the anchor.
+    // The summary lands here; the adopted offsets are the convicted
+    // set when the anchor then drives. False when the host cannot
+    // run the instrument at all (a host with no raw body memory -
+    // the answer is stated, never dressed as a result).
+    struct DiffAdopt {
+        bool ok = false;
+        int wordsTotal = 0;  // words compared (the extent / 4)
+        int wordsDiffer = 0; // words that differ at all
+        int classDiffer[8] = {}; // differing words per CopDiff class
+        int adopted = 0;     // words written onto the anchor
+        unsigned adoptedOffsets[96] = {}; // the first 96 of them
+        int adoptedListed = 0; // how many of `adopted` the list holds
+    };
+    virtual bool CopBodyDiffAdopt(int anchorVeh, int twinVeh, DiffAdopt* out) { return false; }
     // ---- the fishing hook
     virtual HostHit HookTrace(const Vec3& from, const Vec3& dir, float len) { return HostHit(); } // in the way of the flying hook
     virtual bool HookPoint(const HostHit& hooked, Vec3* at) { return false; } // where the hook on its thing is now (false: gone)

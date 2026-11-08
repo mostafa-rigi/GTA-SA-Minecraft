@@ -68,6 +68,17 @@ void GtaRetireDecoy(int veh);
 int GtaSpawnDecoyPed(const Vec3& at);
 bool GtaDecoyPedReport(int ped, Vec3* pos, float* health);
 void GtaRetireDecoyPed(int ped);
+// the diff act's twin + adoption (the full-diff step): a second
+// cop-model body stood up by the anchor's own spawn/seat path but
+// left purely host-driven (never registered as a cop body, so the
+// claimed desk forwards its ProcessAI to the original untouched),
+// and the one-call whole-body diff + drive-state adoption over the
+// anchor and the twin
+int GtaSpawnCopTwin(const Vec3& at, float headingDeg, const Vec3& face);
+void GtaCopTwinDrive(int veh, const Vec3& at, float cruiseMps);
+bool GtaCopTwinReport(int veh, Vec3* pos, Vec3* vel);
+void GtaRetireCopTwin(int veh);
+bool GtaCopBodyDiffAdopt(int anchorVeh, int twinVeh, Host::DiffAdopt* out);
 // the momentum channel's hands (the 5x update): land the core's priced
 // throw on a vehicle (dv m/s added, yawRate rad/s of spin) or on a man
 // on foot (ped 0 = the player himself, otherwise a decoy ped)

@@ -25,6 +25,7 @@
 #include "McModel.h"
 #include "Mobs.h"
 #include "Cop.h"
+#include "CopDiff.h"
 #include "CopTest.h"
 #include "CopCarModel.h"
 #include "Atlas.h"
@@ -13644,6 +13645,13 @@ struct CopTestFakeHost : ForceFakeHost {
     Vec3 wedgePos, wedgeDir;
     void CopBodyPlace(int veh, const Vec3& at, float headingDeg) override {
         ForceFakeHost::CopBodyPlace(veh, at, headingDeg);
+        // a place is a wedge only when the recovery act stages it -
+        // that act alone builds a wall and stands a unit nose-first
+        // against it. Any other act's place (a staging teleport in
+        // open road) is not a wedge; wedging a unit there would pin
+        // it for whatever act follows.
+        if (CopTestPhaseForTest() != 7)
+            return;
         wedged = true;
         wedgeVeh = veh;
         wedgePos = at;
@@ -13660,14 +13668,172 @@ struct CopTestFakeHost : ForceFakeHost {
             decoyCar.speed += dv.x * f.x + dv.y * f.y;
             decoyCar.yaw += yawRate * 0.3f;
         }
+        // a cop body takes the throw on its own speed (the diff
+        // act's velocity probe rides this: 10 m/s written on the
+        // anchor must become 10 m/s of coast for PedalStep to decay)
+        if (Body* b = Find(veh)) {
+            const Vec3 f(std::sin(b->yaw), std::cos(b->yaw), 0.0f);
+            b->speed += dv.x * f.x + dv.y * f.y;
+        }
     }
     void KickPed(int ped, const Vec3& dv) override {
         TestHost::KickPed(ped, dv);
         if (decoyPed.up && ped == 6001)
             decoyPed.kickVel = decoyPed.kickVel + dv;
     }
+    // ---- the diff act (the full-diff step): the twin and the raw
+    // extents. The twin is a MirrorStep body like the decoy car (the
+    // game's own autopilot drives both). The extents are synthetic
+    // buffers of the real CAutomobile size, planted at twin spawn:
+    // both sides share a filler so ONLY the planted words differ -
+    // the brakeCount word (0x804, drive class) standing at its
+    // parked 20.0 on the anchor and 0.0 on the twin is THE LATCH:
+    // while the two extents disagree there, StepTest zeroes the
+    // anchor's pedals for the step (a body state holding the car,
+    // the fake's plain model of the live conviction), and the
+    // adoption - the shipping CopDiff engine run over these very
+    // buffers - rewrites the word and opens the gate by itself.
+    // The other planted words grade the fences: gas (adoptable),
+    // the autopilot mission word and the colours and the velocity
+    // word (classes that must never cross), m_pDriver (pointer
+    // class), and the nitro word, whose anchor value points into
+    // the anchor's own extent - drive class, but the engine's
+    // self-reference fence must refuse it.
+    struct TwinCar {
+        bool up = false;
+        Vec3 pos, vel;
+        float yaw = 0.0f, speed = 0.0f;
+        Vec3 drivePt;
+        float cruise = 0.0f;
+    };
+    TwinCar twinCar;
+    static constexpr unsigned kFakeBaseA = 0x11110000u;
+    static constexpr unsigned kFakeBaseT = 0x22220000u;
+    std::vector<unsigned char> anchorExt, twinExt;
+    int lastAnchorVeh = -1; // the last cop body stood up (the latch's target)
+    int latchedVeh = -1;
+    int SpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) override {
+        const int id = ForceFakeHost::SpawnCopBody(at, headingDeg, face);
+        lastAnchorVeh = id;
+        return id;
+    }
+    static void ExtPut(std::vector<unsigned char>& e, unsigned off, unsigned w) {
+        std::memcpy(&e[off], &w, 4);
+    }
+    static void ExtPutF(std::vector<unsigned char>& e, unsigned off, float f) {
+        unsigned w;
+        std::memcpy(&w, &f, 4);
+        ExtPut(e, off, w);
+    }
+    void PlantDiffExtents() {
+        anchorExt.assign(kCopBodyExtent, 0);
+        twinExt.assign(kCopBodyExtent, 0);
+        for (unsigned off = 0; off + 4 <= kCopBodyExtent; off += 4) {
+            const unsigned w = 0x3F000000u + off * 7u;
+            ExtPut(anchorExt, off, w);
+            ExtPut(twinExt, off, w);
+        }
+        ExtPutF(anchorExt, 0x804, 20.0f); // brakeCount: the latch
+        ExtPutF(twinExt, 0x804, 0.0f);
+        ExtPutF(anchorExt, 0x49C, 0.0f); // gas
+        ExtPutF(twinExt, 0x49C, 0.8f);
+        ExtPut(anchorExt, 0x390, 0u); // the autopilot's mission word
+        ExtPut(twinExt, 0x390, 9u);
+        ExtPut(anchorExt, 0x460, kFakeBaseA + 0x100u); // m_pDriver
+        ExtPut(twinExt, 0x460, kFakeBaseT + 0x200u);
+        ExtPutF(anchorExt, 0x44, 0.0f); // m_vecMoveSpeed.x (header)
+        ExtPutF(twinExt, 0x44, 10.0f);
+        ExtPut(anchorExt, 0x434, 0x06060606u); // the colours word
+        ExtPut(twinExt, 0x434, 0x03030303u);
+        ExtPut(anchorExt, 0x8A4, kFakeBaseA + 0x10u); // nitroValue:
+            // drive class, self-referential value - fence must refuse
+        ExtPutF(twinExt, 0x8A4, 0.0f);
+        // the latched body is the core's anchor, read off the unit
+        // table itself - never "the last body spawned": a ladder
+        // spawn landing between the anchor's summon and the twin's
+        // would otherwise steal the latch (it did, in this act's
+        // first run, and the gate held a ladder car while the
+        // anchor drove)
+        latchedVeh = gCop.veh;
+    }
+    int SpawnCopTwin(const Vec3& at, float headingDeg, const Vec3& face) override {
+        twinCar = TwinCar();
+        twinCar.up = true;
+        twinCar.pos = at;
+        twinCar.yaw = headingDeg * 0.0174533f;
+        twinCar.drivePt = face;
+        PlantDiffExtents();
+        return 7001;
+    }
+    void CopTwinDrive(int, const Vec3& at, float cruiseMps) override {
+        twinCar.drivePt = at;
+        twinCar.cruise = cruiseMps;
+    }
+    bool CopTwinReport(int, Vec3* pos, Vec3* vel) override {
+        if (!twinCar.up)
+            return false;
+        *pos = twinCar.pos;
+        *vel = twinCar.vel;
+        return true;
+    }
+    void RetireCopTwin(int) override {
+        twinCar.up = false;
+        latchedVeh = -1;
+    }
+    bool CopBodyDiffAdopt(int, int, DiffAdopt* out) override {
+        if (!twinCar.up || anchorExt.size() != kCopBodyExtent)
+            return false;
+        // the SHIPPING engine over the fake's buffers - the suite
+        // grades the filter here, not a copy of it
+        CopDiffWord words[kCopBodyWords];
+        int total = 0, adoptable = 0;
+        const int filled = CopBodyDiffWords(anchorExt.data(), twinExt.data(),
+                                            kCopBodyExtent, kFakeBaseA, kFakeBaseT,
+                                            words, (int)kCopBodyWords,
+                                            &total, &adoptable);
+        *out = DiffAdopt();
+        out->ok = true;
+        out->wordsTotal = (int)kCopBodyWords;
+        out->wordsDiffer = total;
+        for (int i = 0; i < filled; ++i)
+            ++out->classDiffer[words[i].cls];
+        out->adopted = CopBodyAdoptWords(anchorExt.data(), twinExt.data(),
+                                         words, filled, out->adoptedOffsets, 96);
+        out->adoptedListed = out->adopted < 96 ? out->adopted : 96;
+        return true;
+    }
     void StepTest(float dt) {
+        // the latch gate (see the diff block above): while the
+        // planted brakeCount words disagree, the anchor's recorded
+        // pedals are zeroed for this step and restored after it -
+        // the reports keep reading the core's words; the PHYSICS
+        // never hears them, which is the conviction being modelled
+        Body* gatedBody = nullptr;
+        float keepGas = 0.0f, keepBrake = 0.0f, keepSteer = 0.0f;
+        if (latchedVeh >= 0 && anchorExt.size() == kCopBodyExtent &&
+            twinExt.size() == kCopBodyExtent) {
+            unsigned a, t;
+            std::memcpy(&a, &anchorExt[0x804], 4);
+            std::memcpy(&t, &twinExt[0x804], 4);
+            if (a != t) {
+                gatedBody = Find(latchedVeh);
+                if (gatedBody) {
+                    keepGas = gatedBody->cmdGas;
+                    keepBrake = gatedBody->cmdBrake;
+                    keepSteer = gatedBody->cmdSteer;
+                    gatedBody->cmdGas = gatedBody->cmdBrake = gatedBody->cmdSteer = 0.0f;
+                }
+            }
+        }
         StepAll(dt);
+        if (gatedBody) {
+            gatedBody->cmdGas = keepGas;
+            gatedBody->cmdBrake = keepBrake;
+            gatedBody->cmdSteer = keepSteer;
+        }
+        if (twinCar.up)
+            MirrorStep(twinCar.pos, twinCar.yaw, twinCar.speed, twinCar.vel,
+                       twinCar.drivePt, twinCar.cruise, twinCar.cruise > 0.05f, dt);
         if (decoyCar.up)
             MirrorStep(decoyCar.pos, decoyCar.yaw, decoyCar.speed, decoyCar.vel,
                        decoyCar.drivePt, decoyCar.cruise, decoyCar.cruise > 0.05f, dt);
@@ -13701,6 +13867,90 @@ struct CopTestFakeHost : ForceFakeHost {
         }
     }
 };
+
+// The full-diff engine itself, over synthetic buffers: the region
+// law's pins - the class table at its convicted offsets, the
+// adoption fences (region edge, autopilot, pointer, identity,
+// health, contact, and the self-reference fence inside drive
+// territory), and the adoption's write set landing exactly on the
+// adoptable words and nowhere else.
+static void TestCopDiff() {
+    auto bits = [](float f) {
+        unsigned w;
+        std::memcpy(&w, &f, 4);
+        return w;
+    };
+    // the class table, at the offsets the live rounds made famous
+    CHECK(CopBodyWordClass(0x000) == CD_HEADER, "diff: the vtable word is header territory");
+    CHECK(CopBodyWordClass(0x044) == CD_HEADER, "diff: moveSpeed (CPhysical 0x44) is below the region");
+    CHECK(CopBodyWordClass(0x137) == CD_HEADER, "diff: the region's lower edge is CPhysical's size");
+    CHECK(CopBodyWordClass(0x138) == CD_STRUCT, "diff: the audio entity opens CVehicle as structural");
+    CHECK(CopBodyWordClass(0x384) == CD_POINTER, "diff: the handling data pointer is a pointer");
+    CHECK(CopBodyWordClass(0x38C) == CD_DRIVE, "diff: the handling FLAGS word is drive state");
+    CHECK(CopBodyWordClass(0x390) == CD_AUTOPILOT, "diff: the autopilot block opens at 0x390");
+    CHECK(CopBodyWordClass(0x424) == CD_AUTOPILOT, "diff: the autopilot block runs to 0x428");
+    CHECK(CopBodyWordClass(0x428) == CD_DRIVE, "diff: the vehicle flag words behind the autopilot are drive state (bEngineOn lives there)");
+    CHECK(CopBodyWordClass(0x430) == CD_IDENTITY, "diff: the creation time is identity");
+    CHECK(CopBodyWordClass(0x434) == CD_IDENTITY, "diff: the colours word is identity");
+    CHECK(CopBodyWordClass(0x460) == CD_POINTER, "diff: m_pDriver is a pointer");
+    CHECK(CopBodyWordClass(0x49C) == CD_DRIVE, "diff: the gas word is drive state");
+    CHECK(CopBodyWordClass(0x4C0) == CD_HEALTH, "diff: the health word is the book's, fenced off");
+    CHECK(CopBodyWordClass(0x724) == CD_CONTACT, "diff: the wheel collision points are a contact cache");
+    CHECK(CopBodyWordClass(0x804) == CD_DRIVE, "diff: brakeCount is drive state");
+    CHECK(CopBodyWordClass(0x8E8) == CD_CONTACT, "diff: the wheel collision entity is a contact cache");
+    CHECK(CopBodyWordClass(0x984) == CD_DRIVE, "diff: the extent's last word is drive state");
+    // the fences, one by one
+    const unsigned baseA = 0x11110000u, baseT = 0x22220000u;
+    CHECK(CopBodyAdoptable(0x804, bits(20.0f), bits(0.0f), baseA, baseT, kCopBodyExtent),
+          "diff: a plain drive word crosses");
+    CHECK(!CopBodyAdoptable(0x390, 0u, 9u, baseA, baseT, kCopBodyExtent),
+          "diff: an autopilot word never crosses");
+    CHECK(!CopBodyAdoptable(0x44, bits(0.0f), bits(10.0f), baseA, baseT, kCopBodyExtent),
+          "diff: a header word never crosses (below the region)");
+    CHECK(!CopBodyAdoptable(0x8A4, baseA + 0x10u, bits(0.0f), baseA, baseT, kCopBodyExtent),
+          "diff: a drive word whose anchor value points into its own body is refused");
+    CHECK(!CopBodyAdoptable(0x8A4, bits(0.0f), baseT + 0x20u, baseA, baseT, kCopBodyExtent),
+          "diff: a drive word whose twin value points into the twin's body is refused");
+    CHECK(CopBodyAdoptable(0x8A4, bits(1.5f), bits(0.0f), baseA, baseT, kCopBodyExtent),
+          "diff: the same offset with plain scalar values crosses");
+    // the whole engine over planted buffers: the diff counts every
+    // planted word, the adoption lands exactly the adoptable set
+    std::vector<unsigned char> A(kCopBodyExtent, 0), T(kCopBodyExtent, 0);
+    auto put = [](std::vector<unsigned char>& e, unsigned off, unsigned w) {
+        std::memcpy(&e[off], &w, 4);
+    };
+    put(A, 0x804, bits(20.0f)); put(T, 0x804, bits(0.0f));   // adoptable
+    put(A, 0x49C, bits(0.0f));  put(T, 0x49C, bits(0.8f));  // adoptable
+    put(T, 0x390, 9u);                                       // autopilot
+    put(A, 0x460, baseA + 0x100u); put(T, 0x460, baseT);      // pointer
+    put(T, 0x44, bits(10.0f));                               // header
+    put(A, 0x8A4, baseA + 0x10u);                            // self-ref
+    CopDiffWord words[kCopBodyWords];
+    int total = 0, adoptable = 0;
+    const int filled = CopBodyDiffWords(A.data(), T.data(), kCopBodyExtent, baseA, baseT,
+                                        words, (int)kCopBodyWords, &total, &adoptable);
+    CHECK(total == 6 && filled == 6, "diff: six planted words differ (got %d)", total);
+    CHECK(adoptable == 2, "diff: exactly the two plain drive words are adoptable (got %d)", adoptable);
+    unsigned adoptedOff[8] = {};
+    const int adopted = CopBodyAdoptWords(A.data(), T.data(), words, filled, adoptedOff, 8);
+    CHECK(adopted == 2, "diff: the adoption wrote two words (got %d)", adopted);
+    auto word = [](const std::vector<unsigned char>& e, unsigned off) {
+        unsigned w;
+        std::memcpy(&w, &e[off], 4);
+        return w;
+    };
+    CHECK(word(A, 0x804) == bits(0.0f) && word(A, 0x49C) == bits(0.8f),
+          "diff: the adopted words now hold the twin's values");
+    CHECK(word(A, 0x390) == 0u && word(A, 0x460) == baseA + 0x100u &&
+          word(A, 0x44) == 0u && word(A, 0x8A4) == baseA + 0x10u,
+          "diff: every fenced word stands untouched on the anchor");
+    // an empty diff adopts nothing and reports nothing
+    total = -1;
+    CHECK(CopBodyDiffWords(A.data(), A.data(), kCopBodyExtent, baseA, baseA,
+                           words, (int)kCopBodyWords, &total, &adoptable) == 0 &&
+          total == 0 && adoptable == 0,
+          "diff: identical bodies differ in no word");
+}
 
 // The whole /coptest machine, run end to end against the fake: the
 // sim plays the user's part where the machine asks (it peppers the
@@ -13740,11 +13990,16 @@ static void TestCopTest() {
         // choreography peppered whenever the decoys were down, which
         // included the opening SPIKE, and shot the felony to 2819
         // under the spike route (the machine's own log convicted it:
-        // "the spike is over" at felony 2819)
+        // "the spike is over" at felony 2819). The diff act reopened
+        // the same window - a long decoy-less act with the anchor
+        // stood by in spike mode - and the peppering blew the felony
+        // to the cap, spawned the ladder, and scattered the whole
+        // back half of the run; so the branch is gated to the player
+        // phases it exists for (phase 9 onward), by the phase hook.
         if (host.decoyCar.up || host.decoyPed.up)
             sawDecoy = true;
-        const bool decoysDown = !host.decoyCar.up && !host.decoyPed.up;
-        if (sawDecoy && decoysDown && gCop.veh >= 0 && gCop.mode != COP_PURSUE &&
+        const bool decoysDown = !host.decoyCar.up && !host.decoyPed.up && !host.twinCar.up;
+        if (CopTestPhaseForTest() >= 9 && sawDecoy && decoysDown && gCop.veh >= 0 && gCop.mode != COP_PURSUE &&
             gCop.mode != COP_BLOCK && !droveCar) {
             // player phase 1's ask: his hand on the anchor - one host
             // point a tick through the shot channel until it lands
@@ -13797,7 +14052,7 @@ static void TestCopTest() {
     CHECK(sheet.counted >= 12, "the sheet counted %d scenarios (spike..soak incl. the direct act, roadblock may skip)", sheet.counted);
     CHECK(sheet.passed == sheet.counted, "every counted scenario passed in the fake world (%d of %d)",
           sheet.passed, sheet.counted);
-    static const char* const kMustPass[] = { "spike", "direct", "arrival", "ram", "siren", "runover",
+    static const char* const kMustPass[] = { "spike", "direct", "diff", "arrival", "ram", "siren", "runover",
                                              "ring", "recovery", "player-felony", "bailout", "radio", "soak" };
     for (const char* name : kMustPass) {
         bool pass = false, counted = false;
@@ -13810,7 +14065,7 @@ static void TestCopTest() {
         CHECK(!found || !counted || pass, "coptest sheet: the roadblock passed or honestly skipped");
     }
     CHECK(CopUnitCount() == 0, "cleanup: the force stood down whole (%d units left)", CopUnitCount());
-    CHECK(!host.decoyCar.up && !host.decoyPed.up, "cleanup: both decoys retired");
+    CHECK(!host.decoyCar.up && !host.decoyPed.up && !host.twinCar.up, "cleanup: both decoys and the twin retired");
     CHECK(std::fabs(gThreat.felony - 333.0f) < 1.5f,
           "cleanup: the felony page was handed back at its pre-run value (%.0f)", gThreat.felony);
     CopReset();
@@ -14124,6 +14379,7 @@ int main(int argc, char** argv) {
     TestBossCoreJump();
     TestCop();
     TestCopForce();
+    TestCopDiff();
     TestCopTest();
     TestCopCarModel();
     TestAtlas();

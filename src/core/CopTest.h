@@ -42,5 +42,11 @@ CopTestSheet CopTestSheetForTest();
 // then holds its verdict and *countedOut whether it counted (a SKIP
 // is graded but never counted).
 bool CopTestVerdictForTest(const char* name, bool* passOut, bool* countedOut);
+// The running run's current phase as a plain number, so the suite's
+// choreography can play the user's part only in the acts that ask for
+// it: 0 none, 1 spike, 2 direct, 3 diff, 4 pursuit, 5 run-over,
+// 6 ring, 7 recovery, 8 roadblock, 9 player phase 1, 10/11 player
+// phase 2, 12 finish. -1 when no run is going.
+int CopTestPhaseForTest();
 
 } // namespace mc

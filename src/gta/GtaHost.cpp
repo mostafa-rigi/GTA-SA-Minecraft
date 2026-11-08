@@ -292,6 +292,19 @@ struct GtaHost : Host {
         return GtaDecoyPedReport(ped, pos, health);
     }
     void RetireDecoyPed(int ped) override { GtaRetireDecoyPed(ped); }
+    int SpawnCopTwin(const Vec3& at, float headingDeg, const Vec3& face) override {
+        return GtaSpawnCopTwin(at, headingDeg, face);
+    }
+    void CopTwinDrive(int veh, const Vec3& at, float cruiseMps) override {
+        GtaCopTwinDrive(veh, at, cruiseMps);
+    }
+    bool CopTwinReport(int veh, Vec3* pos, Vec3* vel) override {
+        return GtaCopTwinReport(veh, pos, vel);
+    }
+    void RetireCopTwin(int veh) override { GtaRetireCopTwin(veh); }
+    bool CopBodyDiffAdopt(int anchorVeh, int twinVeh, DiffAdopt* out) override {
+        return GtaCopBodyDiffAdopt(anchorVeh, twinVeh, out);
+    }
     void KickVehicle(int veh, const Vec3& dv, float yawRate) override {
         GtaKickVehicle(veh, dv, yawRate);
     }
