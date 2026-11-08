@@ -12,6 +12,8 @@
 #include "CTaskComplexKillPedOnFoot.h" // item 38: the bailed driver's fight (the soldier's own task class)
 #include "eWeaponType.h"                 // item 38: his pistol's word
 #include "CVehicle.h"
+#include "CAutomobile.h" // the census: the car's drive-state fields
+#include "CBike.h"       // the census: the bike's own layout of them
 #include "CWorld.h"
 #include "Patch.h" // plugin::patch::SetPointer: the channel repair's
                    // vtable claim (the SDK's own _override idiom,
@@ -297,12 +299,17 @@ float DisplayHealth(float shown) {
 // _override macro; the write itself goes through patch::SetPointer
 // so the page protection is handled, and the landing is read back
 // and logged). For a body of OURS the replacement stamps the core's
-// stored command onto the fields and returns WITHOUT running the
-// original: nothing recomputes the words afterwards, and physics -
-// later in the same processing - reads ours. For every other
-// vehicle it forwards to the saved original untouched. A body whose
-// core has given no order yet forwards too: the channel opens with
-// the first command, and before it the body is simply parked.
+// stored command onto the fields at that desk: nothing recomputes
+// the words afterwards, and physics - later in the same processing
+// - reads ours. THE MISSING-LINK CLOSE (the block at CopAIFn::
+// ProcessAI below) changed HOW the stamp is reached: the original
+// runs first and the stamp lands after it, because the channel
+// build's live session proved the desk alone is not the whole
+// story - the original maintains state besides the pedal words.
+// For every other vehicle the replacement forwards to the saved
+// original untouched. A body whose core has given no order yet
+// forwards too: the channel opens with the first command, and
+// before it the body is simply parked.
 // The patch is never lifted: session resets forget bodies, and a
 // table whose every call forwards is the game's own behaviour.
 // =====================================================================
@@ -329,6 +336,75 @@ CopBodyState* FindBodyByPointer(CVehicle* veh) {
     return nullptr;
 }
 
+// THE STATE CENSUS (the missing-link step, 2026-11-08): every
+// drive-state field that plausibly gates or shapes drive force,
+// read off the body into the report's census block. The offsets are
+// the SDK's VALIDATE_OFFSETs, cited per field; the typed members
+// carry them, so no raw offset is ever written here. Car and bike
+// keep the same facts at different addresses (their own headers'
+// layouts); the shared CVehicle/CPhysical/CAutoPilot fields lead.
+//   gear        CVehicle::m_nCurrentGear            0x4B4
+//   gearChange  CVehicle::m_fGearChangeCount        0x4B8
+//   rawSteer    CVehicle::m_fRawSteerAngle          0x58C
+//   steer2      CVehicle::m_f2ndSteerAngle          0x498
+//   fakePhysics CPhysical::m_nFakePhysics           0xB8
+//   tempAction  CAutoPilot::m_nTempAction           +0x2B
+//   ctrlFlags   CAutoPilot::m_nCarCtrlFlags         +0x4B
+//   switched    CAutoPilot::m_nTimeSwitchedToRealPhysics +0x20
+//   revs        CAutomobile::m_fGasPedalAudioRevs   0x964
+//               CBike::m_fGasPedalAudioRevs         0x808
+//   contact / onGround / driveGround
+//               CAutomobile 0x960 / 0x961 / 0x962
+//               CBike       0x804 / 0x805 / 0x806
+//   wheelState  CAutomobile::m_wheelState           0x968
+//               CBike::m_wheelState                 0x80C
+//   susp        CAutomobile::m_fWheelsSuspensionCompression 0x7D4
+//               CBike::m_aWheelSuspensionHeights    0x760
+//   wheelSpeed  CAutomobile::m_fWheelSpeed          0x848
+//               CBike::m_aWheelAngularVelocity      0x758
+//   brakeCount  CAutomobile::m_fBrakeCount          0x804
+//               CBike::m_fBrakeCount                0x740
+//   burnout     CAutomobile::m_bDoingBurnout        0x86A
+//               CBike::m_nBrakesOn                  0x7A8
+// The velocity half of the census already rides the report (vel).
+void FillCensus(CVehicle* v, bool bike, Host::CopBody::Census& cen) {
+    cen.gear = (int)v->m_nCurrentGear;
+    cen.gearChange = v->m_fGearChangeCount;
+    cen.rawSteer = v->m_fRawSteerAngle;
+    cen.steer2 = v->m_f2ndSteerAngle;
+    cen.fakePhysics = (int)v->m_nFakePhysics;
+    cen.tempAction = (int)v->m_autoPilot.m_nTempAction;
+    cen.ctrlFlags = (int)v->m_autoPilot.m_nCarCtrlFlags;
+    cen.switched = v->m_autoPilot.m_nTimeSwitchedToRealPhysics;
+    if (bike) {
+        CBike* bk = static_cast<CBike*>(v);
+        cen.revs = bk->m_fGasPedalAudioRevs;
+        cen.contact = (int)bk->m_nNumContactWheels;
+        cen.onGround = (int)bk->m_nNumWheelsOnGround;
+        cen.driveGround = (int)bk->m_nNumDriveWheelsOnGroundLastFrame;
+        for (int w = 0; w < 2; ++w) {
+            cen.wheelState[w] = (int)bk->m_wheelState[w];
+            cen.susp[w] = bk->m_aWheelSuspensionHeights[w];
+            cen.wheelSpeed[w] = bk->m_aWheelAngularVelocity[w];
+        }
+        cen.brakeCount = bk->m_fBrakeCount;
+        cen.burnout = (int)bk->m_nBrakesOn;
+    } else {
+        CAutomobile* aut = static_cast<CAutomobile*>(v);
+        cen.revs = aut->m_fGasPedalAudioRevs;
+        cen.contact = (int)aut->m_nNumContactWheels;
+        cen.onGround = (int)aut->m_nWheelsOnGround;
+        cen.driveGround = (int)aut->m_nNumDriveWheelsOnGroundLastFrame;
+        for (int w = 0; w < 4; ++w) {
+            cen.wheelState[w] = (int)aut->m_wheelState[w];
+            cen.susp[w] = aut->m_fWheelsSuspensionCompression[w];
+            cen.wheelSpeed[w] = aut->m_fWheelSpeed[w];
+        }
+        cen.brakeCount = aut->m_fBrakeCount;
+        cen.burnout = (int)aut->m_bDoingBurnout;
+    }
+}
+
 // the stamp itself: the drive surface of ApplyCommand, written at
 // the desk physics reads - the pedal fields, the siren flag, and
 // (once he sits) the parked-car switches open and the mission NONE,
@@ -339,10 +415,28 @@ void StampDrive(CVehicle* veh, CopBodyState& b) {
     veh->m_fGasPedal = b.gas;
     veh->m_fBreakPedal = b.brake;
     veh->m_fSteerAngle = b.steer;
+    // the input-side steer word rides the stamp (the missing-link
+    // step): m_fRawSteerAngle (CVehicle.h:314, VALIDATE_OFFSET
+    // 0x58C - "AKA m_fSteeringLeftRight or fSteer") is the field the
+    // PLAYER's channel writes (ProcessControlInputs), and the
+    // census now prints it for our body and for a host-driven
+    // decoy alike - if the AI path never reads it, the decoy's
+    // reads as dead as ours and this write is a harmless belt; if
+    // anything between the desk and the wheels converts from it,
+    // this is the word that was missing, and the stamp is where it
+    // must land (after the original, per the close below)
+    veh->m_fRawSteerAngle = b.steer;
     veh->bSirenOrAlarm = b.siren;
+    // the handbrake is cleared from the FIRST stamp on every body
+    // (the missing-link step's secondary defect: on the channel
+    // build the clear was seated-gated, and the later spawns' first
+    // reports read handbrake 1 - their drivers had not landed yet,
+    // so the parked car's switch stood set under their first
+    // orders). The stamp is the body's first word of control; the
+    // switch opens with it, seated or not
+    veh->bIsHandbrakeOn = false;
     if (b.seated) {
         veh->bEngineOn = true;
-        veh->bIsHandbrakeOn = false;
         veh->m_autoPilot.m_nCarMission = MISSION_NONE;
     }
     b.stampGas = b.gas;
@@ -359,18 +453,96 @@ struct __single_inheritance CopAIFn {
     bool ProcessAI(unsigned int& arg0);
 };
 
+// =====================================================================
+// THE MISSING LINK (2026-11-08): the desk claimed, the car frozen.
+//
+// THE LIVE CONVICTION it answers (session 16:47, channel build
+// ced434f7): both desks CLAIMED, the stamps advancing ~65/s, and at
+// the desk cmd == body == hook exactly (steer -0.60, gas 1.00,
+// brake 0.00), mission NONE, engine 1, driver-in 1, the anchor's
+// handbrake 0 - and the car never moved (spike FAIL at avg 0.0,
+// displacement 0; the only nonzero speeds were external pushes).
+// So replacing ProcessAI removed more than its pedal words: the
+// original maintains STATE besides the three fields - some link
+// between the desk and wheel force that only it supplies. The
+// prime suspect CLASS going in (named as a class, not a verdict)
+// was transmission/gear state; the census above is the instrument
+// built to convict the specific field in one session, by diffing
+// this body against a host-driven decoy field by field.
+//
+// THE CLOSE - shape (b): at the desk, run the ORIGINAL first for
+// our bodies, then stamp ONLY the pedal/steer words over its
+// outputs, inside the same call. Whatever state machinery the
+// original runs - gear-adjacent autopilot state, temp actions, the
+// rev counter, the stuck logic - lives again, byte for byte the
+// game's own; what physics reads as the drive words are still
+// ours, because the stamp lands after the original returns and
+// nothing runs after us in that call before physics. Shape (a) -
+// maintain the missing state ourselves in the replacement - is
+// REJECTED on the evidence in-tree: the SDK carries no body for
+// ProcessAI (CAutomobile.cpp in-tree is an address trampoline,
+// "Converted from void CAutomobile::ProcessAI(uint &) 0x0"), so
+// its full write set is not enumerable from anything we can
+// inspect; (a) would have us re-implement an unverifiable subset
+// and call it the link, and even a census-diffed field is not
+// proof it is the ONLY maintained state (the census covers the
+// fields we thought to print). (b) needs no enumeration.
+//
+// (b)'s safety, point by point, off the same evidence:
+// - DRIVING INTENT: the original's intent is a function of the
+//   autopilot, and the autopilot is held at MISSION_NONE for our
+//   bodies (StampDrive and ApplyCommand both force it, and the
+//   original in this call reads the mission the last stamp left:
+//   NONE). At NONE its computed pedal outputs are the hold-still
+//   words the 14:44 unit line read (gas 0, brake 0.50-1.00) - and
+//   those are exactly what the stamp overwrites, in this call,
+//   after it speaks.
+// - HANDBRAKE: a parked traffic car at NONE may sit on its
+//   handbrake inside the original's run; the stamp clears the
+//   switch after it, in the same call (and now from the first
+//   stamp, seated or not - the secondary defect above).
+// - VELOCITY: the original has no direct velocity or force
+//   writes to hide: in the SDK it exists only as the control
+//   writer, and the force path from the control fields to the
+//   wheels is physics-side (cTransmission::
+//   CalculateDriveAcceleration + the wheel-pair processing). If a
+//   build of the game proved otherwise, the census's velocity
+//   neighbour (the report's vel, beside every census line) is
+//   where it would show - a stamped car moving WITHOUT our words
+//   would convict this paragraph, and the sheet's direct act
+//   grades motion against our words every run.
+// - GEAR: CalculateDriveAcceleration's own signature
+//   (cTransmission.h:32) takes gasPedal and currrentGear BY
+//   REFERENCE from its physics-side caller - the gear is selected
+//   at physics time off the FINAL pedal fields, i.e. off the
+//   stamp, not off the original's pre-stamp outputs.
+// The census stays as the standing witness: if any part of this
+// reasoning is wrong on the real host, the per-second anchor/decoy
+// pair names the field it is wrong about.
+// =====================================================================
 bool CopAIFn::ProcessAI(unsigned int& arg0) {
     CVehicle* veh = reinterpret_cast<CVehicle*>(this);
     CopBodyState* b = FindBodyByPointer(veh);
+    // the original, resolved the way the forwarding path below
+    // resolves it (the same cast idiom the SDK's own wrappers use)
+    void** vt = *reinterpret_cast<void***>(veh);
+    void* orig = vt == sBikeVtable ? sBikeAIOrig : sCarAIOrig;
     if (b && b->haveCmd) {
+        // THE CLOSE (shape (b), the block above): the original
+        // runs FIRST - its state machinery lives - and the stamp
+        // lands after it inside the same call, so the pedal/steer
+        // words physics reads are the core's and no state the
+        // original maintains is missing. With no original saved
+        // (a claim that failed), the stamp alone stands, as it did
+        // on the channel build - the stamps' silence or the census
+        // grades the difference either way
+        if (orig)
+            ((bool(__thiscall*)(CVehicle*, unsigned int&))orig)(veh, arg0);
         StampDrive(veh, *b);
         return true;
     }
     // not ours (or ours before its first order): the game's own AI
-    // drives him, byte for byte as unpatched - the original called
-    // through the same cast idiom the SDK's own wrappers use
-    void** vt = *reinterpret_cast<void***>(veh);
-    void* orig = vt == sBikeVtable ? sBikeAIOrig : sCarAIOrig;
+    // drives him, byte for byte as unpatched
     if (!orig)
         return true;
     return ((bool(__thiscall*)(CVehicle*, unsigned int&))orig)(veh, arg0);
@@ -417,6 +589,9 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
     veh->m_fGasPedal = b.gas;
     veh->m_fBreakPedal = b.brake;
     veh->m_fSteerAngle = b.steer;
+    veh->m_fRawSteerAngle = b.steer; // the input-side steer word
+        // rides every assert, as it rides the stamp (StampDrive
+        // names the reasoning and the census that grades it)
     veh->bSirenOrAlarm = b.siren;
     // THE COMPLETE UPDATE removes a write this function used to make:
     // veh->bIsLawEnforcer = b.siren. The header's own words for that
@@ -432,15 +607,17 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
     // own with the core's book saying it stood down. The siren flag
     // above (sound and light) is untouched; the law-enforcer flag is
     // simply never ours to assert again.
+    // the parked car's other switch (fix round 4): a car the game
+    // counts as parked sits on its handbrake (CVehicle.h:155).
+    // THE MISSING-LINK STEP moves this clear out of the seated
+    // block below: on the channel build the seated gate left the
+    // later spawns' first reports reading handbrake 1 (their
+    // drivers had not landed when their first orders stamped), so
+    // the switch now opens with the body's first asserted command
+    // - the same law StampDrive follows at the desk
+    veh->bIsHandbrakeOn = false;
     if (b.seated) {
         veh->bEngineOn = true;
-        // the parked car's other switch (fix round 4): a car the game
-        // counts as parked sits on its handbrake (CVehicle.h:155). The
-        // engine flag beside it has been written since piece 0 and the
-        // seated, gassed, motionless sessions proved it is not the
-        // missing link on its own - the handbrake is cleared with it
-        // so no parked-car switch is left set under a driving order.
-        veh->bIsHandbrakeOn = false;
         // THE ROOT STEP (2026-11-08): the autopilot mirror is REMOVED
         // - the whole fix-round-4/complete-update machine that armed
         // GOTOCOORDS_STRAIGHT missions with the brain's aim point and
@@ -1167,6 +1344,11 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->hookBrake = s.stampBrake;
     out->hookSteer = s.stampSteer;
     out->hookStamps = (int)s.stampCount;
+    // the state census (the missing-link step): this body's whole
+    // drive-state block, read with the rest of the report - the
+    // fields FillCensus names, in the shape the decoy's census
+    // below answers in, so the log's per-second pair diffs cleanly
+    FillCensus(v, s.bike, out->census);
     if (CPed* drv = LiveDriver(s))
         out->driverInVehicle = drv->bInVehicle;
     // item 38's read-back: out of the car, and where he stands -
@@ -1501,6 +1683,40 @@ bool GtaDecoyReport(int veh, Vec3* pos, Vec3* vel) {
         return false;
     *pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
     *vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
+    return true;
+}
+
+// the decoy's state census (the missing-link step): the cop
+// report's shape read off a HOST-DRIVEN body - pedals, mission and
+// the whole census block - so the /coptest pursuit act can print
+// this car's drive state beside our stamped anchor's, per second.
+// The decoy is an ordinary automobile (never a bike), and its
+// autopilot is ARMED by GtaDecoyCarDrive: this is what a moving
+// car's fields look like while the game's own ProcessAI drives it
+bool GtaDecoyCensus(int veh, Host::CopBody* out) {
+    DecoyCarState* dp = FindDecoyCar(veh);
+    if (!dp || !out)
+        return false;
+    CVehicle* v = LiveDecoyVeh(*dp);
+    if (!v || !v->m_matrix)
+        return false;
+    *out = Host::CopBody();
+    out->ok = true;
+    out->pos = Vec3(v->m_matrix->pos.x, v->m_matrix->pos.y, v->m_matrix->pos.z);
+    out->fwd = Vec3(v->m_matrix->up.x, v->m_matrix->up.y, v->m_matrix->up.z);
+    out->vel = Vec3(v->m_vecMoveSpeed.x, v->m_vecMoveSpeed.y, v->m_vecMoveSpeed.z) * 50.0f;
+    out->gas = v->m_fGasPedal;
+    out->brake = v->m_fBreakPedal;
+    out->steer = v->m_fSteerAngle;
+    out->siren = v->bSirenOrAlarm;
+    out->engineOn = v->bEngineOn;
+    out->handbrake = v->bIsHandbrakeOn;
+    out->engineBroken = v->bEngineBroken;
+    out->status = (int)v->m_nStatus;
+    out->mission = (int)v->m_autoPilot.m_nCarMission;
+    out->cruise = (int)v->m_autoPilot.m_nCruiseSpeed;
+    out->cruiseF = v->m_autoPilot.m_fMaxTrafficSpeed;
+    FillCensus(v, false, out->census);
     return true;
 }
 

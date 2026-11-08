@@ -283,6 +283,9 @@ struct GtaHost : Host {
     bool DecoyReport(int veh, Vec3* pos, Vec3* vel) override {
         return GtaDecoyReport(veh, pos, vel);
     }
+    bool DecoyCensus(int veh, CopBody* out) override {
+        return GtaDecoyCensus(veh, out);
+    }
     void RetireDecoy(int veh) override { GtaRetireDecoy(veh); }
     int SpawnDecoyPed(const Vec3& at) override { return GtaSpawnDecoyPed(at); }
     bool DecoyPedReport(int ped, Vec3* pos, float* health) override {

@@ -12,7 +12,13 @@
 // emptied). Since the channel repair, the bridge claims the class
 // vtable's ProcessAI slot itself and stamps the core's words at that
 // desk - the last writer before physics, inside the processing. The
-// evidence chain is in DRIVER2-STEP3-fa.md. Since piece 3 the 596 is
+// missing-link step then taught the desk its final shape: the
+// channel build's session proved the stamps land and the car still
+// does not move - the original maintains STATE besides the pedal
+// words - so the desk now runs the original first and stamps over
+// its pedal outputs inside the same call, with the whole drive-
+// state census printing beside a host-driven decoy's in the log.
+// The evidence chain is in DRIVER2-STEP3-fa.md. Since piece 3 the 596 is
 // only the body UNDERNEATH: his own Chicago shape (cop_car.bin from
 // his disc) is drawn over it through the ModelSink and the host car +
 // driver are hidden while the whole body set is loaded - what
@@ -54,6 +60,10 @@ void GtaCopBodyPlace(int veh, const Vec3& at, float headingDeg);
 int GtaSpawnDecoyCar(const Vec3& at, float headingDeg);
 void GtaDecoyCarDrive(int veh, const Vec3& at, float cruiseMps);
 bool GtaDecoyReport(int veh, Vec3* pos, Vec3* vel);
+// the decoy's state census (the missing-link step): the cop
+// report's drive-state shape read off a host-driven body, for the
+// pursuit act's per-second anchor/decoy diff
+bool GtaDecoyCensus(int veh, Host::CopBody* out);
 void GtaRetireDecoy(int veh);
 int GtaSpawnDecoyPed(const Vec3& at);
 bool GtaDecoyPedReport(int ped, Vec3* pos, float* health);
