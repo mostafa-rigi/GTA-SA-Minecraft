@@ -81,26 +81,16 @@ struct CopBodyState {
     float gas = 0.0f, brake = 1.0f, steer = 0.0f;
     bool siren = false;
     bool haveCmd = false;
-    // fix round 4: the core's drive intent, mirrored into the car's own
-    // autopilot by ApplyCommand - the feed (what the brain last named)
-    // and the writing (what the autopilot last heard, so a standing
-    // order is not re-issued every frame and the game's own route
-    // bookkeeping in the same struct is left alone between changes)
-    bool apFeed = false;
-    Vec3 apTarget;
-    float apCruise = 0.0f;
-    bool apArmed = false;
-    Vec3 apWritten;
-    float apWrittenCruise = -1.0f;
-    float apWriteAge = 1e9f; // fix round 5: seconds since the mirror
-        // last wrote the autopilot - the refresh cadence's clock,
-        // advanced by CopBodyPre; a live mission is re-written at most
-        // ~3 times a second, so ProcessAI's own route bookkeeping is
-        // not reset under it faster than it can drive
-    float apRescueLogT = 1e9f; // the complete update: seconds since the
-        // mirror last LOGGED a rescue (a dropped or foreign mission
-        // found under a live feed) - the rescue itself is never
-        // throttled, only its voice is (once a second per body)
+    // THE ROOT STEP (2026-11-08): the autopilot mirror's state is
+    // GONE - apFeed/apTarget/apCruise/apArmed/apWritten/apWriteAge/
+    // apRescueLogT and the whole arming/rescue machine they served.
+    // The brain's pedal words are the drive now (ApplyCommand below),
+    // and the only autopilot word this bridge ever speaks again is
+    // MISSION_NONE, asserted every frame so no game system can claim
+    // the body. The history stands in DRIVER2-STEP3-fa.md: every
+    // convicted defect of the earlier rounds (the crawl, the frozen
+    // units, the block-player missions, the orbiting ring) was born
+    // in the translation between the brain and that middleman.
     // piece 3's sound state: the pursuit edge (for his radio) and the
     // engine layer currently sounding (his idle/revs swap rides it)
     bool sirenPrev = false;
@@ -280,132 +270,43 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
         // missing link on its own - the handbrake is cleared with it
         // so no parked-car switch is left set under a driving order.
         veh->bIsHandbrakeOn = false;
-        // THE AUTOPILOT MIRROR (fix round 4) - the round's conviction,
-        // in short: on this host the pedal fields above are not an
-        // input an AI-driven car is steered by. The SDK headers name
-        // exactly two producers of a car's controls: ProcessControl-
-        // Inputs(playerNum) - the player's pad path (CVehicle.h:341) -
-        // and CAutomobile::ProcessAI (CAutomobile.h:141), whose input
-        // is the vehicle's own CAutoPilot: mission, destination,
-        // cruise (CAutoPilot.h), written in the game's own design by a
-        // car-drive task (TASK_COMPLEX_CAR_DRIVE exists in eTaskType.h;
-        // the class itself is not in the SDK - the same wall the boss's
-        // hybrid met for the go-to task). Our driver is a contained
-        // ped whose only task ever was the seat warp, so his car's
-        // autopilot has sat at its CREATE_CAR rest state (MISSION_NONE)
-        // since birth - and every value read back outside the game's
-        // processing window showed our writes, while inside it the car
-        // was a parked car: engine housekeeping, handbrake, no drive.
-        // The mirror therefore puts the brain's own intent where this
-        // host reads intent from: a straight-line goto at the brain's
-        // current aim point, at the brain's desired speed, refreshed
-        // only when the order materially changes (a fresh destination
-        // every frame would churn the autopilot's own route state).
-        // The pedals above keep being written exactly as before - if
-        // the automobile honours them after all, nothing is lost; if
-        // it honours only its autopilot, the brain's order is finally
-        // on the channel that moves the car. A stop, a reverse or a
-        // stand-down (no throttle, or a crawl's cruise) disarms the
-        // mission back to NONE, so the mirror never drives a unit the
-        // brain has told to stand.
-        CAutoPilot& ap = veh->m_autoPilot;
-        // THE COMPLETE UPDATE's arming law: the feed alone arms the
-        // mirror - a named feed with a cruise above the crawl and a
-        // living book. Round 5's extra gate (the pedal gas > 0.05) is
-        // REMOVED on round 4's own conviction: the pedals are OUTPUTS
-        // ProcessAI recomputes, and they read ~0 exactly while the
-        // autopilot eases off in a close chase - so the old contract
-        // disarmed live pursuits mid-chase, silently, at the very
-        // ranges the ram lives at (the 02:00 session: units in pursuit
-        // at felony 4096, speed 0.0, body mission 0 = NONE, frozen for
-        // tens of seconds while the core believed it was feeding). The
-        // core's half of the contract is its new feed law: a live feed
-        // always carries a positive cruise, so this gate can rest on
-        // the feed alone.
-        const bool wantArm = b.apFeed && b.apCruise > 1.0f && b.book01 > 0.0f;
-        if (wantArm) {
-            const float dx = b.apTarget.x - b.apWritten.x;
-            const float dy = b.apTarget.y - b.apWritten.y;
-            // the refresh discipline (fix round 5): a destination is
-            // re-written only when it truly changed (3 m of ground, or
-            // a new pace) AND the cadence allows it (~0.3 s since the
-            // last write) - except the arm itself, which lands at
-            // once. Round 4's 2 m gate re-wrote the destination every
-            // few frames of a pursuit; every write is a new destination
-            // for ProcessAI's route bookkeeping in the same struct,
-            // and a car whose route is replanned faster than it can
-            // drive never settles into its pace.
-            // THE COMPLETE UPDATE adds the RESCUE on top of it: the
-            // mission is read back LIVE, and when it is not one of ours
-            // (ours: GOTOCOORDS, the routing form ProcessAI itself
-            // settles our STRAIGHT order into, or GOTOCOORDS_STRAIGHT)
-            // the order is re-written IMMEDIATELY - no material gate,
-            // no cadence. A dropped mission (NONE) or a foreign one
-            // (the block-player family the game's own behaviours write
-            // into flagged cars) under a live feed is not a refresh
-            // detail; it is the unit being stolen mid-pursuit, and the
-            // 02:00 session's frozen units sat exactly there: material
-            // gates don't move for a car standing still, so a static
-            // target never re-armed them. Each rescue is logged (the
-            // write never is throttled; its voice is, at 1/s per body).
-            const int liveMission = (int)ap.m_nCarMission;
-            const bool ours = liveMission == MISSION_GOTOCOORDS ||
-                              liveMission == MISSION_GOTOCOORDS_STRAIGHT;
-            const bool dropped = !ours;
-            const bool needWrite = !b.apArmed || dropped ||
-                ((dx * dx + dy * dy > 9.0f ||
-                  std::fabs(b.apCruise - b.apWrittenCruise) > 1.0f) &&
-                 b.apWriteAge >= 0.3f);
-            if (needWrite) {
-                const bool rescue = dropped && (b.apArmed || liveMission != MISSION_NONE);
-                ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
-                // the driving style (fix round 5): a CREATE_CAR
-                // autopilot rests at DRIVINGSTYLE_STOP_FOR_CARS - it
-                // brakes to a stop for cars and peds in its corridor.
-                // For this force the obstacle in the corridor is
-                // usually the TARGET: the man himself, standing in
-                // front of the spike car shooting it, or the car he
-                // flees in. The game's own header names the style a
-                // chase runs on - PLOUGH_THROUGH - and the original's
-                // cop earns the name (his batter geometry rams the
-                // flank; traffic niceties are not in his book). The
-                // style is written with the mission, on the arm.
-                ap.m_nCarDrivingStyle = DRIVINGSTYLE_PLOUGH_THROUGH;
-                ap.m_vecDestinationCoors =
-                    CVector(b.apTarget.x, b.apTarget.y, b.apTarget.z);
-                // the cruise char and the traffic-speed cap are the
-                // autopilot's own pace words; the brain's m/s is the
-                // closest honest reading of both (traffic cruise
-                // settings live in the same range) - the read-back in
-                // the Report prints what landed, and the spike's speed
-                // lines are the pace's judge.
-                // THE 5x UPDATE: the char is a NARROW field - at the
-                // new pace rows the brain's ask (up to 266) cannot
-                // fit it, so it saturates at 127, the most a signed
-                // char holds (the safe reading under either signedness
-                // the SDK header allows), while the float beside it
-                // carries the true ask whole. Neither is dressed as
-                // the other: the Report reads both back and the unit
-                // line prints the pair, so what ProcessAI was actually
-                // handed is measured every second, not assumed.
-                ap.m_nCruiseSpeed = (char)Clamp(b.apCruise, 0.0f, 127.0f);
-                ap.m_fMaxTrafficSpeed = b.apCruise;
-                b.apWritten = b.apTarget;
-                b.apWrittenCruise = b.apCruise;
-                b.apWriteAge = 0.0f;
-                b.apArmed = true;
-                if (rescue && b.apRescueLogT >= 1.0f) {
-                    b.apRescueLogT = 0.0f;
-                    Log("cop mirror: unit %d re-armed - the autopilot read mission %d under a live feed "
-                        "(dropped or foreign order); the brain's goto is written again",
-                        b.vehRef, liveMission);
-                }
-            }
-        } else if (b.apArmed) {
-            ap.m_nCarMission = MISSION_NONE;
-            b.apArmed = false;
-            b.apWrittenCruise = -1.0f;
-        }
+        // THE ROOT STEP (2026-11-08): the autopilot mirror is REMOVED
+        // - the whole fix-round-4/complete-update machine that armed
+        // GOTOCOORDS_STRAIGHT missions with the brain's aim point and
+        // cruise, refreshed them on a cadence, and rescued them when
+        // foreign orders overwrote them. The convictions that built
+        // it were real (the pedal fields ARE recomputed by ProcessAI
+        // while an autopilot order owns the car), but the user's live
+        // session of 2026-11-08 convicted the mirror itself as the
+        // last-metres disease: the brain's decisions read right all
+        // session while the bodies orbited their feed points forever
+        // - a traffic autopilot's native goal is arrive-and-stop, so
+        // a point fed THROUGH the target buys overshoot, loop and
+        // re-approach without end, and the ring built on it never
+        // settled once. The direct law is the opposite shape: the
+        // core's steer/gas/brake words (written at the top of this
+        // function) are the drive, and this bridge's remaining
+        // autopilot duty is to keep every other hand OFF the car -
+        // the mission is forced to NONE every frame while the driver
+        // sits in it, so no game behaviour (the block-player family
+        // claimed siren-flagged cars in the 02:00 session) can arm a
+        // destination under the brain's pedals. The frame order that
+        // makes the pedal writes the frame's last word: our cop frame
+        // runs on Events::gameProcessEvent, which the SDK declares
+        // PRIORITY_AFTER at the CGame::Process call sites - inside
+        // it, GtaMobs runs CopBodyPre, then the core's tick (whose
+        // CopBodyDrive lands here at once), then CopBodyPost, which
+        // re-asserts this function for every commanded body. The
+        // game's own processing for the frame is already done by
+        // then; the next frame's physics reads our fields first.
+        // Whether a taskless seated driver with MISSION_NONE still
+        // gets his pedal fields recomputed by ProcessAI next frame
+        // is the one question this build cannot answer from the desk:
+        // the /coptest direct phase grades it live (body mission must
+        // read NONE throughout, and the unit line prints commanded
+        // vs read-back steer/gas every second) - the report names it
+        // as the live session's first verdict to read.
+        veh->m_autoPilot.m_nCarMission = MISSION_NONE;
     }
     // the displayed health is re-asserted with the pedals: the host's own
     // damage may have bitten into it this frame, and the core's Report
@@ -470,10 +371,6 @@ void CopBodyPre(float dt) {
         CopBodyState& b = sBodies[i];
         if (!b.used)
             continue;
-        b.apWriteAge += dt; // the mirror's refresh cadence clock
-            // (fix round 5), read in ApplyCommand
-        b.apRescueLogT += dt; // the rescue log's throttle clock (the
-            // complete update), read in ApplyCommand
         // his drawn wheels turn with his own travel (piece 3): signed
         // speed along the nose off the vehicle itself, spun at his
         // wheel radius - forward travel decreases the angle, the
@@ -1068,9 +965,12 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     // the drive state, read back the same way (fix round 4): the
     // switches on the automobile's road to the wheels, so a body that
     // answers the pedals but never moves names its blocker in the log
-    // instead of leaving the next round to guess. The mission and
-    // cruise are the autopilot's own words as they stand NOW - what
-    // the mirror wrote, or the rest state it never left.
+    // instead of leaving the next round to guess. THE ROOT STEP: the
+    // mission and cruise below are now the CHANNEL'S RECEIPT - under
+    // direct drive the mission must read NONE (0) and the cruise 0 on
+    // every report while the body drives; any other value means a
+    // game system claimed the car under the brain's pedals, and the
+    // /coptest direct phase grades exactly that witness.
     out->engineOn = v->bEngineOn;
     out->handbrake = v->bIsHandbrakeOn;
     out->engineBroken = v->bEngineBroken;
@@ -1169,15 +1069,14 @@ void GtaCopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {
 }
 
 void GtaCopBodyDriveTarget(int veh, const Vec3& at, float cruiseMps) {
-    CopBodyState* bp = FindBody(veh);
-    if (!bp)
-        return;
-    // only the feed is stored here: the mirror itself is written in
-    // ApplyCommand, beside the pedals, so the Drive-time write and
-    // Post's re-assert carry the autopilot order in the same pass
-    bp->apFeed = true;
-    bp->apTarget = at;
-    bp->apCruise = cruiseMps;
+    // THE ROOT STEP: RETIRED, kept only so the host interface links.
+    // The feed this verb carried (a destination + cruise for the
+    // traffic autopilot) has no consumer left: the core drives the
+    // pedals directly through GtaCopBodyDrive, and nothing here may
+    // arm the middleman again. The arguments are deliberately unused.
+    (void)veh;
+    (void)at;
+    (void)cruiseMps;
 }
 
 void GtaCopBodyRetire(int veh, bool burnOut) {
@@ -1208,8 +1107,8 @@ void GtaCopBodyRetire(int veh, bool burnOut) {
         }
         if (v) {
             // no stale orders on a handed-over body (fix round 4): the
-            // autopilot mirror is disarmed before the fire takes him,
-            // so the wreck the city keeps is a wreck, not a driverless
+            // autopilot is left at NONE before the fire takes him, so
+            // the wreck the city keeps is a wreck, not a driverless
             // car still holding a mission
             v->m_autoPilot.m_nCarMission = MISSION_NONE;
             v->m_fHealth = 90.0f;
@@ -1235,10 +1134,11 @@ float GtaPlayerVehicleImpact() {
 }
 
 // Test staging only (/coptest's recovery wedge): move a cop body
-// outright - the same basis write the spawn proves, then the mirror's
-// bookkeeping forgotten so the next feed re-arms from clean. Nothing in
-// play calls this; it exists so the self-test can put a unit nose-to-
-// wall exactly, instead of hoping a chase ends in a wedge.
+// outright - the same basis write the spawn proves, then the body's
+// impact bookkeeping forgotten so the staging itself is not priced
+// as a crash. Nothing in play calls this; it exists so the self-test
+// can put a unit nose-to-wall exactly, instead of hoping a chase ends
+// in a wedge.
 void GtaCopBodyPlace(int veh, const Vec3& at, float headingDeg) {
     CopBodyState* bp = FindBody(veh);
     if (!bp)
@@ -1268,9 +1168,6 @@ void GtaCopBodyPlace(int veh, const Vec3& at, float headingDeg) {
             driver->SetPosn(m.pos);
         }
     }
-    bp->apArmed = false;
-    bp->apFeed = false;
-    bp->apWrittenCruise = -1.0f;
     bp->prevVelOk = false;
     bp->impactPeak = 0.0f;
     Log("cop body: unit %d placed by the test at (%.0f, %.0f), facing %.0f deg",
@@ -1395,8 +1292,12 @@ void GtaDecoyCarDrive(int veh, const Vec3& at, float cruiseMps) {
     ap.m_nCarMission = MISSION_GOTOCOORDS_STRAIGHT;
     ap.m_nCarDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
     ap.m_vecDestinationCoors = CVector(at.x, at.y, at.z);
-    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 127.0f); // the same
-        // saturation law as the cop mirror's (the 5x update)
+    ap.m_nCruiseSpeed = (char)Clamp(cruiseMps, 0.0f, 127.0f); // the
+        // narrow char saturates at 127, the float beside it carries
+        // the true ask (the 5x update's receipt pair). NOTE: this
+        // decoy is a civilian and keeps the game's autopilot on
+        // purpose - the root step retired the middleman for COP
+        // bodies only
     ap.m_fMaxTrafficSpeed = cruiseMps;
     v->bEngineOn = true;
     v->bIsHandbrakeOn = false;
