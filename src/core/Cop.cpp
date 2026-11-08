@@ -36,13 +36,30 @@ constexpr float kTick = 1.0f / 50.0f;     // one logic tick, seconds
 
 // CopControl1's desired speeds by difficulty (COP_AI.C): speed1 is the
 // cornering pace, speed2 the straight-road pace. The HARDEST row (2)
-// ships - the user's own choice, 2026-11-07, «آره سخت ترین بهترینه»:
-// speed1 217 units = 39.3 m/s, speed2 294 units = 53.3 m/s, and the
-// thrust scales ride the same row ((difficulty+8) base, +(difficulty+4)
-// on a straight). «خودش» is the ceiling too: nothing above his own top.
+// ships - the user's own choice, 2026-11-07, «آره سخت ترین بهترینه».
+//
+// THE 5x UPDATE (the user's new law, 2026-11-08, chosen in consultation
+// AFTER the walls were named to him: San Andreas clips part of any
+// paper number - streaming, physics stepping, ProcessAI's own steering
+// - and he ordered the paper 5x anyway, «همون ۵ برابر رو بنویس», against
+// an UNCHANGED world: his stats scale, the world's prices and speeds do
+// not). This supersedes the old «خودش is the ceiling» law FOR THE COP
+// (the boss and everything else keep it). The pace rows are five times
+// the hardest row: speed1 217 -> 1085 units = 197 m/s on paper, speed2
+// 294 -> 1470 = 266 m/s on paper. What the host's fields actually hold
+// and what the car achieves are separate questions, answered honestly
+// in DRIVER2-STEP3-fa.md's 5x table - the rows here are the paper law
+// he ordered, nothing dressed down in advance. The thrust scales ride
+// the same row ((difficulty+8) base, +(difficulty+4) on a straight).
+// The MANOEUVRE speeds below the rows are not pace: the side-zone
+// crawl, the overshoot reverse and the both-corners reverse are
+// geometry speeds the original ties to the car's own frame (a reverse
+// at 5x is not pressure, it is a different accident), and the recovery
+// desire belongs to the recovery's own clock - they stay at his
+// numbers, named here so the exception is a decision, not an omission.
 constexpr int kDifficulty = 2;
-constexpr float kSpeed1[3] = { 203 * kV, 210 * kV, 217 * kV };
-constexpr float kSpeed2[3] = { 238 * kV, 266 * kV, 294 * kV };
+constexpr float kSpeed1[3] = { 1015 * kV, 1050 * kV, 1085 * kV }; // 5x of {203, 210, 217}
+constexpr float kSpeed2[3] = { 1190 * kV, 1330 * kV, 1470 * kV }; // 5x of {238, 266, 294}
 constexpr float kSideSpeed = 110 * kV;    // 19.9 m/s, the side-zone crawl
 constexpr float kBackSpeed = -70 * kV;    // -12.7 m/s, overshoot reverse
 constexpr float kBlockedSpeed = -120 * kV; // -21.7 m/s, both corners shut
@@ -71,8 +88,12 @@ constexpr float kBatterFelony = 2457.0f;   // the ladder's top rung - the
     // original's gBatterPlayer is a per-mission flag, and top pressure is
     // the honest stand-in, named as such (piece 1's reading, kept)
 constexpr float kLostAfter = 256 * kTick;  // 5.12 s unseen = position lost
-constexpr float kWreckLine = 27000.0f;     // the original's retirement line
-    // (COP_AI.C: totalDamage > 27000 && !immortal - the dying sequence)
+constexpr float kWreckLine = 135000.0f;    // the 5x update: five times the
+    // original's retirement line (COP_AI.C: totalDamage > 27000 &&
+    // !immortal - the dying sequence). The book deepened; the prices
+    // that fill it did not move (see the anchor below), so an RPG-class
+    // blast that billed 8100 of 27000 now bills 8100 of 135000 -
+    // roughly seventeen direct RPGs to retire him, not three-plus.
 // His damage book's prices (BCOLLIDE.C's ApplyDamage / DamageCar3D, the
 // user's order 2026-11-07: survival law = HIS, display = the city's):
 // - collisions price off the impact's own velocity change, on the shape
@@ -85,7 +106,9 @@ constexpr float kWreckLine = 27000.0f;     // the original's retirement line
 //   fire, hits on the driver) converts at one anchor: 27000 of his
 //   points == the host body's own 1000-point life, 27 per point. An RPG
 //   that would take ~300 host points off the body bills ~8100 of his:
-//   expensive, and three-plus direct hits from retiring him - never one.
+//   expensive - and since the 5x update deepened the book to 135000
+//   with this anchor UNCHANGED, some seventeen direct hits from
+//   retiring him - never one, and no longer three-plus.
 //   FIX ROUND 3 (2026-11-07): the "~300 host points" was the design's
 //   assumption, and the host does not honour it - a point-blank blast
 //   strips the body 1000 -> 0 (or below) inside one frame, so the raw
@@ -105,10 +128,63 @@ constexpr float kImpactRate = 340.0f;  // his points per m/s past it
 constexpr float kImpactCap = 1500.0f;  // per single impact, before discount
 constexpr float kPursuerToughness = 0.875f; // ApplyDamage, difficulty 2
 constexpr float kSaBookRate = 27.0f;   // host health point -> his points
+// THE PLOUGH LAW's price split (the user's amendment, 2026-11-08
+// 09:39 - "nothing ahead of them matters"): his book is for the PREY's
+// fight. A collision away from the prey - traffic rammed aside,
+// scenery struck at pace - bills a token share of the fight price, so
+// ploughing a street of cars cannot burn the 135000 on the world. The
+// split is read off the report itself: an impact is a FIGHT contact
+// when the prey is at hand (the bridge's own ram filing, or the prey
+// inside 6 m - the kick band's country); health the body lost in the
+// same report as a scenery impact is collision-filed and rides the
+// same token lane, while a smooth drain with no impact in it (fire)
+// keeps the anchor rate of the standing law - fire is priced,
+// collisions are not.
+constexpr float kSceneryShare = 0.04f; // the token: 1/25 of the fight price
 constexpr float kBlastPrice = 8100.0f; // one blast-class event: 300 host
                                        // points at the anchor - the most
                                        // one tick's health-delta channels
                                        // may bill, all of them together
+
+// ---- THE 5x UPDATE: the momentum channel (impact x5), the damage
+// book's sibling. The book prices what the world does TO the cop; this
+// channel prices what the cop does to the PREY at contact, and pays it
+// out as velocity through the host verbs (KickVehicle / KickPed) - the
+// core owns the law, the host displays it, the same split as the book.
+// The law, stated whole:
+//  - contact is read geometrically, off the bodies' centres - the same
+//    reading the /coptest ram grade uses: centres inside the band
+//    (4.8 m car-to-car, about two body lengths of shell; 2.6 m to the
+//    man himself) while the unit pursues and is itself moving;
+//  - the throw's size is the TRANSFER FRACTION of the closing speed:
+//    0.6 of it. The raw host outcome for a square hit between similar
+//    cars keeps perhaps a tenth to a fifth of the closing in the prey;
+//    0.6 is the felt ~5x of that outcome, and it is CAPPED at 30 m/s -
+//    the physics-sanity cap, stated here and in the report, not hidden:
+//    past it the host's own stepping tunnels bodies through each other
+//    and a bigger number would buy cartoon, not force;
+//  - the size ramps in between the tap threshold (3 m/s of closing:
+//    under it, nothing - a parked car's tap stays a tap) and full
+//    contact (8 m/s), so lesser contacts scale down smoothly instead
+//    of switching on;
+//  - a flank or off-centre hit adds a yaw kick proportional to the
+//    prey centre's signed offset from the cop's line of travel:
+//    0.045 rad/s per metre of offset per m/s of throw, capped at
+//    3 rad/s. Square-on, the offset is zero and there is no spin;
+//  - one throw per approach (CopState::kickArmed): the latch re-arms
+//    only when the centres have separated past the band + 3 m;
+//  - a fired throw is also the re-attack order (the user's pressure
+//    law): the unit's stuck witness is wiped and any recovery the
+//    impact provoked is cancelled on the spot - he re-engages at
+//    batter pace through the ordinary feed, with no re-path pause.
+constexpr float kKickBandCar = 4.8f;
+constexpr float kKickBandFoot = 2.6f;
+constexpr float kKickTap = 3.0f;
+constexpr float kKickFull = 8.0f;
+constexpr float kKickTransfer = 0.6f;
+constexpr float kKickCap = 30.0f;
+constexpr float kKickSpin = 0.045f;
+constexpr float kKickSpinCap = 3.0f;
 
 // FELONY.C's own tables.
 constexpr int kPlacid[12] = { 659, 659, 659, 659, 659, 1318, 659, 659, 659, 659, 659, 4096 };
@@ -132,12 +208,21 @@ constexpr float kLadderRungs[4] = { 0.0f, 819.0f, 1638.0f, 2457.0f };
 // initial data in the original's COP_DATA block - so the port adopts
 // 2048 (the delay halves by the felony cap) as a NAMED stand-in, the
 // same epistemic status as the batter line above.
-constexpr float kRespawnTicks = 320.0f;
+// THE 5x UPDATE divides the base by five (pressure x5 where the slots
+// allow): 64 ticks at felony 0 = 1.28 s, 32 ticks at the cap = 0.64 s -
+// replacements arrive inside the ~1.3 s -> ~0.6 s band.
+constexpr float kRespawnTicks = 64.0f; // 320 / 5
 constexpr float kRespawnScale = 2048.0f / 4096.0f;
 // The cutoff (ControlNumberOfCops + its use in CopControl1): when more
 // pursuers are live than the ladder wants, cutOffDistance is set to the
 // wanted-th nearest pursuer's distance, and a pursuer beyond it reads
 // his desired speed through cutOffPowerScale = 2048 of 4096 - one half.
+// THE 5x UPDATE removes the discount at the felony cap (the manager's
+// cutoff block reads the page): at max felony far units fight at full
+// fed speed - with 5x pace rows the cutoff's purpose (keeping the far
+// units from arriving hotter than the near ones can use) is gone, and
+// the user's pressure order names the result. Below the cap the
+// original's half scale stands untouched.
 constexpr float kCutoffScale = 2048.0f / 4096.0f;
 // CheckPingOut's own radius: a car farther than 24000 units (93.75 m)
 // from the player's spool centre leaves the world.
@@ -246,7 +331,10 @@ int sPreyPed = -1;
 bool PreyOverrideOn() { return sPreyVeh >= 0 || sPreyPed >= 0; }
 
 float BlockDelay() {
-    return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick;
+    // THE 5x UPDATE: the whole armed count is divided by five, the
+    // random tail included (pressure x5) - the hardest row's
+    // 800..1055 ticks (16..21 s) become 3.2..4.2 s.
+    return (kBlockDelayTicks[kDifficulty] + (float)(McsaRand() & 0xFF)) * kTick / 5.0f;
 }
 
 int LadderWanted(float felony) {
@@ -422,19 +510,45 @@ void StandDrive(CopState& c) {
         Drive(c, 0.0f, 0.0f, 0.0f, false);
 }
 
+// THE 5x UPDATE's feed law: every distance a feed is given grows with
+// the speed it is fed at. The law is 25 m of base (round 5's floor -
+// the crawl that fed itself at 2.7 m is the conviction under it) plus
+// 0.9 s of travel, capped at 180 m: inside the host's ~300 m body
+// streaming radius, with the route machinery keeping longer roads
+// honest past it. A braking-distance law (v^2 / 2a) was considered
+// and rejected on its face: at the paper top speed it asks for
+// kilometres of look-ahead on a city map. Nine-tenths of a second of
+// travel is what a driver actually looks ahead, and at the old 1x
+// paces it lands within a few metres of the numbers the earlier
+// rounds shipped (25 m at a crawl, ~60 m at the old straight pace) -
+// the law is the old shape, extended honestly to the new rows.
+float FeedLookAhead(float speed) {
+    return Clamp(25.0f + 0.9f * std::fabs(speed), 30.0f, 180.0f);
+}
+
 // Route capture, the complete update's route law: a waypoint counts
-// as taken when the car comes within 7 m of it OR has drawn level
-// with it (the next waypoint is nearer than it is). The second clause
-// is new and the mirror channel is why: a pedal-era body steered AT
-// the current waypoint and passed through its circle; a body driven
-// by the autopilot feed beelines at the look-ahead point tens of
-// metres down the road, and on a bend its chord can pass a waypoint
-// 8-10 m wide without ever entering the circle - the index then never
-// advances, the look-ahead stays anchored behind the car, and the
-// route stalls (the complete update's sims convicted exactly this in
-// both route drivers: the spike never finished, and stood-down units
-// orbited at ~47 m and never pinged out).
-void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos) {
+// as taken when the car comes within the capture radius of it OR has
+// drawn level with it (the next waypoint is nearer than it is). The
+// second clause is new and the mirror channel is why: a pedal-era
+// body steered AT the current waypoint and passed through its circle;
+// a body driven by the autopilot feed beelines at the look-ahead
+// point tens of metres down the road, and on a bend its chord can
+// pass a waypoint 8-10 m wide without ever entering the circle - the
+// index then never advances, the look-ahead stays anchored behind
+// the car, and the route stalls (the complete update's sims convicted
+// exactly this in both route drivers: the spike never finished, and
+// stood-down units orbited at ~47 m and never pinged out).
+// THE 5x UPDATE: the capture radius itself is speed-shaped - 7 m at
+// the crawl it was tuned at, +0.1 m per m/s of travel, capped at
+// 25 m. A car covering 4 m a tick at the new rows crosses a 7 m
+// circle in under two ticks and its chord on a bend stands wider of
+// the waypoint than the whole circle; the drawn-level clause still
+// does the precise work, the wider circle is the fast car's slack.
+float RouteCapture(float speed) {
+    return Clamp(7.0f + 0.1f * std::fabs(speed), 7.0f, 25.0f);
+}
+void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos,
+                  float capture) {
     // reseed first: if a point a little further along the route is
     // already within capture distance, the car has drawn level with
     // THAT stretch of road - a hairpin can put a later point at his
@@ -445,7 +559,7 @@ void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos) 
     // satisfied by the stretch of route that passed over his spot)
     {
         size_t best = idx;
-        float bestD = 7.0f;
+        float bestD = capture;
         for (size_t j = idx; j < route.size() && j < idx + 12; ++j) {
             Vec3 to = route[j] - pos;
             to.z = 0.0f;
@@ -462,7 +576,7 @@ void RouteAdvance(const std::vector<Vec3>& route, size_t& idx, const Vec3& pos) 
         Vec3 to = route[idx] - pos;
         to.z = 0.0f;
         const float d = to.Length();
-        if (d < 7.0f) {
+        if (d < capture) {
             ++idx;
             continue;
         }
@@ -503,6 +617,51 @@ Vec3 RouteLookAhead(const std::vector<Vec3>& route, size_t idx,
     }
     return route.back();
 }
+
+// The momentum channel's arithmetic (the constants and the whole law
+// stand at kKickBandCar above): pure geometry on the two velocities
+// and the centres' offset, no state - CopTick calls it at a contact,
+// the sims pin it directly through CopKickCompute.
+Vec3 KickCompute(const Vec3& copVel, const Vec3& preyVel, const Vec3& rel,
+                 float* spinOut, float* closingOut) {
+    *spinOut = 0.0f;
+    *closingOut = 0.0f;
+    Vec3 flat = rel;
+    flat.z = 0.0f;
+    const float dist = flat.Length();
+    Vec3 cv = copVel;
+    cv.z = 0.0f;
+    const float copSpeed = cv.Length();
+    if (dist < 0.01f || copSpeed < 1.0f)
+        return Vec3(); // no line to price on, or no momentum to give
+    const Vec3 dir = flat * (1.0f / dist);
+    Vec3 rv = preyVel - copVel;
+    rv.z = 0.0f;
+    const float closing = -(rv.x * dir.x + rv.y * dir.y);
+    *closingOut = closing;
+    if (closing < kKickTap)
+        return Vec3(); // a tap: the ramp below starts at zero here
+    const float ramp = Clamp((closing - kKickTap) / (kKickFull - kKickTap), 0.0f, 1.0f);
+    const float mag = std::fmin(kKickTransfer * closing * ramp, kKickCap);
+    if (mag <= 0.01f)
+        return Vec3();
+    const Vec3 travel = cv * (1.0f / copSpeed);
+    // the prey centre's signed offset from the cop's line of travel
+    // (the z of travel x rel): zero square-on, and its sign is the
+    // side the spin answers to
+    const float offset = travel.x * flat.y - travel.y * flat.x;
+    *spinOut = Clamp(kKickSpin * offset * mag, -kKickSpinCap, kKickSpinCap);
+    return travel * mag;
+}
+
+} // namespace
+
+Vec3 CopKickCompute(const Vec3& copVel, const Vec3& preyVel, const Vec3& rel,
+                    float* spinOut, float* closingOut) {
+    return KickCompute(copVel, preyVel, rel, spinOut, closingOut);
+}
+
+namespace {
 
 // ---------------------------------------------------------------------------
 // Piece 0's spike controller (slot 0 only): first the steering calibration
@@ -551,7 +710,7 @@ void SpikeDrive(float dt) {
         }
         return;
     }
-    RouteAdvance(c.spikeRoute, c.spikeIdx, c.pos);
+    RouteAdvance(c.spikeRoute, c.spikeIdx, c.pos, RouteCapture(c.speed));
     if (c.spikeIdx >= c.spikeRoute.size())
         return; // the finish branch at the top takes the next tick
     const Vec3 wp = c.spikeRoute[c.spikeIdx];
@@ -580,10 +739,15 @@ void SpikeDrive(float dt) {
     }
     // a city pace, easing off as the point nears or the turn grows: a
     // cruiser's turn radius at full pace is wider than a waypoint's
-    // capture circle, and an orbiting spike proves nothing
-    float want = 11.0f;
+    // capture circle, and an orbiting spike proves nothing. THE 5x
+    // UPDATE scales this pace with the rest of him (55 / 30 - these
+    // two numbers were always OUR stand-in for a city pace, not one
+    // of his rows, and the order was 5x in all respects); the capture
+    // radius and the look-ahead grow with the speed by the feed law,
+    // which is what keeps the faster spike from orbiting its points.
+    float want = 55.0f;
     if (dist < 25.0f || std::fabs(err) > 0.7f)
-        want = 6.0f;
+        want = 30.0f;
     float gas = 0.0f, brake = 0.0f;
     if (c.speed < want)
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
@@ -593,10 +757,11 @@ void SpikeDrive(float dt) {
     // this waypoint at this pace - but the feed is the look-ahead
     // (fix round 5): the graph's waypoints can stand a few metres
     // apart, and a destination a few metres ahead is a car braking to
-    // arrive, forever. The feed walks 25 m of road down the route.
+    // arrive, forever. The feed walks the feed law's distance of road
+    // down the route (25 m at the old paces; speed-shaped now).
     c.target = wp;
     c.desiredSpeed = want;
-    c.feedPoint = RouteLookAhead(c.spikeRoute, c.spikeIdx, c.pos, 25.0f);
+    c.feedPoint = RouteLookAhead(c.spikeRoute, c.spikeIdx, c.pos, FeedLookAhead(c.speed));
     c.feedCruise = want;
     c.feedLive = true;
     Drive(c, gas, brake, steer, false);
@@ -606,12 +771,12 @@ void SpikeDrive(float dt) {
         Host::CopBody rep;
         if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok)
             Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f"
-                " | engine %d handbrake %d broken %d status %d mission %d cruise %d driver-in %d",
+                " | engine %d handbrake %d broken %d status %d mission %d cruise %d/%.0f driver-in %d",
                 rep.pos.x, rep.pos.y, rep.pos.z,
                 rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z,
                 rep.gas, rep.brake, rep.steer,
                 rep.engineOn ? 1 : 0, rep.handbrake ? 1 : 0, rep.engineBroken ? 1 : 0,
-                rep.status, rep.mission, rep.cruise, rep.driverInVehicle ? 1 : 0);
+                rep.status, rep.mission, rep.cruise, rep.cruiseF, rep.driverInVehicle ? 1 : 0);
     }
 }
 
@@ -653,7 +818,7 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
         }
         c.leaveIdx = 0;
     }
-    RouteAdvance(c.leaveRoute, c.leaveIdx, c.pos);
+    RouteAdvance(c.leaveRoute, c.leaveIdx, c.pos, RouteCapture(c.speed));
     if (c.leaveIdx >= c.leaveRoute.size())
         return; // the re-lay branch at the top takes the next tick
     const Vec3 wp = c.leaveRoute[c.leaveIdx];
@@ -667,19 +832,23 @@ void LeaveDrive(CopState& c, float dt, const Vec3& playerPos) {
     const float steer = dot < 0.0f ? (cross >= 0.0f ? -1.0f : 1.0f)
                                    : Clamp(-err * 1.4f, -1.0f, 1.0f);
     float gas = 0.0f, brake = 0.0f;
-    const float want = dist < 25.0f || std::fabs(err) > 0.7f ? 6.0f : 11.0f;
+    // the leave pace rides the same 5x as the spike's (a stood-down
+    // unit clears the field five times as fast - the ping-out edge
+    // has not moved, only his speed toward it)
+    const float want = dist < 25.0f || std::fabs(err) > 0.7f ? 30.0f : 55.0f;
     if (c.speed < want)
         gas = Clamp((want - c.speed) * 0.2f, 0.25f, 1.0f);
     else
         brake = Clamp((c.speed - want) * 0.2f, 0.0f, 0.6f);
     // the intent the autopilot mirror reads: the leave waypoint at
     // the leave pace, fed as the look-ahead down the leave route
-    // (fix round 5 - same arrival-braking law as the spike) - named
-    // before the drive, as in the spike, so the mirror never reads
-    // last tick's word
+    // (fix round 5 - same arrival-braking law as the spike, the
+    // distance speed-shaped by the 5x feed law) - named before the
+    // drive, as in the spike, so the mirror never reads last tick's
+    // word
     c.target = wp;
     c.desiredSpeed = want;
-    c.feedPoint = RouteLookAhead(c.leaveRoute, c.leaveIdx, c.pos, 25.0f);
+    c.feedPoint = RouteLookAhead(c.leaveRoute, c.leaveIdx, c.pos, FeedLookAhead(c.speed));
     c.feedCruise = want;
     c.feedLive = true;
     Drive(c, gas, brake, steer, false);
@@ -714,8 +883,29 @@ void PursuitFeed(CopState& c, const Vec3& target) {
         dir.z = 0.0f;
         const float dl = dir.Length();
         dir = dl > 0.01f ? dir * (1.0f / dl) : c.fwd;
-        c.feedPoint = target + dir * 5.0f;
+        // THE 5x UPDATE: the through-projection grows with his speed
+        // (5 m at the old paces, +0.35 s of travel, capped at 60 m) -
+        // a destination 5 m past the prey is an arrival order to a car
+        // covering that in a tenth of a second, and the batter's whole
+        // geometry is driving THROUGH the man, not stopping on him.
+        // THE ZERO-MERCY AMENDMENT adds the floor for the man on foot
+        // at batter: the projection never drops under 25 m there, so
+        // no arrival brake in the host's driving can park the unit
+        // beside him - the fed point is always well THROUGH his exact
+        // position, and after the pass the zone law turns the unit and
+        // feeds it through him again.
+        float proj = Clamp(5.0f + 0.35f * std::fabs(c.speed), 5.0f, 60.0f);
+        if (!gThreat.playerInVehicle && c.batter)
+            proj = std::fmax(proj, 25.0f);
+        c.feedPoint = target + dir * proj;
         c.feedCruise = std::fmax(c.desiredSpeed, 2.0f);
+        // at batter the fed pace never drops below the batter pace:
+        // the pacing blend is dead there (CopControl's front zone),
+        // and the feed says the same law in its own channel - a side
+        // zone's manoeuvre desire does not get to feed a crawl while
+        // the felony stands at the ladder's top
+        if (c.batter)
+            c.feedCruise = std::fmax(c.feedCruise, kSpeed1[kDifficulty] * c.powerScale);
     } else {
         Vec3 to = target - c.pos;
         to.z = 0.0f;
@@ -766,8 +956,18 @@ void CopControl(CopState& c, float dt) {
         // `want` at EVERY range, and what the feed law turned into the
         // crawl the bridge printed. The probes now skip his own
         // vehicle, exactly like the sight rays round 5 already fixed.
-        c.frontLClear = !TheHost().LineBlockedSkipVeh(c.pos, base - right * (150 * kM), c.veh);
-        c.frontRClear = !TheHost().LineBlockedSkipVeh(c.pos, base + right * (150 * kM), c.veh);
+        // THE PLOUGH LAW (the user's amendment, 2026-11-08 09:39 -
+        // "nothing ahead of them matters"): the probes ask the
+        // WORLD-only reading now. A vehicle standing in the probe line
+        // is not geometry: a street of traffic ahead must read CLEAR
+        // corners, so the zone law holds the FRONT desire at the pace
+        // rows and the unit drives through at speed - no braking, no
+        // swerve, no detour for anything movable. Only solid world
+        // (buildings, pillars - the geometry the host itself cannot
+        // pass) may still read blocked, and that case belongs to the
+        // recovery law below, as it always did.
+        c.frontLClear = !TheHost().LineBlockedWorld(c.pos, base - right * (150 * kM));
+        c.frontRClear = !TheHost().LineBlockedWorld(c.pos, base + right * (150 * kM));
     }
 
     // the stuck witness's fair start runs down first (fix round 5):
@@ -921,17 +1121,26 @@ void CopControl(CopState& c, float dt) {
             }
         }
         const Vec3 pRight(pFwd.y, -pFwd.x, 0.0f);
-        if (c.batter)
-            target = intercept + pRight * (5.0f * 0.5f); // his flank: 5 units,
-                // the matrix arithmetic of the original lands at ~2.5 m
-        else if (!playerInCar)
+        if (!playerInCar)
             target = intercept; // SA adaptation, the user's order
                 // (2026-11-07): the hunt binds to the MAN, never to his
                 // car - bailed out on foot, there is no tail to stand
                 // behind, so he drives at the man himself and blocks his
                 // path with the car. In Driver 2 the man is never out of
                 // a car and FELONY.C's gates all read the car; the
-                // player-binding is ours, named as such in the step report
+                // player-binding is ours, named as such in the step report.
+                // THE ZERO-MERCY AMENDMENT (2026-11-08) moves this branch
+                // ABOVE the batter flank: at max felony the flank offset
+                // used to win even over a man on foot, which put the aim
+                // 2.5 m BESIDE him - a pass-by offset on the one prey the
+                // order names exactly («کامل خودم رو دقیقا هدف بگیرن چه
+                // پیاده چه با ماشین»). On foot the target is the man
+                // himself at EVERY felony, batter included: no flank, no
+                // tail, no offset. The flank below is a car geometry and
+                // only ever applies to a man in a vehicle.
+        else if (c.batter)
+            target = intercept + pRight * (5.0f * 0.5f); // his flank: 5 units,
+                // the matrix arithmetic of the original lands at ~2.5 m
         else
             target = intercept - pFwd * 2.5f; // the CarTail: behind his rear
     } else {
@@ -947,12 +1156,15 @@ void CopControl(CopState& c, float dt) {
         // to arrive, its speed stays at the crawl, the walk stays 2.7 m
         // - the crawl feeds itself. The walk therefore never goes
         // under 30 m of road (the descent stops at the field's goal on
-        // its own, so the floor can never overshoot the man); past
-        // ~130 m/s of |v| the original's own term takes over again.
-        // An SA-channel adaptation, named like the others.
-        const float ahead = std::fmax(std::fabs(c.speed) * (10.0f / (kV / kM)) + 680 * kM,
-                                      30.0f); // his speed x10 ticks of road,
-            // +680 units: in metres, |v|*0.216 + 2.66, floored at 30
+        // its own, so the floor can never overshoot the man).
+        // THE 5x UPDATE - the walk's length is the feed law's now
+        // (FeedLookAhead above): the original's own term was |v|*0.216
+        // + 2.66 m, which at the new paper rows still names a point
+        // ~60 m out for a car covering that in a quarter second - the
+        // self-feeding crawl at 5x scale. The law's 0.9 s of travel,
+        // capped at 180 m, is the walk. An SA-channel adaptation,
+        // named like the others.
+        const float ahead = FeedLookAhead(c.speed);
         Vec3 far, farther;
         bool straight = false;
         if (Page().fieldOk && VehicleFieldDescent(c.pos, ahead, &far)) {
@@ -1045,7 +1257,12 @@ void CopControl(CopState& c, float dt) {
         // the anti-rear-end pacing: close and not battering, blend the
         // desire toward just under the man's own speed. Car-to-car only:
         // on foot the man gets the full pressure speed (the same user
-        // order - a swap or a bail-out cleanses nothing)
+        // order - a swap or a bail-out cleanses nothing).
+        // THE 5x UPDATE makes the batter gate below the whole law, in
+        // words: at felony >= 2457 (c.batter) the blend is DEAD - his
+        // speed is never tied to the prey's again, and PursuitFeed
+        // floors the fed cruise at the batter pace to match. Below
+        // batter the original's blend stands as it was.
         if (cost < kPaceCost && !c.batter && playerInCar) {
             const float pSpeed = pVel.Length();
             const float w = cost / kPaceCost;
@@ -1204,7 +1421,23 @@ bool LadderSpawnPoint(const Vec3& playerPos, Vec3* out) {
         dirv.z = 0.0f;
         const float dl = dirv.Length();
         const float behind = dl > 0.5f ? (dirv * (1.0f / dl)).Dot(back) : 0.0f;
-        const float score = behind * 100.0f - std::fabs(d - kSpawnRing);
+        float score = behind * 100.0f - std::fabs(d - kSpawnRing);
+        // THE PRESENCE TUNE (the user's ابهت order, 2026-11-08): a
+        // point a living unit already stands on is worth less - each
+        // unit within 30 m of the candidate costs it 60 of score, so
+        // successive ladder spawns walk AROUND the ring instead of
+        // stacking on the one best node and convoying in from a
+        // single street. The force reads as a fan closing from
+        // several directions; the discount is strong but not absolute
+        // (a sparse corner of the map still takes its only node).
+        for (int s = 0; s < kMaxCopUnits; ++s) {
+            if (!UnitLiving(gCops[s]))
+                continue;
+            Vec3 du = gCops[s].pos - np;
+            du.z = 0.0f;
+            if (du.Length() < 30.0f)
+                score -= 60.0f;
+        }
         if (score > bestScore) {
             bestScore = score;
             bestNode = node;
@@ -1519,10 +1752,28 @@ void CopTick(float dt, const Vec3& playerPos) {
         // channels bill the book whoever dealt them; the ledger of what
         // the PLAYER dealt rides playerBookDamage, and that split is what
         // the replacement step's ourUnitsLost count reads at retirement.
+        //
+        // THE PLOUGH LAW's split (kSceneryShare): is this report's
+        // impact a FIGHT contact - the prey at hand, by the bridge's
+        // own ram filing or by measure (inside 6 m, the kick band's
+        // country)? A fight impact pays the full BCOLLIDE price and
+        // attributes to the player. Any other impact - traffic rammed
+        // aside, scenery struck at pace - pays the token share and
+        // attributes nothing, and health the body lost in the same
+        // report is collision-filed and rides the token lane with it.
+        // A smooth drain with no impact in it (fire) is untouched by
+        // the split and keeps the anchor rate, as the standing law
+        // prices it.
+        Vec3 preyGap = preyPos - c.pos;
+        preyGap.z = 0.0f;
+        const bool fightContact = rep.struckRam > 0.5f || preyGap.Length() <= 6.0f;
+        const bool impactSpike = rep.impactDv > kImpactFree;
         float impactPrice = 0.0f;
-        if (rep.impactDv > kImpactFree) {
+        if (impactSpike) {
             impactPrice = std::fmin((rep.impactDv - kImpactFree) * kImpactRate, kImpactCap) *
                           kPursuerToughness;
+            if (!fightContact)
+                impactPrice *= kSceneryShare;
             c.totalDamage += impactPrice;
         }
         // the health-delta channels, blast-capped as one sum (fix round
@@ -1531,15 +1782,17 @@ void CopTick(float dt, const Vec3& playerPos) {
         // delta (shot + driver channels) scales by the same fraction
         // the cap leaves standing, so the ourUnitsLost attribution at
         // retirement reads the billed book, not the raw host numbers.
+        const float worldPts = rep.struckWorld *
+                               ((impactSpike && !fightContact) ? kSceneryShare : 1.0f);
         const float rawDeltaPts =
-            (rep.struckShot + rep.struckWorld + rep.struckDriver) * kSaBookRate;
+            (rep.struckShot + rep.struckDriver) * kSaBookRate + worldPts * kSaBookRate;
         const float deltaBill = std::fmin(rawDeltaPts, kBlastPrice);
         c.totalDamage += deltaBill;
         float playerDeltaPts = (rep.struckShot + rep.struckDriver) * kSaBookRate;
         if (rawDeltaPts > deltaBill && rawDeltaPts > 0.0f)
             playerDeltaPts *= deltaBill / rawDeltaPts;
         c.playerBookDamage += playerDeltaPts +
-                              (rep.struckRam > 0.5f ? impactPrice : 0.0f);
+                              (fightContact ? impactPrice : 0.0f);
         c.health = Clamp(1.0f - c.totalDamage / kWreckLine, 0.0f, 1.0f);
         // the book is DISPLAYED on the body (step 1's display band): the
         // host shows smoke and fire off its own health, his law decides
@@ -1574,9 +1827,12 @@ void CopTick(float dt, const Vec3& playerPos) {
         struckShotU[slot] = rep.struckShot;
         struckDriverU[slot] = rep.struckDriver;
         // the body's own drive-state words, stashed for the per-second
-        // unit line (fix round 5)
+        // unit line (fix round 5; the 5x update adds the traffic-speed
+        // float beside the narrow cruise char, so the line can print
+        // what each field actually held)
         c.repMission = rep.mission;
         c.repCruise = rep.cruise;
+        c.repCruiseF = rep.cruiseF;
         c.repSiren = rep.siren;
         // the victim of a hit knows - the original's felony note for
         // being struck never asks for his eyes; the unit's own sight
@@ -1592,9 +1848,66 @@ void CopTick(float dt, const Vec3& playerPos) {
         // point blank and the page read "position lost" over his
         // corpse-to-be. Position-lost is now impossible while he is
         // actively damaging the unit through ANY of its channels.
+        // THE 5x UPDATE: the momentum channel pays out. Contact is the
+        // geometric reading (the centres' distance inside the band -
+        // KickCompute prices it off the closing speed); the throw goes
+        // to whatever the man is in - his vehicle, ANY vehicle, a
+        // motorcycle included: the channel has no per-class softening
+        // anywhere, a bike takes the full priced launch (the user's
+        // zero-mercy amendment) - or to the man himself on foot. Only
+        // a pursuing unit throws: a parked unit the man crashes into
+        // has no momentum order to give, and its book already prices
+        // his arrival.
+        bool struckHim = false;
+        {
+            const float band = gThreat.playerInVehicle ? kKickBandCar : kKickBandFoot;
+            Vec3 relKick = gThreat.playerPos - c.pos;
+            relKick.z = 0.0f;
+            const float kickDist = relKick.Length();
+            if (kickDist > band + 3.0f)
+                c.kickArmed = true; // the centres separated: a fresh
+                                    // approach may throw again
+            if (c.mode == COP_PURSUE && c.kickArmed && kickDist <= band) {
+                float spin = 0.0f, closing = 0.0f;
+                const Vec3 dv = KickCompute(c.vel, gThreat.playerVel, relKick, &spin, &closing);
+                if (dv.Length() > 0.01f) {
+                    c.kickArmed = false;
+                    ++c.kickCount;
+                    struckHim = true;
+                    if (gThreat.playerInVehicle && gThreat.playerVehicle >= 0)
+                        TheHost().KickVehicle(gThreat.playerVehicle, dv, spin);
+                    else if (!gThreat.playerInVehicle)
+                        TheHost().KickPed(PreyOverrideOn() && sPreyPed >= 0 ? sPreyPed : 0, dv);
+                    // immediate re-attack (the pressure law): the
+                    // throw IS the contact - the post-impact stillness
+                    // is not stuck evidence, a recovery the impact
+                    // provoked does not stand, and the next tick's
+                    // ordinary feed re-engages him at batter pace with
+                    // no re-path pause. The loop after a pass or a hit
+                    // is this plus the zone law, for as long as the
+                    // felony holds and he is in range.
+                    c.stuckT = 0.0f;
+                    c.fairStartT = kCopFairStart;
+                    c.recoveryT = 0.0f;
+                    Log("cop: unit %d threw the %s (kick #%d) - dv %.1f m/s, spin %.2f rad/s, closing %.1f m/s",
+                        slot, gThreat.playerInVehicle ? "vehicle he is in" : "man himself",
+                        c.kickCount, dv.Length(), spin, closing);
+                }
+            }
+        }
+        // the sight word for this unit, struckHim included: the
+        // victim of a hit knows (round 5, the struck channels below),
+        // and the STRIKER knows by the same epistemics - a unit whose
+        // body just threw the man has physically touched him, and at
+        // the 5x pace rows the overshoot that follows a contact runs
+        // outside the original's sight gates for seconds at a time.
+        // Without the striker's word the page read "position lost"
+        // over a force that had rammed him four times in the act (the
+        // first 5x sim run's log convicted it in blocks (b) and (l)).
+        // Contact is knowledge, in both directions.
         bool sees = CopSees(c, page.felony > kFelonyTrigger) ||
                     rep.struckRam > 0.5f || rep.struckShot > 0.5f ||
-                    rep.struckDriver > 0.5f;
+                    rep.struckDriver > 0.5f || struckHim;
         if (sees)
             anySeen = true;
     }
@@ -1811,6 +2124,12 @@ void CopTick(float dt, const Vec3& playerPos) {
     // roadblock is how that happens) - the wanted-th nearest pursuer's
     // distance becomes the line, and pursuers beyond it read their
     // desire at the half scale. Nobody beyond: everyone at full strength.
+    // THE 5x UPDATE removes the discount at the felony cap: at max
+    // felony there is no line at all - far units fight at full fed
+    // speed, so the pressure closes on him from several streets at
+    // once instead of queueing politely behind the near units (the
+    // user's presence order: he faces a force arriving, never one
+    // wandering car at a time).
     {
         float pDist[kMaxCopUnits];
         int nP = 0;
@@ -1826,7 +2145,7 @@ void CopTick(float dt, const Vec3& playerPos) {
             }
             pDist[j + 1] = d;
         }
-        if (nP > sWanted && sWanted >= 1)
+        if (nP > sWanted && sWanted >= 1 && page.felony < kFelonyCap)
             sCutoff = pDist[sWanted - 1];
         else
             sCutoff = 1e9f;
@@ -1840,9 +2159,12 @@ void CopTick(float dt, const Vec3& playerPos) {
     }
 
     // the spawn clock (ControlNumberOfCops): while the ladder is short,
-    // the delay shrinks with the felony - 320 ticks at felony 0, half
-    // that at the cap, through the named stand-in scale. When the clock
-    // runs out and a ladder slot is free, the unit enters at range.
+    // the delay shrinks with the felony - 64 ticks at felony 0, half
+    // that at the cap, through the named stand-in scale (the 5x
+    // update's divided base: the whole ladder fills inside ~2-3 s of
+    // a felony jump, which is the arrival the presence order wants).
+    // When the clock runs out and a ladder slot is free, the unit
+    // enters at range.
     if (livingLadder < sWanted) {
         sRespawnT += dt;
         const float delayTicks = kRespawnTicks * (1.0f - page.felony * kRespawnScale / kFelonyCap);
@@ -1943,13 +2265,18 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (c.unitLogT <= 0.0f) {
             c.unitLogT = 1.0f;
             const Vec3& aim = c.feedLive ? c.feedPoint : c.target;
+            // the 5x update extends the body's words: cruise prints
+            // as char/float - what the narrow field held, then what
+            // the traffic-speed float held - beside the kicks the
+            // momentum channel has dealt, so a session reads the
+            // clipping and the throws off the same line
             Log("cop unit %d: mode %d speed %.1f want %.1f | feed %s cruise %.0f aim %.0f m"
-                " | body mission %d cruise %d siren %d | felony %.0f known %d seen %d",
+                " | body mission %d cruise %d/%.0f siren %d | felony %.0f known %d seen %d kicks %d",
                 slot, (int)c.mode, c.speed, c.desiredSpeed,
                 c.feedLive ? "on" : "off", c.feedLive ? c.feedCruise : 0.0f,
                 (aim - c.pos).Length(),
-                c.repMission, c.repCruise, c.repSiren ? 1 : 0,
-                page.felony, page.known ? 1 : 0, page.seen ? 1 : 0);
+                c.repMission, c.repCruise, c.repCruiseF, c.repSiren ? 1 : 0,
+                page.felony, page.known ? 1 : 0, page.seen ? 1 : 0, c.kickCount);
         }
     }
 

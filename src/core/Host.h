@@ -85,6 +85,11 @@ struct Host {
     // asking "can I see the driver of THAT car" must not be answered by the
     // car's own bodywork, the way the shot trace already ignores a vehicle
     virtual bool LineBlockedSkipVeh(const Vec3& a, const Vec3& b, int vehRef) { return LineBlocked(a, b); }
+    // the world-only reading: SOLID geometry alone between two points -
+    // buildings and props; vehicles and peds never count as standing in
+    // it. The cop's corner probes ask this (the plough law): a traffic
+    // car ahead is something to drive through, not a wall to read
+    virtual bool LineBlockedWorld(const Vec3& a, const Vec3& b) { return LineBlocked(a, b); }
     virtual bool WaterLevel(const Vec3& at, float* level) { return false; }  // its own water (sea, pools) at that spot
     virtual bool FlammableUnder(const Int3& c) { return false; }             // bushes, dry grass under the cell
     // earth of its ground under a point (sand too when asked); *z: how high it is
@@ -194,6 +199,12 @@ struct Host {
         int status = -1;          // the host's eEntityStatus, raw
         int mission = -1;         // the autopilot's eCarMission, raw
         int cruise = 0;           // the autopilot's cruise setting, raw
+        // the autopilot's traffic-speed cap read back beside it (the
+        // 5x update): the cruise char above is a narrow field and
+        // saturates at its width under a 5x feed; this float is the
+        // field that can hold the true ask, and the unit line prints
+        // both landings so the clipping is measured, not guessed
+        float cruiseF = 0.0f;
         bool driverInVehicle = false;
     };
     // Stand the body up at `at` facing `headingDeg`, its nose turned toward
@@ -248,6 +259,19 @@ struct Host {
     // the way the spawn does and forgets its mirror bookkeeping, so the
     // next feed re-arms from clean. Nothing in play ever calls this.
     virtual void CopBodyPlace(int veh, const Vec3& at, float headingDeg) {}
+    // ---- the momentum channel (the 5x update): the core owns the law
+    // (Cop.cpp prices the throw off the contact's closing speed, caps
+    // it, and aims it); the host only displays it. KickVehicle adds dv
+    // (m/s) to the named vehicle's velocity and yawRate (rad/s) to its
+    // spin - veh is the host's own number for the vehicle, the same
+    // numbers PlayerVehicle and the decoy spawns hand out; a number
+    // that names nothing is ignored. KickPed does the same for a man
+    // on foot: ped 0 is the player himself, any other number is a
+    // decoy ped's. What the host's physics then does with a thrown
+    // car or man (slide, roll, ragdoll) is the host's own business,
+    // exactly like a collision it resolved itself.
+    virtual void KickVehicle(int veh, const Vec3& dv, float yawRate) {}
+    virtual void KickPed(int ped, const Vec3& dv) {}
     // ---- the /coptest decoys: plain host bodies the force is graded
     // against, so one session can answer what a night of free play used
     // to answer one defect at a time. A decoy car is an ordinary civilian

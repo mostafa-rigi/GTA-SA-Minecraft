@@ -106,7 +106,9 @@ struct CopState {
                                // host body's health - the bridge displays
                                // the book on the body, the book rules)
     float totalDamage = 0.0f;  // his damage book, the original's own scale
-                               // (BCOLLIDE.C pricing): retires past 27000
+                               // (BCOLLIDE.C pricing): retires past 135000
+                               // (the 5x update deepened the line; the
+                               // prices that fill it did not move)
     float playerBookDamage = 0.0f; // of that book, the part the PLAYER
                                // priced (his gunfire at the anchor, and an
                                // impact the same report ties to his ram):
@@ -168,7 +170,18 @@ struct CopState {
     // own words next to the brain's intent
     int repMission = -1;
     int repCruise = 0;
+    float repCruiseF = 0.0f;   // the 5x update: the traffic-speed cap
+                               // read back beside the narrow cruise char
+                               // (the char saturates; the float lands
+                               // whole - the unit line prints both)
     bool repSiren = false;
+    // the momentum channel's bookkeeping (the 5x update): one throw
+    // per approach - the latch re-arms only when the centres have
+    // separated past the contact band + 3 m, so a single pass can
+    // never machine-gun throws; the count is the channel's receipt,
+    // graded by the sims and printed on the unit line
+    bool kickArmed = true;
+    int kickCount = 0;
     float unitLogT = 0.0f;     // the per-second unit line's clock
     bool frontLClear = true, frontRClear = true; // bumper-corner probes
     float probeT = 0.0f;
@@ -304,5 +317,21 @@ float CopProfilePedal(float pedal);
 // gain's law in the sims. -1 restores the decoded row. Nothing else in
 // the build calls this.
 void CopProfileOverrideForTest(int powerRatio);
+
+// The momentum channel's arithmetic (the 5x update), exposed for the
+// sims - the live path in CopTick calls this same function, so the
+// pins grade the shipping law, not a copy of it. Given the cop's
+// velocity, the prey's velocity and the prey centre's offset from the
+// cop's centre (all m/s and m), returns the velocity the prey gains:
+// along the cop's own travel direction, sized at the transfer fraction
+// of the closing speed, ramped in between the tap threshold and full
+// contact, and capped at the channel's stated cap. *spinOut receives
+// the yaw rate (rad/s) a flank hit adds, signed by which side of the
+// cop's line of travel the prey's centre sits on (zero square-on);
+// *closingOut receives the closing speed the price was read off. A
+// contact under the tap threshold - or a cop barely moving - returns
+// the zero vector: parked taps stay taps.
+Vec3 CopKickCompute(const Vec3& copVel, const Vec3& preyVel, const Vec3& rel,
+                    float* spinOut, float* closingOut);
 
 } // namespace mc
