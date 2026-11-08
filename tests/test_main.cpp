@@ -1,6 +1,7 @@
 // Offline checks of the pure game logic (recipes, cooking, tables, movement, blocks, loose things, arm's length, survival, controls, game state, world file). Not part of the mod.
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -14281,6 +14282,49 @@ static void TestPoModel() {
             ok = par[i] >= -1 && par[i] < i;
         CHECK(ok, "every bone's parent precedes it (the loader's invariant)");
     }
+    // the engine-path skinning gate (fix round): the C++ loader + skinning
+    // must reproduce the reference skinning of the source data - the f16
+    // machinery the known-good renders used; tools/po_skin_check.py holds
+    // the full vertex-for-vertex diff (max 2.8 mm on the 30 fps bake).
+    // Pinned here: bone world origins and two skinned vertices at idle
+    // frame 0 and attack frame 44, to 5 mm - a convention error (palette
+    // order, IBM layout, composition order, bind application) misses by
+    // centimetres to metres; int16 quantisation costs ~1 mm.
+    {
+        struct Pin { int bone; float x, y, z; };
+        const Pin idlePins[] = { { 0, -0.02776f, -0.84413f, 0.89530f }, { 26, 0.02104f, 0.00000f, 0.43670f },
+                                 { 60, -0.57378f, 0.81710f, 0.92798f }, { 90, -0.04404f, -0.34890f, 1.19901f },
+                                 { 107, -0.06847f, -0.00650f, 0.64110f } };
+        const Pin atkPins[] = { { 0, -0.02776f, -0.84413f, 0.89530f }, { 26, 0.03858f, 0.00000f, 0.44011f },
+                                { 60, -0.88501f, 0.16181f, 0.94055f }, { 90, -0.14380f, 0.18859f, 1.19297f },
+                                { 107, -0.08044f, 0.02061f, 0.68271f } };
+        std::vector<float> w12, s12;
+        std::vector<Vec3> pos;
+        PoDrawState stIdle;
+        stIdle.category = PP_IDLE;
+        stIdle.time = 0.0f;
+        CHECK(PoDebugSkin(stIdle, w12, s12, pos), "the harness composes idle frame 0");
+        bool ok = pos.size() == 36318;
+        for (const Pin& p : idlePins)
+            ok = ok && std::fabs(w12[(size_t)p.bone * 12 + 9] - p.x) < 0.005f &&
+                 std::fabs(w12[(size_t)p.bone * 12 + 10] - p.y) < 0.005f &&
+                 std::fabs(w12[(size_t)p.bone * 12 + 11] - p.z) < 0.005f;
+        ok = ok && (pos[0] - Vec3(-0.61087f, 0.89130f, 0.89676f)).Length() < 0.005f &&
+             (pos[18000] - Vec3(0.06332f, -0.34272f, 0.40187f)).Length() < 0.005f;
+        CHECK(ok, "engine-path skinning == reference at idle frame 0 (origins + verts, 5 mm)");
+        PoDrawState stAtk;
+        stAtk.category = PP_ATTACK;
+        stAtk.time = 44.0f / 60.0f;
+        CHECK(PoDebugSkin(stAtk, w12, s12, pos), "the harness composes attack frame 44");
+        ok = pos.size() == 36318;
+        for (const Pin& p : atkPins)
+            ok = ok && std::fabs(w12[(size_t)p.bone * 12 + 9] - p.x) < 0.005f &&
+                 std::fabs(w12[(size_t)p.bone * 12 + 10] - p.y) < 0.005f &&
+                 std::fabs(w12[(size_t)p.bone * 12 + 11] - p.z) < 0.005f;
+        ok = ok && (pos[0] - Vec3(-0.96530f, 0.17117f, 0.90418f)).Length() < 0.005f &&
+             (pos[18000] - Vec3(0.05263f, -0.35258f, 0.49085f)).Length() < 0.005f;
+        CHECK(ok, "engine-path skinning == reference at attack frame 44 (origins + verts, 5 mm)");
+    }
     CHECK(PoStride(PP_WALK) > 0.1f && PoStride(PP_WALK) < 1.0f, "his walk stride is a real step (%.3f m)", PoStride(PP_WALK));
     CHECK(PoStride(PP_RUN) > PoStride(PP_WALK), "and his run stride is longer (%.3f m)", PoStride(PP_RUN));
 
@@ -14312,6 +14356,75 @@ static void TestPoModel() {
         float mx = 0, lo = 0, hi = 0;
         CHECK(PoRenderExtents(st, &mx, &lo, &hi) && !PoPoseExplodes(st),
               "cat %d mid-fade composes as one panda", cat);
+    }
+
+    // ---- the engine-path harness (Po fix round): when MCSA_PO_DUMP names a
+    // directory, dump the renderer's own composed world/skin matrices and
+    // skinned vertices for probe states landing exactly on baked frames of
+    // the CURRENT shipped file, plus a 240 Hz local-pose sweep of idle and
+    // walk for the smoothness check. tools/po_skin_check.py diffs them
+    // against the reference skinning of the source data. Gated so the
+    // suite's normal output is untouched.
+    if (const char* dumpDir = std::getenv("MCSA_PO_DUMP")) {
+        struct Probe { const char* name; PoDrawState st; };
+        // probe states land exactly on baked frames of the shipped file
+        // (60 fps bake: state time = source key / 60; walk phase = key/S)
+        PoDrawState pIdle0; pIdle0.category = PP_IDLE; pIdle0.time = 0.0f;
+        PoDrawState pIdle30; pIdle30.category = PP_IDLE; pIdle30.time = 60.0f / 60.0f;
+        PoDrawState pWalk15; pWalk15.category = PP_WALK; pWalk15.gait = 30.0f / 120.0f;
+        PoDrawState pAttack22; pAttack22.category = PP_ATTACK; pAttack22.time = 44.0f / 60.0f;
+        PoDrawState pDie0; pDie0.category = PP_DIE; pDie0.time = 0.0f;
+        const Probe probes[] = { { "idle_f0", pIdle0 }, { "idle_f30", pIdle30 }, { "walk_f15", pWalk15 },
+                                 { "attack_f22", pAttack22 }, { "die_f0", pDie0 } };
+        for (const Probe& pr : probes) {
+            std::vector<float> w12, s12;
+            std::vector<Vec3> pos;
+            if (!PoDebugSkin(pr.st, w12, s12, pos))
+                continue;
+            char path[512];
+            std::snprintf(path, sizeof(path), "%s/po_skin_%s.bin", dumpDir, pr.name);
+            FILE* f = std::fopen(path, "wb");
+            if (!f)
+                continue;
+            const uint32_t nb = (uint32_t)PoBoneCount(), nv = (uint32_t)pos.size();
+            std::fwrite(&nb, 4, 1, f);
+            std::fwrite(&nv, 4, 1, f);
+            std::fwrite(w12.data(), 4, w12.size(), f);
+            std::fwrite(s12.data(), 4, s12.size(), f);
+            for (const Vec3& v : pos) {
+                const float xyz[3] = { v.x, v.y, v.z };
+                std::fwrite(xyz, 4, 3, f);
+            }
+            std::fclose(f);
+        }
+        // the smoothness sweep: composed locals at 240 Hz over one cycle of
+        // idle and of walk, so the check can measure per-step joint deltas
+        for (int cat = 0; cat < 2; ++cat) {
+            const int samples = 480;
+            char path[512];
+            std::snprintf(path, sizeof(path), "%s/po_sweep_%s.bin", dumpDir, cat == 0 ? "idle" : "walk");
+            FILE* f = std::fopen(path, "wb");
+            if (!f)
+                continue;
+            const uint32_t ns = (uint32_t)samples, nb = (uint32_t)PoBoneCount();
+            std::fwrite(&ns, 4, 1, f);
+            std::fwrite(&nb, 4, 1, f);
+            for (int i = 0; i < samples; ++i) {
+                PoDrawState st;
+                st.category = cat == 0 ? PP_IDLE : PP_WALK;
+                const float cyc = (float)i / (float)samples;
+                if (cat == 0)
+                    st.time = cyc * PoPoseDuration(PP_IDLE);
+                else
+                    st.gait = cyc;
+                PoLocal buf[128];
+                if (PoComposeLocals(st, buf, 128))
+                    for (int b = 0; b < PoBoneCount(); ++b)
+                        std::fwrite(buf[b].q.data(), 4, 4, f);
+            }
+            std::fclose(f);
+        }
+        printf("po harness dumps written to %s\n", dumpDir);
     }
 
     // the CleanSA door: Po passes it, a Minecraft mob still does not; and
@@ -14350,6 +14463,16 @@ static void TestPoModel() {
         CHECK(sawRun, "with the player far he runs (ended in cat %d)", gMobs[p].poDraw.category);
         CHECK(closedIn, "and he really closes the distance (%.1f m of %.1f m)",
               d0 - (gMobs[p].pos - far).Length(), d0);
+        // the walk band, held (fix round - step 1's suite never visited
+        // this state): the player keeps 7 m away and Po must WALK
+        bool sawWalk = false;
+        for (int i = 0; i < 120; ++i) {
+            const Vec3 mid = gMobs[p].pos + Vec3(7.0f, 0.0f, 0.0f);
+            MobsTick(0.05f, mid, 0, true);
+            if (gMobs[p].poDraw.category == PP_WALK)
+                sawWalk = true;
+        }
+        CHECK(sawWalk, "at middle distance he walks (ended in cat %d)", gMobs[p].poDraw.category);
         const Vec3 near = gMobs[p].pos + Vec3(1.2f, 0.0f, 0.0f);
         bool sawIdle = false, sawAttack = false;
         for (int i = 0; i < 400; ++i) {
@@ -14361,20 +14484,39 @@ static void TestPoModel() {
         }
         CHECK(sawIdle, "close up he stands with the player");
         CHECK(sawAttack, "and in reach he shows his attack");
-        gMobs[p].hurt = 0.0f; // MobHurt's brief invulnerability window
-        MobHurt(p, 1.0f, near, 0.0f);
-        CHECK(gMobs[p].poHitT > 0.0f, "a landed hit starts his flinch clock");
+        // death through HIS OWN damage door (fix round): the relay the
+        // bridge feeds from his sensor body. Step 1's suite killed him
+        // with a raw MobHurt call - a door the user's guns never had -
+        // which is exactly how "he does not die" shipped.
+        MobPoProxyDamage(p, 100000.0f);
+        CHECK(gMobs[p].death < 0.0f && gMobs[p].health > 300.0f,
+              "one relayed event can never one-shot him (hp %.0f after the cap)", gMobs[p].health);
+        CHECK(gMobs[p].poHitT > 0.0f, "and even the capped hit starts his flinch clock");
         MobsTick(0.05f, near, 0, true);
         CHECK(gMobs[p].poDraw.category == PP_HIT, "and the flinch pose shows (cat %d)", gMobs[p].poDraw.category);
-        gMobs[p].hurt = 0.0f;
-        MobHurt(p, 100000.0f, near, 0.0f);
-        CHECK(gMobs[p].death >= 0.0f, "a fatal blow kills him");
+        int events = 1;
+        while (gMobs[p].death < 0.0f && events < 40) {
+            MobPoProxyDamage(p, 60.0f);
+            ++events;
+        }
+        CHECK(gMobs[p].death >= 0.0f, "sustained relayed fire kills him (%d events)", events);
+        CHECK(events >= 10, "and it took the capped road - ten solid events minimum (%d)", events);
         CHECK(gMobs[p].poDraw.category == PP_DIE, "his own death clip owns the corpse");
         PoDrawState dead = gMobs[p].poDraw;
         dead.time = 0.6f;
         float mx = 0, lo = 0, hi = 0;
         CHECK(PoRenderExtents(dead, &mx, &lo, &hi) && !PoPoseExplodes(dead),
               "the death pose composes as one panda");
+        // the corpse ending is the creatures' shared one: the death
+        // timer runs out, the puff fires and the mob is removed
+        const uint32_t deadId = gMobs[p].id;
+        for (int i = 0; i < 40; ++i)
+            MobsTick(0.05f, near, 0, true);
+        bool stillThere = false;
+        for (const Mob& m : gMobs)
+            if (m.id == deadId)
+                stillThere = true;
+        CHECK(!stillThere, "the shared corpse timer removes him (1 s, like every creature)");
     }
 }
 

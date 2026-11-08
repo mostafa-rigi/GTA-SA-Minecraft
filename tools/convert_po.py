@@ -191,22 +191,112 @@ def main():
     seqs = []
     anim = []  # flat list of (pos3, quat4) per seq-frame-bone, in bake order
     strides = {}
+
+    def nlerp_q(a, b, w):
+        a = np.asarray(a, dtype=float)
+        b = np.asarray(b, dtype=float)
+        if np.dot(a, b) < 0.0:
+            b = -b
+        v = a + (b - a) * w
+        n = np.linalg.norm(v)
+        return v / n if n > 1e-9 else a
+
+    def dev_from_smooth(clip_idx, bone):
+        """Mean angle (deg) between a bone's local track and its own
+        5-key smoothed self - the corruption discriminator: real motion,
+        however fast, tracks its smoothing (tenths of a degree); a
+        mis-sliced track record deviates everywhere, all the time."""
+        la_ = C.make_local_fn(clip_idx, 'F16B1', 'rotvec')
+        S_ = C.SEG[clip_idx]['S']
+        qs = np.array([la_(bone, t) for t in range(0, S_ + 1)], dtype=float)
+        qs = qs / np.linalg.norm(qs, axis=1, keepdims=True)
+        for i in range(1, len(qs)):
+            if np.dot(qs[i], qs[i - 1]) < 0.0:
+                qs[i] = -qs[i]
+        dev = []
+        for i in range(len(qs)):
+            lo_, hi_ = max(0, i - 2), min(len(qs), i + 3)
+            v = qs[lo_:hi_].mean(axis=0)
+            v = v / np.linalg.norm(v)
+            d = abs(float(np.dot(qs[i], v)))
+            dev.append(math.degrees(2 * math.acos(min(1.0, d))))
+        return float(np.mean(dev))
+
+    # Corrupt-track freeze (fix round): in the CALM idle clip, where the
+    # whole body moves by tenths of a degree, five bones' decoded tracks
+    # are convicted corrupt by TWO independent signals - they deviate
+    # from their own smoothed selves by 2.6-21.5 degrees sustained, AND
+    # their world origins teleport ~2 cm per key while a healthy bone's
+    # moves 0.6 mm (old 42: 21.5 deg and 1.8 cm). Those records are
+    # mis-sliced in the decoded animset, not motion. Their bones are
+    # frozen at the bind local rotation in EVERY clip: the honest value
+    # until the tracks are re-decoded (a named later step). The census
+    # is computed here from the idle clip - never hand-picked - and a
+    # bone failing either signal is left alone (old 2 deviates 2.25 deg
+    # but its origin never moves: a subtle rotator, not corruption).
+    def idle_world_step_max(bone):
+        la_ = C.make_local_fn(52, 'F16B1', 'rotvec')
+        pts = [C.world_pos(la_, bone, t) for t in range(0, C.SEG[52]['S'] + 1)]
+        return max(float(np.linalg.norm(np.asarray(pts[i + 1]) - np.asarray(pts[i])))
+                   for i in range(len(pts) - 1))
+
+    FROZEN = sorted(b for b in range(108)
+                    if b not in REPAIRED and dev_from_smooth(52, b) > 2.0
+                    and idle_world_step_max(b) > 0.005)
+    print('corrupt tracks frozen at bind (idle deviation + teleport census):', FROZEN)
+    faded = {}
     for clip_idx, cat, loop in CLIPS:
         la = C.make_local_fn(clip_idx, 'F16B1', 'rotvec')
         S = C.SEG[clip_idx]['S']
-        tags = list(range(0, S + 1, 2))
-        if tags[-1] != S:
-            tags.append(S)
-        for t in tags:
+        # fix round: bake at the clips' NATIVE 60 fps (step 1 took every
+        # second key - 30 fps - which halved the motion detail and read as
+        # stiffness in game). Loop clips drop the duplicate endpoint key:
+        # frame k is the source key k and the period is S/60 exactly, so
+        # the loader's wrap blend crosses the seam over one native step.
+        tags = list(range(0, S)) if loop else list(range(0, S + 1))
+        # per-bone key lists first, so the two declared repairs below act
+        # on whole tracks, not on frames streaming past
+        keys = {}
+        for b in range(108):
+            if b in FROZEN:
+                keys[b] = [np.asarray(C.q0[b], dtype=float)] * len(tags)
+            else:
+                keys[b] = [np.asarray(la(b, t), dtype=float) for t in tags]
+        if loop:
+            # seam fade: these are cinematic clips forced to loop; several
+            # healthy bones end 20-178 degrees away from their start, and
+            # the loader's wrap blend would snap that whole error across
+            # one step at every cycle. The last 12 keys are eased toward
+            # frame 0 so the wrap crosses only a twelfth of the residue
+            # per step. Declared here and in the report; the real cure is
+            # the multiplayer animset's true gait clips (a later step).
+            K = 12
+            faded_here = []
+            for b in range(108):
+                if b in FROZEN or b in REPAIRED:
+                    continue
+                q_end = np.asarray(la(b, S), dtype=float)
+                q0v = keys[b][0]
+                d = abs(float(np.dot(q_end / np.linalg.norm(q_end), q0v / np.linalg.norm(q0v))))
+                closure = math.degrees(2 * math.acos(min(1.0, d)))
+                if closure > 20.0:
+                    faded_here.append(b)
+                    for idx, t in enumerate(tags):
+                        if t >= S - K:
+                            w = (t - (S - K) + 1) / (K + 1)
+                            keys[b][idx] = nlerp_q(keys[b][idx], q0v, w)
+            if faded_here:
+                faded[clip_idx] = faded_here
+                print(f'clip {clip_idx}: seam fade on bones {faded_here}')
+        for fi, t in enumerate(tags):
             frame = []
             for b in range(108):
                 if b in REPAIRED:
                     q = np.array([0.0, 0.0, 0.0, 1.0])
                     tl = REPAIRED[b]
                 else:
-                    q = la(b, t)  # local_at returns the local quaternion only;
-                    # the clips are rotation-only, so the local translation is
-                    # the bind local (C.t_loc) for every frame
+                    q = keys[b][fi]  # the clips are rotation-only, so the
+                    # local translation is the bind local (C.t_loc) always
                     tl = C.t_loc[b]
                 qq = conv_quat(q)
                 tt = s * (M @ np.asarray(tl, dtype=float))
@@ -271,7 +361,9 @@ def main():
     shutil.copy(os.path.join(KFP, 'po_tmr_flipped.png'), os.path.join(outdir, 'po_tex0.png'))
     report = {'po_bin_bytes': len(buf), 'bones': 108, 'verts': nverts, 'tris': ntris,
               'scale': s, 'bind_height_units': height, 'lift': lift,
-              'seqs': seqs, 'strides': {str(k): v for k, v in strides.items()}}
+              'seqs': seqs, 'strides': {str(k): v for k, v in strides.items()},
+              'frozen_corrupt_tracks': FROZEN,
+              'seam_faded': {str(k): v for k, v in faded.items()}}
     json.dump(report, open(os.path.join(outdir, 'po_bake_report.json'), 'w'), indent=1)
     print('wrote', path, len(buf), 'bytes')
 
