@@ -11263,6 +11263,9 @@ struct ForceFakeHost : TestHost {
         Vec3 feedPt;
         float feedCruise = 0.0f;
         bool feedLive = false;
+        // items 36/38: this body is a bike; its driver is out on foot
+        bool bike = false;
+        bool driverOut = false;
     };
     std::map<int, Body> bodies;
     int nextId = 100;
@@ -11290,6 +11293,9 @@ struct ForceFakeHost : TestHost {
     // item 24's staged traffic: civilian cars the core may read as
     // weapons; a sim fills the list, the verb serves it honestly
     std::vector<VehicleInfo> traffic;
+    int bikeSpawns = 0;   // item 36: bike bodies this host has made
+    int bailOrders = 0;   // item 38: bail verbs this host has taken
+    bool lastBailOut = false;
     void NearbyVehicles(const Vec3& centre, float radius,
                         std::vector<VehicleInfo>& out) override {
         for (const VehicleInfo& v : traffic)
@@ -11306,6 +11312,32 @@ struct ForceFakeHost : TestHost {
         lastSpawnDist = Dist2D(at, player);
         spawnPts.push_back(at);
         return id;
+    }
+    // item 36: a bike body is a body in every way the fake grades -
+    // the difference lives in the bridge (a real bike model and no
+    // Chicago mesh), so here it is a body with the flag set
+    int SpawnCopBikeBody(const Vec3& at, float, const Vec3& face) override {
+        Body b;
+        b.pos = at;
+        const Vec3 d = face - at;
+        b.yaw = std::atan2(d.x, d.y);
+        b.bike = true;
+        const int id = nextId++;
+        bodies[id] = b;
+        lastSpawnDist = Dist2D(at, player);
+        spawnPts.push_back(at);
+        ++bikeSpawns;
+        return id;
+    }
+    // item 38: the bail verb moves the fake's driver word; the
+    // report below reads it back, the way the bridge's will
+    void CopBodyBail(int veh, bool out) override {
+        auto it = bodies.find(veh);
+        if (it == bodies.end())
+            return;
+        it->second.driverOut = out;
+        ++bailOrders;
+        lastBailOut = out;
     }
     bool CopBodyReport(int veh, CopBody* out) override {
         auto it = bodies.find(veh);
@@ -11331,6 +11363,8 @@ struct ForceFakeHost : TestHost {
         out->cruise = (int)std::fmin(b.feedCruise, 127.0f); // the mirror
             // model's landing pair (the 5x update, as in the single fake)
         out->cruiseF = b.feedCruise;
+        out->driverOut = b.driverOut; // item 38: the driver stands
+        out->driverPos = b.driverOut ? b.pos + Vec3(2, 0, 0) : b.pos;
         return true;
     }
     void CopBodySetHealth(int veh, float book01) override {
@@ -13225,6 +13259,99 @@ static void TestCopForce() {
                 CHECK(host.kickVehCount > kicks1 && plainDv > 9.0f && plainDv < 14.0f,
                       "item 35: outside the window the same kick is the plain throw (dv %.1f)",
                       plainDv);
+            }
+            // (ar) items 36+38: the motorcycle fields beside a full
+            // ladder and cuts direct at range; a pinned on-foot prey
+            // at the top rungs puts a driver out of his car, and the
+            // prey mounting anything calls him back
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3(0, 20, 0);
+                host.vehicle = 42;
+                stageAnchor(G + Vec3(0, -25, 0), G);
+                gCop.felony = 3000.0f;
+                int bikeSlot = -1;
+                for (float t = 0.0f; t < 20.0f && bikeSlot < 0; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3(0, 20, 0);
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    for (int sl = 0; sl < kMaxCopUnits; ++sl)
+                        if (gCops[sl].bikeUnit && gCops[sl].veh >= 0)
+                            bikeSlot = sl;
+                }
+                CHECK(bikeSlot >= 0 && host.bikeSpawns >= 1,
+                      "item 36: at the top rungs a motorcycle cop fields beside the full ladder (slot %d)",
+                      bikeSlot);
+                if (bikeSlot >= 0) {
+                    // the feed split at 80 m: the bike cuts at the
+                    // man; the car rides the road field's descent
+                    const Vec3 preyPos = G + Vec3(0, 200, 0);
+                    host.player = preyPos;
+                    host.velocity = Vec3(0, 20, 0);
+                    if (ForceFakeHost::Body* b = host.Find(gCops[bikeSlot].veh)) {
+                        b->pos = preyPos + Vec3(0, -80, 0);
+                        b->vel = Vec3(0, 10, 0);
+                        b->yaw = 0.0f;
+                    }
+                    if (ForceFakeHost::Body* b = host.Find(gCop.veh)) {
+                        b->pos = preyPos + Vec3(0, 80, 0);
+                        b->vel = Vec3(0, 10, 0);
+                        b->yaw = 0.0f;
+                    }
+                    CopTick(dt, preyPos);
+                    const float bikeErr = (gCops[bikeSlot].target - preyPos).Length();
+                    const float carErr = (gCop.target - preyPos).Length();
+                    CHECK(bikeErr < 3.0f && carErr > 5.0f,
+                          "item 36: at 80 m the bike's aim is the man himself (%.1f m) while the car rides the descent (%.1f m)",
+                          bikeErr, carErr);
+                }
+            }
+            {
+                CopReset();
+                host.player = G;
+                host.velocity = Vec3();
+                host.vehicle = -1;
+                stageAnchor(G + Vec3(0, -20, 0), G);
+                host.vehicle = -1; // stageAnchor seats him; this
+                                   // staging's prey stands on foot
+                gCop.felony = 3000.0f;
+                for (float t = 0.0f; t < 8.0f && ladderLiving() < 2; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    host.vehicle = -1;
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                }
+                CHECK(ladderLiving() >= 2, "item 38 stage: two units are up");
+                const int bail0 = host.bailOrders;
+                bool bailed = false;
+                for (float t = 0.0f; t < 6.0f && !bailed; t += dt) {
+                    host.player = G;
+                    host.velocity = Vec3();
+                    host.vehicle = -1;
+                    if (ForceFakeHost::Body* b = host.Find(gCops[1].veh)) {
+                        b->pos = G + Vec3(10, 0, 0);
+                        b->vel = Vec3();
+                        b->yaw = -1.5708f; // facing the man
+                    }
+                    CopTick(dt, G);
+                    host.StepAll(dt);
+                    bailed = gCops[1].bailState == 1;
+                }
+                CHECK(bailed && host.bailOrders > bail0,
+                      "item 38: a driver is ordered out against a pinned on-foot prey at the top rungs");
+                CopTick(dt, G);
+                host.StepAll(dt);
+                CHECK(gCops[1].repDriverOut && !gCops[1].feedLive,
+                      "item 38: the report reads the driver out and the car stands parked (feed live %d)",
+                      (int)gCops[1].feedLive);
+                host.vehicle = 42; // he mounts - everybody back in
+                CopTick(dt, G);
+                host.StepAll(dt);
+                CHECK(gCops[1].bailState == 0 && !host.lastBailOut,
+                      "item 38: the prey mounting calls the driver back to his car");
             }
         }
     }

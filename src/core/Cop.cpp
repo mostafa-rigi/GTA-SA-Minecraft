@@ -363,6 +363,7 @@ float sCrashT = 0.0f;     // item 31: the prey just crashed - the
 float sSpdOld = 0.0f;     // the crash witness's older speed sample
 float sSpdAge = 1e9f;     // seconds since that sample was taken
 float sSyncT = 0.0f;      // item 11: the synchronised-hit window
+float sBikeT = 0.0f;      // item 36: the motorcycle's fielding clock
 bool sAirborne = false;   // item 35: the prey's car is in the air
 bool sAirFell = false;    // item 35: ...and has started falling
 float sAirLaunchZ = 0.0f; // item 35: the height he left the ground at
@@ -1502,7 +1503,13 @@ void CopControl(CopState& c, float dt) {
         Vec3 from = c.pos;
         if (std::fabs(pPos.z - c.pos.z) > 4.0f && ((&c - gCops) % 2 == 1))
             from.z = pPos.z;
-        if (sPreyOffRoad) {
+        if (c.bikeUnit && (pPos - c.pos).Length() < 90.0f) {
+            // item 36: at working range a bike does not ride the
+            // road field's descent - it cuts at the man directly,
+            // the way a bike actually hunts (and where a car would
+            // be reading the road ahead, the bike is already coming)
+            target = pPos;
+        } else if (sPreyOffRoad) {
             // item 18: he has left the road - grass, dirt, a car
             // park, the beach. The descent would keep the unit on
             // the graph while he cuts the field; instead the unit
@@ -1766,14 +1773,28 @@ void RestorePage(const PageSnapshot& s) {
     c.fieldOk = s.fieldOk;
 }
 
-bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
+bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block, bool bike = false) {
     PageSnapshot snap;
     const bool keepPage = slot == 0;
     if (keepPage)
         SnapshotPage(&snap);
     Vec3 d = face - at;
     const float heading = std::atan2(d.x, d.y) * 57.29578f;
-    const int veh = TheHost().SpawnCopBody(at, heading, face);
+    // item 36: a bike order asks the host for a bike body first; a
+    // host with no bike in it answers -1 and the order honestly
+    // falls back to a car (logged - the unit is then a car in every
+    // way that matters, and bikeUnit stays false)
+    int veh = -1;
+    bool gotBike = false;
+    if (bike) {
+        veh = TheHost().SpawnCopBikeBody(at, heading, face);
+        if (veh >= 0)
+            gotBike = true;
+        else
+            Log("cop: this host has no bike body - the motorcycle order falls back to a car");
+    }
+    if (veh < 0)
+        veh = TheHost().SpawnCopBody(at, heading, face);
     if (veh < 0)
         return false;
     gCops[slot] = CopState();
@@ -1796,6 +1817,7 @@ bool SpawnUnit(int slot, const Vec3& at, const Vec3& face, bool block) {
         c.paceScale = Clamp(sPreyTopSeen * 1.12f / std::fmax(nowMps, 12.0f), 1.0f, 1.5f);
     }
     c.blockUnit = block;
+    c.bikeUnit = gotBike;
     c.mode = block ? COP_BLOCK : COP_IDLE;
     c.fairStartT = kCopFairStart; // a fresh body is a fresh drive
         // order: the stuck witness waits out its start-up (fix round 5)
@@ -1972,7 +1994,7 @@ int PlaceBlockAt(const Vec3& at, const Vec3& segDir, int maxCars) {
         }
     }
     int placed = 0;
-    for (int slot = kMaxCopCars; slot < kMaxCopUnits && placed + startIdx < maxCars; ++slot) {
+    for (int slot = kMaxCopCars; slot < kMaxCopCars + kMaxBlockCars && placed + startIdx < maxCars; ++slot) {
         if (UnitLiving(gCops[slot]))
             continue;
         const int idx = placed + startIdx;
@@ -2811,6 +2833,7 @@ void CopReset() {
     sSpdOld = 0.0f;
     sSpdAge = 1e9f;
     sSyncT = 0.0f;
+    sBikeT = 0.0f;
     sAirborne = false;
     sAirFell = false;
     sLandValid = false;
@@ -3161,6 +3184,8 @@ void CopTick(float dt, const Vec3& playerPos) {
         c.repCruise = rep.cruise;
         c.repCruiseF = rep.cruiseF;
         c.repSiren = rep.siren;
+        c.repDriverOut = rep.driverOut; // item 38: the bail book's
+        c.repDriverPos = rep.driverPos; // read-back, beside the rest
         // the victim of a hit knows - the original's felony note for
         // being struck never asks for his eyes; the unit's own sight
         // feeds the page's seen flag, whoever of them saw the man.
@@ -3896,6 +3921,52 @@ void CopTick(float dt, const Vec3& playerPos) {
         sRespawnT = 0.0f;
     }
 
+    // item 36: the motorcycle cop - the surrounding force, not the
+    // ladder (the contract files it there, and the ladder's last
+    // slot already belongs to item 4's heavy): at the top rungs,
+    // with the ladder full, one bike is fielded in a free
+    // surrounding slot and hunts as a unit in every law but its
+    // far-mode feed. When the case closes it rides off like any
+    // surplus unit. A 1 s cadence fields and retires it - nothing
+    // here runs per-frame that the ladder does not already run.
+    {
+        bool bikeLives = false;
+        for (int slot = 0; slot < kMaxCopUnits; ++slot)
+            if (gCops[slot].bikeUnit && UnitLiving(gCops[slot]))
+                bikeLives = true;
+        if (bikeLives && page.felony <= kFelonyTrigger) {
+            for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+                CopState& c = gCops[slot];
+                if (c.bikeUnit && UnitLiving(c) && c.mode != COP_LEAVE) {
+                    c.mode = COP_LEAVE;
+                    c.leaveRoute.clear();
+                    c.leaveIdx = 0;
+                    GiveUpPost(c);
+                    Log("cop: the case is over - the motorcycle cop rides off");
+                }
+            }
+        } else if (!bikeLives && wantPursue && page.felony >= 2457.0f &&
+                   livingLadder >= sWanted && sWanted >= 2) {
+            sBikeT += dt;
+            if (sBikeT >= 1.0f) {
+                sBikeT = 0.0f;
+                const int slot = kMaxCopUnits - 1; // the bike's own
+                    // berth, behind the roadblock's four - nothing
+                    // else in the force ever takes it
+                if (!UnitLiving(gCops[slot])) {
+                    Vec3 at;
+                    if (LadderSpawnPoint(preyPos, &at) &&
+                        SpawnUnit(slot, at, preyPos, false, true)) {
+                        gCops[slot].mode = COP_PURSUE;
+                        Log("cop: a motorcycle cop joins the hunt");
+                    }
+                }
+            }
+        } else {
+            sBikeT = 0.0f;
+        }
+    }
+
     // ---- the roadblock chain (NoteFelony's latch + MAIN.C's count)
     if (page.felony <= kBlockArmFelony) {
         sBlockWasLow = true;
@@ -3935,7 +4006,7 @@ void CopTick(float dt, const Vec3& playerPos) {
         if (sCreepT <= 0.0f) {
             sCreepT = 2.0f;
             bool allAsleep = true;
-            for (int slot = kMaxCopCars; slot < kMaxCopUnits; ++slot)
+            for (int slot = kMaxCopCars; slot < kMaxCopCars + kMaxBlockCars; ++slot)
                 if (UnitLiving(gCops[slot]) && gCops[slot].mode != COP_BLOCK)
                     allAsleep = false;
             if (allAsleep && (preyPos - sBlockPoint).Length() > 55.0f) {
@@ -3943,7 +4014,7 @@ void CopTick(float dt, const Vec3& playerPos) {
                 if (BlockRoutePoint(preyPos, BlockAheadFor(gThreat.playerVel.Length()),
                                     &at, &segDir, false) &&
                     (at - sBlockPoint).Length() > 12.0f) {
-                    for (int slot = kMaxCopCars; slot < kMaxCopUnits; ++slot) {
+                    for (int slot = kMaxCopCars; slot < kMaxCopCars + kMaxBlockCars; ++slot) {
                         CopState& c = gCops[slot];
                         if (!UnitLiving(c) || c.mode != COP_BLOCK)
                             continue;
@@ -3979,6 +4050,42 @@ void CopTick(float dt, const Vec3& playerPos) {
         }
     }
 
+    // item 38: at the top rungs the drivers get out and fight. The
+    // order goes to a pursuing car whose prey is on foot, pinned at
+    // arm's length and nearly stopped; while the driver is out his
+    // car stands where it stopped, and the unit's book keeps billing
+    // through the driver channel wherever he stands (the bridge
+    // measures him there - the one-unit law does not care where the
+    // driver is). The return is the prey mounting anything, the
+    // range opening past 60 m, the felony falling under the
+    // trigger, or the unit being stood down. The fight itself is
+    // the bridge's ped work; the core owns the order, the book and
+    // the return.
+    for (int slot = 0; slot < kMaxCopUnits; ++slot) {
+        CopState& c = gCops[slot];
+        if (!UnitLiving(c) || c.blockUnit || c.bikeUnit)
+            continue;
+        if (c.bailState == 0) {
+            if (c.mode == COP_PURSUE && page.felony >= 2457.0f &&
+                !gThreat.playerInVehicle &&
+                (c.pos - preyPos).Length() < 14.0f && c.speed < 2.0f) {
+                TheHost().CopBodyBail(c.veh, true);
+                c.bailState = 1;
+                c.bailT = 0.0f;
+                Log("cop: unit %d's driver is out - he fights on foot now", slot);
+            }
+        } else {
+            c.bailT += dt;
+            if (c.mode != COP_PURSUE || gThreat.playerInVehicle ||
+                (c.pos - preyPos).Length() > 60.0f ||
+                page.felony <= kFelonyTrigger) {
+                TheHost().CopBodyBail(c.veh, false);
+                c.bailState = 0;
+                Log("cop: unit %d's driver is back in his car", slot);
+            }
+        }
+    }
+
     // ---- drive every unit by its mode
     for (int slot = 0; slot < kMaxCopUnits; ++slot) {
         CopState& c = gCops[slot];
@@ -3989,7 +4096,11 @@ void CopTick(float dt, const Vec3& playerPos) {
             SpikeDrive(dt);
             break;
         case COP_PURSUE:
-            if (c.holding)
+            if (c.bailState == 1)
+                StandDrive(c); // item 38: the driver is out - the
+                               // car stands where it stopped, a
+                               // blocker with its door open
+            else if (c.holding)
                 HoldControl(c, dt);
             else
                 CopControl(c, dt);

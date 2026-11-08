@@ -93,7 +93,16 @@ constexpr int kMaxCopCars = 4;
 // the second row staggered behind the first, angled (piece 2 shipped one
 // row and named this follow-up in its report).
 constexpr int kMaxBlockCars = 4;
-constexpr int kMaxCopUnits = kMaxCopCars + kMaxBlockCars;
+// The 39-package's one cap change, made openly: item 36's
+// motorcycle is a ninth body the complete update's force never
+// contemplated, and it cannot steal a roadblock berth (items
+// 9/15/22/30 grade those four) nor a ladder slot (item 4's heavy
+// owns the last one). The force is nine now - the cost is one more
+// body on the host, named in the step report; every loop that
+// means the BLOCK's berths still stops at kMaxCopCars +
+// kMaxBlockCars, and only the hunting scans read all nine.
+constexpr int kMaxBikeUnits = 1;
+constexpr int kMaxCopUnits = kMaxCopCars + kMaxBlockCars + kMaxBikeUnits;
 
 struct CopState {
     CopMode mode = COP_NONE;
