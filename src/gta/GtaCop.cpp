@@ -1039,7 +1039,6 @@ void GtaNearbyVehicles(const Vec3& centre, float radius, std::vector<Host::Vehic
         out.push_back(info);
     }
 }
-}
 
 bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     CopBodyState* bp = FindBody(veh);
