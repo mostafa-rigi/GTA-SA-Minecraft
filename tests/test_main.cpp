@@ -14217,6 +14217,167 @@ static void TestCopCarModel() {
           "his last radio phrase is file row 545");
 }
 
+// ---- Po (Kung Fu Panda, step 1): his real model, found in the repo next to
+// the soldier's (the game reads its copy from the MinecraftSA\po folder; the
+// tests read the converter's output, po/po.bin + po/po_tex0.png)
+static const char* PoBinPath() {
+    static const char* paths[] = { "po/po.bin", "../po/po.bin", "../../po/po.bin", "../../../po/po.bin" };
+    for (const char* p : paths) {
+        FILE* f = std::fopen(p, "rb");
+        if (f) {
+            std::fclose(f);
+            return p;
+        }
+    }
+    return nullptr;
+}
+
+static bool LoadPoBinFromRepo() {
+    const char* p = PoBinPath();
+    if (!p)
+        return false;
+    FILE* f = std::fopen(p, "rb");
+    std::fseek(f, 0, SEEK_END);
+    const long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<unsigned char> bytes((size_t)std::max<long>(n, 0));
+    const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    std::fclose(f);
+    return ok && LoadPoModel(bytes.data(), bytes.size());
+}
+
+// Po step 1: the file, the no-fake gate, the six wired clips measured off
+// the converted file, the CleanSA door, and the minimal follower brain.
+static void TestPoModel() {
+    TestHost host;
+    SetHost(&host);
+    McsaSrand(777);
+
+    // the law, same as the soldier's: no model file, no Po - and nothing drawn
+    {
+        WideStage();
+        UnloadPoModel();
+        CHECK(!PoModelReady(), "Po's model can be unloaded");
+        CHECK(SpawnMob(MOB_PO, Vec3(3.5f, 0.5f, 10.0f), true) < 0,
+              "without po.bin Po refuses to spawn");
+        RecordSink sink;
+        SetModelSink(&sink);
+        sink.Reset();
+        MobAnim a;
+        a.po.category = PP_IDLE;
+        DrawMob(MOB_PO, EntityPose(Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 0, 1), Vec3(0, 1, 0), 1.0f),
+                a, 1.0f, 1.0f, 1.0f, 1.0f);
+        CHECK(sink.quads[0] == 0 && sink.quads[1] == 0, "and nothing at all is drawn for him (%d quads)", sink.quads[0]);
+        CHECK(LoadPoBinFromRepo() && PoModelReady(), "po.bin loads back from the repo file");
+    }
+
+    // the shipped file's pins: his full 108-bone skeleton and his six clips
+    CHECK(PoBoneCount() == 108, "the shipped po.bin carries Po's 108 bones (got %d)", PoBoneCount());
+    CHECK(PoSequenceCount() == 6, "and his six step-1 sequences (got %d)", PoSequenceCount());
+    {
+        const int* par = PoBoneParents();
+        bool ok = par != nullptr;
+        for (int i = 0; ok && i < PoBoneCount(); ++i)
+            ok = par[i] >= -1 && par[i] < i;
+        CHECK(ok, "every bone's parent precedes it (the loader's invariant)");
+    }
+    CHECK(PoStride(PP_WALK) > 0.1f && PoStride(PP_WALK) < 1.0f, "his walk stride is a real step (%.3f m)", PoStride(PP_WALK));
+    CHECK(PoStride(PP_RUN) > PoStride(PP_WALK), "and his run stride is longer (%.3f m)", PoStride(PP_RUN));
+
+    // every wired clip composes inside the render watchdog at every phase,
+    // plain and mid-fade - the offline half of "he never explodes on screen"
+    for (int cat = 0; cat < 6; ++cat) {
+        const float dur = PoPoseDuration(cat);
+        CHECK(dur > 0.05f, "clip category %d has a real duration (%.2f s)", cat, dur);
+        for (float tt = 0.0f; tt <= dur + 0.001f; tt += dur / 7.0f) {
+            PoDrawState st;
+            st.category = cat;
+            st.time = tt;
+            st.gait = tt;
+            float mx = 0, lo = 0, hi = 0;
+            CHECK(PoRenderExtents(st, &mx, &lo, &hi), "cat %d at %.2f s composes finite", cat, tt);
+            CHECK(mx <= kPoWatchdogRadius && lo >= kPoWatchdogLoZ && hi <= kPoWatchdogHiZ,
+                  "cat %d at %.2f s stays a panda (radial %.2f, z %.2f..%.2f)", cat, tt, mx, lo, hi);
+            CHECK(!PoPoseExplodes(st), "cat %d at %.2f s does not trip the watchdog", cat, tt);
+        }
+        PoDrawState st;
+        st.category = cat;
+        st.time = dur * 0.5f;
+        st.gait = dur * 0.5f;
+        PoDrawState idle;
+        CHECK(PoComposeLocals(idle, st.prevLocals.data(), 128), "an idle pose composes for the fade source");
+        st.prevBones = PoBoneCount();
+        st.hasPrev = true;
+        st.fade = 0.5f;
+        float mx = 0, lo = 0, hi = 0;
+        CHECK(PoRenderExtents(st, &mx, &lo, &hi) && !PoPoseExplodes(st),
+              "cat %d mid-fade composes as one panda", cat);
+    }
+
+    // the CleanSA door: Po passes it, a Minecraft mob still does not; and
+    // there is only ever one Po - a second summon re-anchors the same slot
+    {
+        WideStage();
+        gRules.cleanSA = true;
+        const int p = SpawnMob(MOB_PO, Vec3(3.5f, 0.5f, 10.0f), true);
+        CHECK(p >= 0, "Po spawns under CleanSA");
+        CHECK(SpawnMob(MOB_ZOMBIE, Vec3(6.5f, 0.5f, 10.0f), true) < 0,
+              "a Minecraft mob is still refused under CleanSA");
+        const uint32_t id0 = gMobs[p].id;
+        const size_t n0 = gMobs.size();
+        const int p2 = SpawnMob(MOB_PO, Vec3(6.5f, 0.5f, 10.0f), true);
+        CHECK(p2 == p && gMobs.size() == n0 && gMobs[p].id == id0,
+              "a second summon re-anchors the same Po, never a twin");
+        gRules.cleanSA = false;
+    }
+
+    // the brain: he comes to the player (running from far), stands with him
+    // close, shows his attack, flinches when hit, and dies into his own clip
+    {
+        WideStage();
+        const int p = SpawnMob(MOB_PO, Vec3(0.5f, 0.5f, 10.0f), false);
+        CHECK(p >= 0, "Po spawns for the brain walk");
+        const Vec3 far(30.5f, 0.5f, 10.0f);
+        const float d0 = (gMobs[p].pos - far).Length();
+        bool sawRun = false, closedIn = false;
+        for (int i = 0; i < 240; ++i) {
+            MobsTick(0.05f, far, 0, true);
+            if (gMobs[p].poDraw.category == PP_RUN)
+                sawRun = true;
+            if ((gMobs[p].pos - far).Length() < d0 - 3.0f)
+                closedIn = true;
+        }
+        CHECK(sawRun, "with the player far he runs (ended in cat %d)", gMobs[p].poDraw.category);
+        CHECK(closedIn, "and he really closes the distance (%.1f m of %.1f m)",
+              d0 - (gMobs[p].pos - far).Length(), d0);
+        const Vec3 near = gMobs[p].pos + Vec3(1.2f, 0.0f, 0.0f);
+        bool sawIdle = false, sawAttack = false;
+        for (int i = 0; i < 400; ++i) {
+            MobsTick(0.05f, near, 0, true);
+            if (gMobs[p].poDraw.category == PP_IDLE)
+                sawIdle = true;
+            if (gMobs[p].poDraw.category == PP_ATTACK)
+                sawAttack = true;
+        }
+        CHECK(sawIdle, "close up he stands with the player");
+        CHECK(sawAttack, "and in reach he shows his attack");
+        gMobs[p].hurt = 0.0f; // MobHurt's brief invulnerability window
+        MobHurt(p, 1.0f, near, 0.0f);
+        CHECK(gMobs[p].poHitT > 0.0f, "a landed hit starts his flinch clock");
+        MobsTick(0.05f, near, 0, true);
+        CHECK(gMobs[p].poDraw.category == PP_HIT, "and the flinch pose shows (cat %d)", gMobs[p].poDraw.category);
+        gMobs[p].hurt = 0.0f;
+        MobHurt(p, 100000.0f, near, 0.0f);
+        CHECK(gMobs[p].death >= 0.0f, "a fatal blow kills him");
+        CHECK(gMobs[p].poDraw.category == PP_DIE, "his own death clip owns the corpse");
+        PoDrawState dead = gMobs[p].poDraw;
+        dead.time = 0.6f;
+        float mx = 0, lo = 0, hi = 0;
+        CHECK(PoRenderExtents(dead, &mx, &lo, &hi) && !PoPoseExplodes(dead),
+              "the death pose composes as one panda");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1)
         return InspectWorldFile(argv[1]);
@@ -14331,6 +14492,10 @@ int main(int argc, char** argv) {
         printf("soldier model loaded from %s\n", SoldierBinPath());
     else
         printf("WARNING: cs_soldier.bin not found from here - the soldier tests will fail loudly\n");
+    if (LoadPoBinFromRepo())
+        printf("po model loaded from %s\n", PoBinPath());
+    else
+        printf("WARNING: po.bin not found from here - the Po tests will fail loudly\n");
 
     TestPhysics();
     TestBlockRules();
@@ -14360,6 +14525,7 @@ int main(int argc, char** argv) {
     TestModels();
     TestSoldierRealAsset();
     TestSoldierModel();
+    TestPoModel();
     TestSoldierAimFix();
     TestBoss();
     TestSmartPack();
