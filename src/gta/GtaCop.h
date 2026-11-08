@@ -1,17 +1,24 @@
 #pragma once
 // The GTA side of the Driver 2 cop (src/core/Cop.h has the brain itself):
 // one real police car of the game's (model 596) and one contained driver
-// of the game's own cop kind sitting in it, driven by pedal and steering
-// fields the core writes every tick - and, since fix round 4, by the
-// drive intent the bridge mirrors into the car's own autopilot, the
-// channel this host's AI cars are actually driven through (the
-// conviction and the evidence chain are in DRIVER2-STEP3-fa.md). Since piece 3 the 596 is only the
-// body UNDERNEATH: his own Chicago shape (cop_car.bin from his disc) is
-// drawn over it through the ModelSink and the host car + driver are
-// hidden while the whole body set is loaded - what collides, drives
-// and burns is still the 596; what the eye sees is him. Thin, like
-// every bridge file: bodies and field writes live here, decisions
-// never do.
+// of the game's own cop kind sitting in it, driven by the core's pedal
+// and steering words. The channel those words travel has been convicted
+// and rebuilt twice: fix round 4's autopilot mirror (retired by the root
+// step - the traffic autopilot's arrive-and-stop was the last-metres
+// disease), then the root step's plain field writes from the
+// gameProcessEvent callback (convicted live on 2026-11-08: the game's
+// ProcessAI recomputes the fields inside the frame's processing,
+// before physics, so a callback write is a letter to a house already
+// emptied). Since the channel repair, the bridge claims the class
+// vtable's ProcessAI slot itself and stamps the core's words at that
+// desk - the last writer before physics, inside the processing. The
+// evidence chain is in DRIVER2-STEP3-fa.md. Since piece 3 the 596 is
+// only the body UNDERNEATH: his own Chicago shape (cop_car.bin from
+// his disc) is drawn over it through the ModelSink and the host car +
+// driver are hidden while the whole body set is loaded - what
+// collides, drives and burns is still the 596; what the eye sees is
+// him. Thin, like every bridge file: bodies and field writes live
+// here, decisions never do.
 
 #include "Host.h"
 

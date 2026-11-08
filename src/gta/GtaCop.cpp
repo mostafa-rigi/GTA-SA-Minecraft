@@ -13,6 +13,9 @@
 #include "eWeaponType.h"                 // item 38: his pistol's word
 #include "CVehicle.h"
 #include "CWorld.h"
+#include "Patch.h" // plugin::patch::SetPointer: the channel repair's
+                   // vtable claim (the SDK's own _override idiom,
+                   // Patch.h:159, with the page protection done)
 #include "common.h"
 #include "extensions/ScriptCommands.h"
 
@@ -81,6 +84,15 @@ struct CopBodyState {
     float gas = 0.0f, brake = 1.0f, steer = 0.0f;
     bool siren = false;
     bool haveCmd = false;
+    // THE CHANNEL REPAIR (2026-11-08): what the ProcessAI replacement
+    // last stamped on this body at the desk physics reads, and how
+    // many frames it has stamped - the report carries them to the
+    // core as the channel's own receipt (hook* beside cmd and body on
+    // the unit line; the /coptest direct act grades the count's
+    // advance). Written only inside the hook, during the game's own
+    // processing; read by the Report after it.
+    float stampGas = 0.0f, stampBrake = 0.0f, stampSteer = 0.0f;
+    unsigned stampCount = 0;
     // THE ROOT STEP (2026-11-08): the autopilot mirror's state is
     // GONE - apFeed/apTarget/apCruise/apArmed/apWritten/apWriteAge/
     // apRescueLogT and the whole arming/rescue machine they served.
@@ -230,6 +242,165 @@ float DisplayHealth(float shown) {
     return 380.0f + 2120.0f * frac;
 }
 
+// =====================================================================
+// THE CHANNEL REPAIR (2026-11-08): the door physics actually reads.
+//
+// THE LIVE CONVICTION it answers (session 14:42-14:45, build
+// f6b626ef): the core commanded steer -0.60 / gas 1.00 / brake 0.00;
+// the fields ApplyCommand writes DID hold those words microseconds
+// after the write (the spike's fresh read-back: gas 1.00, steer
+// -0.60); and the car never moved - speed 0.0, position frozen, spike
+// FAIL at 0.1 m/s, soak freeze 28.2 s, sheet 0/12. The unit line's
+// tick-start report read the SAME fields as gas 0.00 / brake
+// 0.50-1.00. Two readings, one field set, opposite stories - so the
+// fields are RECOMPUTED inside the game's own frame processing,
+// between our gameProcessEvent writes (Events.h: SA's
+// gameProcessEvent is PRIORITY_AFTER at the CGame::Process call site
+// 0x53E981 - after the whole frame's processing, physics included).
+//
+// WHOSE hand recomputes them - the SDK evidence, file by file:
+// - CVehicle.h:240-243, VALIDATE_OFFSETs at 575-578: m_fSteerAngle
+//   0x494, m_fGasPedal 0x49C, m_fBreakPedal 0x4A0 - the fields both
+//   witnesses read; there are not two pedal sets on the vehicle.
+// - CVehicle.h:341 + CVehicle.cpp:75-79: ProcessControlInputs(player
+//   Num) is the PLAYER's writer of those fields (vtable slot 24,
+//   CPad-fed). An AI driver has no pad path to his car - candidate
+//   (c), writing the driver's pad words, has no reader on an AI car.
+// - CAutomobile.h:141 + CAutomobile.cpp:18-22: CAutomobile::
+//   ProcessAI(uint&) - vtable slot 66 - is the AI car's control
+//   writer: it computes the pedal words from the car's CAutoPilot
+//   (CAutoPilot.h: mission, cruise, destination) inside the
+//   vehicle's own control pass (CVehicle.h:214 places ProcessControl
+//   as the car's per-frame control entry), which runs BEFORE physics
+//   in the same processing. CBike.cpp:9-11: the bike's ProcessAI is
+//   the same slot 66 on its own table.
+// - The control experiment our own sheet runs every session: the
+//   /coptest DECOY car - same warp seating, same absence of any
+//   drive task on its driver (CTaskComplexCarDrive exists nowhere
+//   in this SDK copy; the warp is CTaskSimpleCarSetPedInAsDriver) -
+//   DRIVES, because GtaDecoyCarDrive arms its autopilot. The cop,
+//   mission forced NONE, does not. The gate is not a task; it is
+//   ProcessAI's output, and at mission NONE that output is the
+//   hold-still stomp the unit line read: gas 0, brake 0.50-1.00
+//   (it brakes a stopped car the way a traffic driver holds one).
+//   Candidate (b) - keep a genuine drive task and overwrite after
+//   it - collapses: the task's words would still land in the
+//   autopilot, and ProcessAI would still speak after them; and the
+//   class to build the task from is absent from the SDK in-tree.
+//
+// THE DOOR (candidate (a), at its sharpest point): claim slot 66
+// itself. The class vtable entry for CAutomobile::ProcessAI (and
+// CBike::ProcessAI for the bike body) is replaced - once, lazily, at
+// the first spawn of each kind, the table read off the fresh body
+// itself so no table address is ever hardcoded - with the function
+// below, following the SDK's own vtable idiom (Patch.h:159's
+// _override macro; the write itself goes through patch::SetPointer
+// so the page protection is handled, and the landing is read back
+// and logged). For a body of OURS the replacement stamps the core's
+// stored command onto the fields and returns WITHOUT running the
+// original: nothing recomputes the words afterwards, and physics -
+// later in the same processing - reads ours. For every other
+// vehicle it forwards to the saved original untouched. A body whose
+// core has given no order yet forwards too: the channel opens with
+// the first command, and before it the body is simply parked.
+// The patch is never lifted: session resets forget bodies, and a
+// table whose every call forwards is the game's own behaviour.
+// =====================================================================
+constexpr int kProcessAISlot = 66; // CAutomobile.cpp:21 / CBike.cpp:11
+void** sCarVtable = nullptr;       // read off our first car body
+void** sBikeVtable = nullptr;      // read off our first bike body
+void* sCarAIOrig = nullptr;        // the slot's saved originals
+void* sBikeAIOrig = nullptr;
+bool sCarChannelDone = false;      // claim attempted (once, either way)
+bool sBikeChannelDone = false;
+
+CopBodyState* FindBodyByPointer(CVehicle* veh) {
+    if (!veh)
+        return nullptr;
+    for (int i = 0; i < kMaxCopUnits; ++i) {
+        CopBodyState& b = sBodies[i];
+        // the cheap compare first; the pool confirmation second -
+        // a pointer the world has recycled must never match a body
+        // whose car is gone (the retire paths forget the body, and
+        // this is the second lock on the same door)
+        if (b.used && b.veh == veh && LiveVeh(b) == veh)
+            return &b;
+    }
+    return nullptr;
+}
+
+// the stamp itself: the drive surface of ApplyCommand, written at
+// the desk physics reads - the pedal fields, the siren flag, and
+// (once he sits) the parked-car switches open and the mission NONE,
+// so no game system can arm a destination under the brain's pedals.
+// The health display is NOT stamped here: its measure-and-hold pair
+// lives in Pre/Post and keeps its own cadence.
+void StampDrive(CVehicle* veh, CopBodyState& b) {
+    veh->m_fGasPedal = b.gas;
+    veh->m_fBreakPedal = b.brake;
+    veh->m_fSteerAngle = b.steer;
+    veh->bSirenOrAlarm = b.siren;
+    if (b.seated) {
+        veh->bEngineOn = true;
+        veh->bIsHandbrakeOn = false;
+        veh->m_autoPilot.m_nCarMission = MISSION_NONE;
+    }
+    b.stampGas = b.gas;
+    b.stampBrake = b.brake;
+    b.stampSteer = b.steer;
+    ++b.stampCount;
+}
+
+// the replacement, in the SDK's _override shape: a member function
+// whose address takes the slot. __single_inheritance pins the
+// member pointer to the single word the macro's cast assumes, and
+// the static_assert at the claim proves it on this compiler.
+struct __single_inheritance CopAIFn {
+    bool ProcessAI(unsigned int& arg0);
+};
+
+bool CopAIFn::ProcessAI(unsigned int& arg0) {
+    CVehicle* veh = reinterpret_cast<CVehicle*>(this);
+    CopBodyState* b = FindBodyByPointer(veh);
+    if (b && b->haveCmd) {
+        StampDrive(veh, *b);
+        return true;
+    }
+    // not ours (or ours before its first order): the game's own AI
+    // drives him, byte for byte as unpatched - the original called
+    // through the same cast idiom the SDK's own wrappers use
+    void** vt = *reinterpret_cast<void***>(veh);
+    void* orig = vt == sBikeVtable ? sBikeAIOrig : sCarAIOrig;
+    if (!orig)
+        return true;
+    return ((bool(__thiscall*)(CVehicle*, unsigned int&))orig)(veh, arg0);
+}
+
+// claim one class table's slot 66, once, off a live body of the kind
+void EnsureChannel(CVehicle* veh, bool bike) {
+    bool& done = bike ? sBikeChannelDone : sCarChannelDone;
+    if (done)
+        return;
+    done = true; // attempted once: a failure is logged once and the
+                 // stamps' silence grades it, never retried per spawn
+    void** vt = *reinterpret_cast<void***>(veh);
+    void*& orig = bike ? sBikeAIOrig : sCarAIOrig;
+    void*& savedVt = bike ? sBikeVtable : sCarVtable;
+    orig = vt[kProcessAISlot];
+    savedVt = vt;
+    auto fn = &CopAIFn::ProcessAI;
+    static_assert(sizeof(fn) == sizeof(void*),
+                  "the ProcessAI replacement must be a one-word member pointer");
+    void* hook = *reinterpret_cast<void**>(&fn);
+    patch::SetPointer((uintptr_t)&vt[kProcessAISlot], hook);
+    const bool landed = vt[kProcessAISlot] == hook;
+    Log("cop channel: the %s ProcessAI desk (vtable slot %d) %s - original %p saved;"
+        " the brain stamps at the desk physics reads from here",
+        bike ? "bike" : "car", kProcessAISlot,
+        landed ? "is CLAIMED" : "COULD NOT BE CLAIMED - the direct channel stays shut",
+        orig);
+}
+
 // piece 3: silence one body's two loops (siren = slot*2, engine =
 // slot*2+1, the ids CopBodyPost drives)
 void StopBodyLoops(int slot) {
@@ -290,22 +461,22 @@ void ApplyCommand(CVehicle* veh, CopBodyState& b) {
         // the mission is forced to NONE every frame while the driver
         // sits in it, so no game behaviour (the block-player family
         // claimed siren-flagged cars in the 02:00 session) can arm a
-        // destination under the brain's pedals. The frame order that
-        // makes the pedal writes the frame's last word: our cop frame
-        // runs on Events::gameProcessEvent, which the SDK declares
-        // PRIORITY_AFTER at the CGame::Process call sites - inside
-        // it, GtaMobs runs CopBodyPre, then the core's tick (whose
-        // CopBodyDrive lands here at once), then CopBodyPost, which
-        // re-asserts this function for every commanded body. The
-        // game's own processing for the frame is already done by
-        // then; the next frame's physics reads our fields first.
-        // Whether a taskless seated driver with MISSION_NONE still
-        // gets his pedal fields recomputed by ProcessAI next frame
-        // is the one question this build cannot answer from the desk:
-        // the /coptest direct phase grades it live (body mission must
-        // read NONE throughout, and the unit line prints commanded
-        // vs read-back steer/gas every second) - the report names it
-        // as the live session's first verdict to read.
+        // destination under the brain's pedals.
+        // THE CHANNEL REPAIR (2026-11-08) - what these gameProcessEvent
+        // writes are, and are not: the root step claimed this order
+        // made the pedal writes "the frame's last word" and the next
+        // frame's physics would read them first. The 14:44 live
+        // session convicted that claim whole: gas 1.00 stood on the
+        // fields microseconds after this write while the car never
+        // moved, because the game's ProcessAI recomputes the fields
+        // INSIDE the frame's processing, before physics - after our
+        // write, before any reader that matters. These writes stay
+        // (they cost nothing, they keep the siren/engine switches
+        // fresh between control passes, and the Report's tick-start
+        // read-back remains a witness), but they are NOT the channel
+        // anymore: the channel is the ProcessAI replacement above
+        // (StampDrive), which writes the same stored words at the
+        // desk physics reads, inside the processing itself.
         veh->m_autoPilot.m_nCarMission = MISSION_NONE;
     }
     // the displayed health is re-asserted with the pedals: the host's own
@@ -728,6 +899,12 @@ int GtaSpawnCopBodyKind(const Vec3& at, float headingDeg, const Vec3& face, bool
     }
     s.book01 = 1.0f;
     s.lastSetHealth = veh->m_fHealth;
+    // THE CHANNEL REPAIR: with the body's identity proven, claim the
+    // desk this body is driven from - the class table's ProcessAI
+    // slot, once per kind, read off this very body (EnsureChannel
+    // logs the claim and its read-back). From the next processing
+    // pass, this car's control writer is ours.
+    EnsureChannel(veh, bike);
 
     // the driver: the game's own cop kind, pool-built and contained from
     // birth - the boss body's discipline, word for word (PED_EMPTY, senses
@@ -980,6 +1157,16 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     out->cruiseF = v->m_autoPilot.m_fMaxTrafficSpeed; // the float's
         // landing, read back beside the char's (the 5x update: the
         // pair is the clipping's receipt)
+    // THE CHANNEL REPAIR's receipt: what the ProcessAI replacement
+    // last stamped on this body at the desk physics reads, and its
+    // stamp count - beside the tick-start field read-back above,
+    // whose timing the 14:44 session convicted (it reads the fields
+    // after a full frame of game processing; the stamp is taken
+    // inside that processing, at the last writer's desk)
+    out->hookGas = s.stampGas;
+    out->hookBrake = s.stampBrake;
+    out->hookSteer = s.stampSteer;
+    out->hookStamps = (int)s.stampCount;
     if (CPed* drv = LiveDriver(s))
         out->driverInVehicle = drv->bInVehicle;
     // item 38's read-back: out of the car, and where he stands -
@@ -1036,10 +1223,12 @@ bool GtaCopBodyReport(int veh, Host::CopBody* out) {
     if (!s.reportedOnce) {
         s.reportedOnce = true;
         Log("cop spawn: first report for car %d read back gas %.2f brake %.2f steer %.2f"
-            " | engine %d handbrake %d broken %d status %d mission %d cruise %d driver-in %d - the body answers",
+            " | engine %d handbrake %d broken %d status %d mission %d cruise %d driver-in %d"
+            " | channel stamps %d - the body answers",
             s.vehRef, out->gas, out->brake, out->steer,
             out->engineOn ? 1 : 0, out->handbrake ? 1 : 0, out->engineBroken ? 1 : 0,
-            out->status, out->mission, out->cruise, out->driverInVehicle ? 1 : 0);
+            out->status, out->mission, out->cruise, out->driverInVehicle ? 1 : 0,
+            out->hookStamps);
     }
     return true;
 }
