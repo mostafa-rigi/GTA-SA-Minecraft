@@ -10063,6 +10063,25 @@ struct CopFakeHost : TestHost {
         out->hookBrake = cmdBrake;
         out->hookSteer = cmdSteer;
         out->hookStamps = hookStamps;
+        // the census, answered trivially on Host.h's own terms:
+        // host-domain state this body does not simulate - gear 1,
+        // every wheel down and turning at his speed, the revs the
+        // command's size. The suite grades the law; the census is
+        // the real host's instrument and no check reads it here
+        CopBody::Census& cen = out->census;
+        cen.gear = 1;
+        cen.rawSteer = cmdSteer;
+        cen.fakePhysics = 0;
+        cen.tempAction = 0;
+        cen.ctrlFlags = 0;
+        cen.revs = cmdGas;
+        cen.contact = cen.onGround = cen.driveGround = 4;
+        for (int w = 0; w < 4; ++w) {
+            cen.wheelState[w] = 0;
+            cen.susp[w] = 0.85f;
+            cen.wheelSpeed[w] = carSpeed;
+        }
+        cen.burnout = 0;
         return true;
     }
     void CopBodySetHealth(int, float book01) override {
@@ -11475,6 +11494,23 @@ struct ForceFakeHost : TestHost {
         out->hookBrake = b.cmdBrake; // words are the commanded words,
         out->hookSteer = b.cmdSteer; // the count the body's drive calls
         out->hookStamps = b.hookStamps;
+        // the census, trivially, as the single fake's (host-domain
+        // state, not simulated): gear 1, his wheels down - 2 for a
+        // bike body, 4 for a car - turning at his speed
+        CopBody::Census& cen = out->census;
+        cen.gear = 1;
+        cen.rawSteer = b.cmdSteer;
+        cen.fakePhysics = 0;
+        cen.tempAction = 0;
+        cen.ctrlFlags = 0;
+        cen.revs = b.cmdGas;
+        cen.contact = cen.onGround = cen.driveGround = b.bike ? 2 : 4;
+        for (int w = 0; w < 4; ++w) {
+            cen.wheelState[w] = 0;
+            cen.susp[w] = 0.85f;
+            cen.wheelSpeed[w] = b.speed;
+        }
+        cen.burnout = 0;
         out->driverOut = b.driverOut; // item 38: the driver stands
         out->driverPos = b.driverOut ? b.pos + Vec3(2, 0, 0) : b.pos;
         return true;
@@ -13531,6 +13567,35 @@ struct CopTestFakeHost : ForceFakeHost {
             return false;
         *pos = decoyCar.pos;
         *vel = decoyCar.vel;
+        return true;
+    }
+    // the decoy's census for the pursuit act's pair print: the same
+    // trivial host-domain answers as the cop fakes' - this decoy is
+    // driven by MirrorStep off a feed, so its "pedals" are the feed's
+    // plain reading (under way or not) and its mission the goto word
+    // the real decoy's autopilot would carry
+    bool DecoyCensus(int, CopBody* out) override {
+        if (!decoyCar.up)
+            return false;
+        *out = CopBody();
+        out->ok = true;
+        out->pos = decoyCar.pos;
+        out->vel = decoyCar.vel;
+        out->gas = decoyCar.cruise > 0.05f ? 0.8f : 0.0f;
+        out->mission = decoyCar.cruise > 0.05f ? 9 : 0;
+        CopBody::Census& cen = out->census;
+        cen.gear = 1;
+        cen.fakePhysics = 0;
+        cen.tempAction = 0;
+        cen.ctrlFlags = 0;
+        cen.revs = out->gas;
+        cen.contact = cen.onGround = cen.driveGround = 4;
+        for (int w = 0; w < 4; ++w) {
+            cen.wheelState[w] = 0;
+            cen.susp[w] = 0.85f;
+            cen.wheelSpeed[w] = decoyCar.speed;
+        }
+        cen.burnout = 0;
         return true;
     }
     void RetireDecoy(int) override { decoyCar.up = false; }
