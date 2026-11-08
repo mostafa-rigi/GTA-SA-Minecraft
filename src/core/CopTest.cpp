@@ -156,6 +156,18 @@ float sFreeze[kMaxCopUnits] = {};
 float sWorstFreeze = 0.0f;
 int sWorstSlot = -1;
 
+// THE CHAT LAW (2026-11-08, the user's live complaint): opening the
+// chat in free play met a wall of the force's talk. The split is
+// structural from here: Say is CHAT + LOG and is reserved for the
+// sheet's own lines - the run's bookends, the phase announcements,
+// the grades, the YOUR TURN instructions - the bounded set the user
+// runs the sheet by watching. Everything else the force or this
+// machine wants on record travels SayQuiet (LOG ONLY): the run's
+// progress notes, and - by the same law, already their shape - the
+// force's whole ambient voice in Cop.cpp (its Log lines and the
+// radio's logged notes), which never had a chat path and now never
+// can grow one by accident: a line reaches the chat only by being
+// a sheet line through this one funnel.
 void Say(const char* fmt, ...) {
     char buf[256];
     va_list ap;
@@ -164,6 +176,17 @@ void Say(const char* fmt, ...) {
     va_end(ap);
     Log("%s", buf);
     ChatPrint(buf);
+}
+
+// the log-only funnel (the chat law above): same text, same log
+// presence - only the chat copy is withheld
+void SayQuiet(const char* fmt, ...) {
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    Log("%s", buf);
 }
 
 void Grade(const char* name, bool pass, bool counted, const char* fmt, ...) {
@@ -577,7 +600,7 @@ void PhaseDirect(float dt) {
             a.holdArrived = false;
             sDirStage = 1;
             sDirStageT = 0.0f;
-            Say("coptest: direct pace read %.1f m/s - now the settle: a post 38 m ahead, reach and STAY",
+            SayQuiet("coptest: direct pace read %.1f m/s - now the settle: a post 38 m ahead, reach and STAY",
                 sDirPeak);
         }
         return;
@@ -616,7 +639,7 @@ void PhaseDirect(float dt) {
             sDirHoldMax = 0.0f;
         }
         if (sDirHoldT >= 10.0f || sDirStageT > 45.0f) {
-            Say("coptest: direct settle read: held %.0f s, worst excursion %.1f m, entries %d",
+            SayQuiet("coptest: direct settle read: held %.0f s, worst excursion %.1f m, entries %d",
                 sDirHoldT, sDirHoldMax, sDirEntries);
             // stage 2: ram-and-pass. The post is given back, a parked
             // decoy car stands 30 m ahead of the anchor's nose, felony
@@ -768,7 +791,7 @@ void PhasePursuit(float dt) {
         // sheet bug's twin. The arrival MOMENT below still credits
         // the nearest unit: the force arriving is the force arriving
         sStartDist = (gCop.pos - dp).Length();
-        Say("coptest: pursuit open - the anchor starts %.0f m out", sStartDist);
+        SayQuiet("coptest: pursuit open - the anchor starts %.0f m out", sStartDist);
     }
     if (sPursuitOpen) {
         if (d < sMinDist)
@@ -812,6 +835,26 @@ void PhasePursuit(float dt) {
                 ++sSirenN;
                 if (gCops[nearSlot].repSiren)
                     ++sSirenOn;
+            }
+            // THE STATE CENSUS PAIR (the missing-link step): the
+            // anchor's census beside the decoy's, once a second while
+            // the hunt is open, in the one segment shape. The decoy
+            // is a HOST-DRIVEN car covering ground on the game's own
+            // autopilot; the anchor is ours, stamped at the claimed
+            // desk. Log only (the chat law): the pair is an
+            // instrument for the log's reader, not a sheet line -
+            // the field that differs between a moving car and ours
+            // is the missing link, named by this diff in the session
+            // instead of by the next guess
+            char cenA[384];
+            FormatCensus(gCop.repCensus, cenA, sizeof cenA);
+            Host::CopBody dc;
+            if (TheHost().DecoyCensus(sDecoyCar, &dc) && dc.ok) {
+                char cenD[384];
+                FormatCensus(dc.census, cenD, sizeof cenD);
+                Log("coptest census: anchor speed %.1f | %s", gCop.speed, cenA);
+                Log("coptest census: decoy speed %.1f | gas %.2f brake %.2f steer %.2f mission %d | %s",
+                    dv.Length(), dc.gas, dc.brake, dc.steer, dc.mission, cenD);
             }
         }
     }
@@ -1197,7 +1240,7 @@ void PhaseRecovery(float dt) {
             // re-wedging on the route around the block is the far
             // mode's story (and its distance prints at the grade),
             // not this act's bill
-        Say("coptest: the wedged unit is free (%.0f s, %d recoveries)", sPhaseT, recs);
+        SayQuiet("coptest: the wedged unit is free (%.0f s, %d recoveries)", sPhaseT, recs);
     }
     if (sRecFreed && (sPhaseT > sRecFreeT + 20.0f || sPhaseT > 74.0f)) {
         Vec3 cp, cv;

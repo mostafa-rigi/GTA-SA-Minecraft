@@ -231,6 +231,46 @@ struct Host {
         float hookGas = 0.0f;
         float hookBrake = 0.0f;
         int hookStamps = 0;
+        // THE STATE CENSUS (the missing-link step, 2026-11-08): every
+        // drive-state field on the body that plausibly gates or
+        // shapes drive force, read back beside the pedals. The live
+        // session on the channel build proved the desk claim works
+        // (stamps advancing ~65/s, cmd == body == hook at the desk)
+        // and the car STILL never moved - so something the original
+        // ProcessAI maintained, beyond the three pedal words, is a
+        // link between the desk and wheel force. The census is the
+        // instrument that names it: the bridge fills these for a cop
+        // body (here) and for a host-driven decoy (DecoyCensus below)
+        // in the same shape, and the log prints both per second, so
+        // one session diffs a moving car against our stamped car
+        // field by field. The offsets are the plugin-sdk's
+        // VALIDATE_OFFSETs, cited at the bridge's FillCensus. A host
+        // with no such state (the fakes) answers trivially - gear 1,
+        // wheels on the ground - which is stated wherever they do:
+        // the census is host-domain state, and the fakes grade the
+        // law, never the door.
+        struct Census {
+            int gear = -1;          // CVehicle::m_nCurrentGear
+            float gearChange = 0.0f; // CVehicle::m_fGearChangeCount
+            float rawSteer = 0.0f;  // CVehicle::m_fRawSteerAngle
+            float steer2 = 0.0f;    // CVehicle::m_f2ndSteerAngle
+            int fakePhysics = -1;   // CPhysical::m_nFakePhysics
+            int tempAction = -1;    // CAutoPilot::m_nTempAction
+            int ctrlFlags = -1;     // CAutoPilot::m_nCarCtrlFlags
+            unsigned switched = 0;  // CAutoPilot::m_nTimeSwitchedToRealPhysics
+            float revs = 0.0f;      // m_fGasPedalAudioRevs (car/bike)
+            int contact = -1;       // wheels touching (car/bike layouts)
+            int onGround = -1;      // wheels on the ground
+            int driveGround = -1;   // drive wheels on ground last frame
+            int wheelState[4] = {-1, -1, -1, -1}; // eWheelState per wheel
+            float susp[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // car: suspension
+                            // compression; bike: suspension heights
+            float wheelSpeed[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // car: wheel
+                            // speed; bike: wheel angular velocity
+            float brakeCount = 0.0f; // the brake integrator (car/bike)
+            int burnout = -1;       // car: m_bDoingBurnout; bike: brakes-on
+        };
+        Census census;
         // the 39-package's bail-out (item 38): once the core orders the
         // driver out (CopBodyBail), the bridge fights him on foot and
         // reports him here - out of the car, and where he stands. His
@@ -329,6 +369,13 @@ struct Host {
     virtual int SpawnDecoyCar(const Vec3& at, float headingDeg) { return -1; }
     virtual void DecoyCarDrive(int veh, const Vec3& at, float cruiseMps) {}
     virtual bool DecoyReport(int veh, Vec3* pos, Vec3* vel) { return false; }
+    // The state census of a decoy body (the missing-link step): the
+    // same CopBody shape the cop report fills - pedals, mission and
+    // the whole census block - read off a HOST-DRIVEN body, so the
+    // /coptest pursuit act can print a moving car's drive state
+    // beside our stamped anchor's, per second, and the session's diff
+    // is mechanical. False when the host cannot read the body.
+    virtual bool DecoyCensus(int veh, CopBody* out) { return false; }
     virtual void RetireDecoy(int veh) {}
     virtual int SpawnDecoyPed(const Vec3& at) { return -1; }
     // health: the man's current host health (a run-over shows here and in

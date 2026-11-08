@@ -23,6 +23,9 @@
 // body, the damage book and the CopControl1 working state.
 
 #include "Core.h"
+#include "Host.h" // CopBody::Census, the report mirror's type (the
+                  // missing-link step); Host.h includes Core.h and
+                  // never Cop.h, so the order is safe
 
 namespace mc {
 
@@ -199,6 +202,13 @@ struct CopState {
     // the fields held when the tick looked)
     float repHookSteer = 0.0f, repHookGas = 0.0f, repHookBrake = 0.0f;
     int repHookStamps = 0;
+    // the state census mirror (the missing-link step, 2026-11-08):
+    // the last report's census block, whole - the unit line and the
+    // spike line print it through FormatCensus, and the /coptest
+    // pursuit act prints the anchor's beside a host-driven decoy's,
+    // so the field that differs between a moving car and ours is
+    // read off the log, not guessed
+    Host::CopBody::Census repCensus;
     int repMission = -1;
     int repCruise = 0;
     float repCruiseF = 0.0f;
@@ -348,6 +358,13 @@ float CopCutoffDistance();
 // talk is counted, not asserted.
 int CopRadioLinesFired();
 int CopRadioEventMask();
+
+// The state census as one log segment (the missing-link step): the
+// unit line, the spike line and the /coptest pursuit act all print
+// a body's census through this one formatter, so an anchor line and
+// a decoy line are comparable character for character. Writes a
+// NUL-terminated segment (no leading separator) into out.
+void FormatCensus(const Host::CopBody::Census& c, char* out, size_t outSize);
 
 // ---------------------------------------------------------------------------
 // Piece 3: his OWN constants, decoded from the disc - CHICAGO.LCF's

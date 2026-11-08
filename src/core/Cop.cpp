@@ -919,16 +919,23 @@ void SpikeDrive(float dt) {
     if (c.spikeLogT <= 0.0f) {
         c.spikeLogT = 1.0f;
         Host::CopBody rep;
-        if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok)
+        if (TheHost().CopBodyReport(c.veh, &rep) && rep.ok) {
+            // the census rides the spike line too (the missing-link
+            // step): the spike is the first grader, and its per-second
+            // line is where the anchor's drive state is read while
+            // the route runs - same segment shape as the unit line
+            char cen[384];
+            FormatCensus(rep.census, cen, sizeof cen);
             Log("cop spike: pos (%.1f, %.1f, %.1f) speed %.1f m/s | read-back gas %.2f brake %.2f steer %.2f"
                 " | hook gas %.2f brake %.2f steer %.2f n %d"
-                " | engine %d handbrake %d broken %d status %d mission %d cruise %d/%.0f driver-in %d",
+                " | engine %d handbrake %d broken %d status %d mission %d cruise %d/%.0f driver-in %d | %s",
                 rep.pos.x, rep.pos.y, rep.pos.z,
                 rep.vel.x * rep.fwd.x + rep.vel.y * rep.fwd.y + rep.vel.z * rep.fwd.z,
                 rep.gas, rep.brake, rep.steer,
                 rep.hookGas, rep.hookBrake, rep.hookSteer, rep.hookStamps,
                 rep.engineOn ? 1 : 0, rep.handbrake ? 1 : 0, rep.engineBroken ? 1 : 0,
-                rep.status, rep.mission, rep.cruise, rep.cruiseF, rep.driverInVehicle ? 1 : 0);
+                rep.status, rep.mission, rep.cruise, rep.cruiseF, rep.driverInVehicle ? 1 : 0, cen);
+        }
     }
 }
 
@@ -3138,6 +3145,11 @@ void CopTick(float dt, const Vec3& playerPos) {
         c.repHookGas = rep.hookGas;
         c.repHookBrake = rep.hookBrake;
         c.repHookStamps = rep.hookStamps;
+        // the census mirror (the missing-link step): the whole block,
+        // stashed with the rest of the read-backs - the unit line
+        // prints it beside cmd/body/hook, so the session's diff
+        // against a host-driven decoy is read off matching segments
+        c.repCensus = rep.census;
         c.repMission = rep.mission;
         c.repCruise = rep.cruise;
         c.repCruiseF = rep.cruiseF;
@@ -4104,17 +4116,25 @@ void CopTick(float dt, const Vec3& playerPos) {
         c.unitLogT -= dt;
         if (c.unitLogT <= 0.0f) {
             c.unitLogT = 1.0f;
+            // THE MISSING-LINK STEP adds the fourth reading: the
+            // state census, appended whole - the fields this line's
+            // three pedal stories cannot show (gear, wheel contact,
+            // the autopilot's internals), printed for our body in
+            // exactly the shape the /coptest pursuit act prints for
+            // a host-driven decoy, so the diff is mechanical
+            char cen[384];
+            FormatCensus(c.repCensus, cen, sizeof cen);
             Log("cop unit %d: mode %d speed %.1f want %.1f | cmd steer %.2f gas %.2f brake %.2f"
                 " | body steer %.2f gas %.2f brake %.2f | hook steer %.2f gas %.2f brake %.2f n %d"
                 " | mission %d cruise %d/%.0f siren %d"
-                " | aim %.0f m | felony %.0f known %d seen %d kicks %d",
+                " | aim %.0f m | felony %.0f known %d seen %d kicks %d | %s",
                 slot, (int)c.mode, c.speed, c.desiredSpeed,
                 c.cmdSteer, c.gas, c.brake,
                 c.repSteer, c.repGas, c.repBrake,
                 c.repHookSteer, c.repHookGas, c.repHookBrake, c.repHookStamps,
                 c.repMission, c.repCruise, c.repCruiseF, c.repSiren ? 1 : 0,
                 (c.target - c.pos).Length(),
-                page.felony, page.known ? 1 : 0, page.seen ? 1 : 0, c.kickCount);
+                page.felony, page.known ? 1 : 0, page.seen ? 1 : 0, c.kickCount, cen);
         }
     }
 
@@ -4145,6 +4165,28 @@ void CopTick(float dt, const Vec3& playerPos) {
     // the self-test grades the tick just driven (it set the prey and
     // the felony before it, and reads the outcome after it)
     CopTestTick(dt);
+}
+
+// ---- the state census formatter (the missing-link step): one
+// segment shape for every census printing (unit line, spike line,
+// the /coptest pursuit act's anchor/decoy pair), so two lines diff
+// field by field without re-parsing. The field order is the Host.h
+// census block's order: gear state, the raw/second steer words, the
+// fake-physics and autopilot internals, the rev counter; then the
+// wheel-contact triple, the per-wheel states, suspension, wheel
+// speeds, the brake integrator and the burnout/brakes word.
+void FormatCensus(const Host::CopBody::Census& c, char* out, size_t outSize) {
+    std::snprintf(out, outSize,
+                  "cen gear %d gc %.2f raw %.2f st2 %.2f fake %d tmp %d flg %d sw %u rev %.2f"
+                  " | gnd %d/%d/%d ws %d/%d/%d/%d susp %.2f/%.2f/%.2f/%.2f"
+                  " wsp %.1f/%.1f/%.1f/%.1f bc %.2f burn %d",
+                  c.gear, c.gearChange, c.rawSteer, c.steer2,
+                  c.fakePhysics, c.tempAction, c.ctrlFlags, c.switched, c.revs,
+                  c.contact, c.onGround, c.driveGround,
+                  c.wheelState[0], c.wheelState[1], c.wheelState[2], c.wheelState[3],
+                  c.susp[0], c.susp[1], c.susp[2], c.susp[3],
+                  c.wheelSpeed[0], c.wheelSpeed[1], c.wheelSpeed[2], c.wheelSpeed[3],
+                  c.brakeCount, c.burnout);
 }
 
 // ---- piece 3: the decoded profile's accessors -------------------------
