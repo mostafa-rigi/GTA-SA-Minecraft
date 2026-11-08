@@ -106,9 +106,14 @@ struct CopState {
                                // host body's health - the bridge displays
                                // the book on the body, the book rules)
     float totalDamage = 0.0f;  // his damage book, the original's own scale
-                               // (BCOLLIDE.C pricing): retires past 135000
-                               // (the 5x update deepened the line; the
-                               // prices that fill it did not move)
+                               // (BCOLLIDE.C pricing): retires past the
+                               // line below (135000 since the 5x update
+                               // deepened it; the prices that fill it
+                               // did not move)
+    float wreckLine = 0.0f;    // this unit's retirement line: 0 reads
+                               // as the standing 135000; the 39-package's
+                               // heavy top-rung unit (item 4) carries
+                               // 1.5x it in this field, set at spawn
     float playerBookDamage = 0.0f; // of that book, the part the PLAYER
                                // priced (his gunfire at the anchor, and an
                                // impact the same report ties to his ram):
@@ -182,6 +187,53 @@ struct CopState {
     // graded by the sims and printed on the unit line
     bool kickArmed = true;
     int kickCount = 0;
+    // ---- the 39-package's per-unit state (items named at each field)
+    int role = 0;              // item 1: the tactics tick's assignment -
+                               // 0 lead, 1/2 the two flanks, 3 the front
+                               // brake-check; read by CopControl's aim
+    bool bikeUnit = false;     // item 36: this body is the motorcycle
+    bool heavyUnit = false;    // item 4: the ladder's top rung made
+                               // heavy (book line and throw, by law)
+    float paceScale = 1.0f;    // item 26: the counter-pick - a spawn
+                               // priced off the prey's measured top
+                               // speed this pursuit (1.0 until measured)
+    // the HOLD: one mechanism under the ring (7), the ambush (20),
+    // the exit camp (27), the shore line (29), the dead-end mouth
+    // (34), the rear-exit guard (9) and the block creep (2). While
+    // holding, the unit drives to holdPoint and stands there, engine
+    // on, instead of running CopControl; holdArrived latches inside
+    // 2.2 m of the point. The LAWS that set and clear holds live in
+    // Cop.cpp's tactics tick; the drive itself is HoldDrive.
+    Vec3 holdPoint;
+    bool holding = false;
+    bool holdArrived = false;
+    // item 38: the bail-out. 0 = the driver sits in his car (the
+    // standing state); 1 = the core has ordered him out and the bridge
+    // fights him on foot. bailT is his time out; the report's own
+    // words (driverOut/driverPos) are stashed beside the other
+    // read-backs so the unit line can print them.
+    int bailState = 0;
+    float bailT = 0.0f;
+    bool repDriverOut = false;
+    Vec3 repDriverPos;
+    bool sirenCmd = false;     // item 39: the sound law's word for this
+                               // unit this tick - CopControl's drives
+                               // pass it instead of a literal true, so
+                               // stealth, ring-stillness and the parked
+                               // bail car can all sleep the siren
+    float lastRamT = 0.0f;     // item 8: the dying unit's last-ram
+                               // window, seconds left; lastRamDone once
+                               // spent (one per unit per life)
+    bool lastRamDone = false;
+    // item 24/25: a one-tick aim override - the traffic car in his
+    // corridor, or the wounded friend he is shoving - set by the
+    // tactics tick, consumed by CopControl's target choice
+    Vec3 aimOverride;
+    bool aimOverrideOn = false;
+    float wallSide = 0.0f;     // item 13: the probe cadence's reading of
+                               // which side of the prey is walled
+                               // (-1/+1 = a wall within 9 m on that
+                               // side of his line, 0 = both open)
     float unitLogT = 0.0f;     // the per-second unit line's clock
     bool frontLClear = true, frontRClear = true; // bumper-corner probes
     float probeT = 0.0f;
@@ -259,6 +311,13 @@ int CopPursuingCount();
 int CopBlockCount();
 int CopWantedCount();
 float CopCutoffDistance();
+// Item 39's receipts, for the suite and the /coptest sheet: how many
+// radio lines the core has fired since the last reset, and the bitmask
+// of event kinds among them (bit per kind, in the firing function's
+// own order) - his live complaint was "they never talked", so the
+// talk is counted, not asserted.
+int CopRadioLinesFired();
+int CopRadioEventMask();
 
 // ---------------------------------------------------------------------------
 // Piece 3: his OWN constants, decoded from the disc - CHICAGO.LCF's

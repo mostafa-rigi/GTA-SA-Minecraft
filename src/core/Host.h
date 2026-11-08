@@ -206,12 +206,44 @@ struct Host {
         // both landings so the clipping is measured, not guessed
         float cruiseF = 0.0f;
         bool driverInVehicle = false;
+        // the 39-package's bail-out (item 38): once the core orders the
+        // driver out (CopBodyBail), the bridge fights him on foot and
+        // reports him here - out of the car, and where he stands. His
+        // damage keeps arriving through struckDriver above: the measure
+        // in the bridge's Pre runs on the driver wherever he is, which
+        // is what keeps the one-unit book whole across the bail.
+        bool driverOut = false;
+        Vec3 driverPos;
     };
     // Stand the body up at `at` facing `headingDeg`, its nose turned toward
     // `face` (the original's justPinged: a fresh cop starts facing his man).
     // Returns the host's number for the car, or -1 when no body could be made.
     virtual int SpawnCopBody(const Vec3& at, float headingDeg, const Vec3& face) { return -1; }
+    // The 39-package's motorcycle unit (item 36): the same body
+    // contract on the host's own police bike - reports, drives, health
+    // display and retirement all ride the car verbs above by the
+    // returned number; only the standing-up differs. A host with no
+    // bike body answers -1 and the force falls back to a car, logged.
+    virtual int SpawnCopBikeBody(const Vec3& at, float headingDeg, const Vec3& face) { return -1; }
     virtual bool CopBodyReport(int veh, CopBody* out) { return false; }
+    // The bail order (item 38): out=true takes the seated driver out of
+    // the named body and sets him fighting the player on foot (the
+    // bridge's own ped machinery, the soldier's pattern); out=false
+    // warps him back into his seat by the same warp that seated him.
+    // The core owns WHEN; the bridge owns HOW, and reports the result
+    // through CopBody::driverOut/driverPos.
+    virtual void CopBodyBail(int veh, bool out) {}
+    // The traffic around a point (item 24): the host's own vehicles
+    // near `centre`, by the same numbers the kick and pose verbs trade
+    // in. Cop bodies, decoys and the player's own vehicle are NOT
+    // traffic and never appear here. A host that cannot enumerate
+    // answers nothing, and the law that reads this stays silent.
+    struct VehicleInfo {
+        int veh = -1;
+        Vec3 pos;
+        Vec3 vel;
+    };
+    virtual void NearbyVehicles(const Vec3& centre, float radius, std::vector<VehicleInfo>& out) {}
     // gas/brake 0..1, steer -1..1 of full lock. Siren: the host's own siren
     // flag follows `siren` while the body is driven.
     virtual void CopBodyDrive(int veh, float gas, float brake, float steer, bool siren) {}

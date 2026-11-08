@@ -34,6 +34,7 @@ struct Reader {
 // graph plus the per-node flood/segment id and path width the builder kept.
 std::vector<Vec3> vNodes;
 std::vector<uint8_t> vFlood;
+std::vector<uint8_t> vWidth;
 std::vector<uint32_t> vRow;
 std::vector<uint32_t> vTargets;
 
@@ -260,6 +261,7 @@ bool LoadVehicleGraph(const unsigned char* data, size_t size) {
     }
     vNodes.resize(nodes);
     vFlood.resize(nodes);
+    vWidth.resize(nodes);
     for (uint32_t i = 0; i < nodes; ++i) {
         float x = 0, y = 0, z = 0;
         uint8_t flood = 0, width = 0;
@@ -271,6 +273,7 @@ bool LoadVehicleGraph(const unsigned char* data, size_t size) {
         }
         vNodes[i] = Vec3(x, y, z);
         vFlood[i] = flood;
+        vWidth[i] = width;
     }
     vRow.resize(nodes + 1);
     for (uint32_t i = 0; i <= nodes; ++i)
@@ -306,6 +309,7 @@ void VehicleFieldInvalidate(); // defined with the field itself, below
 void UnloadVehicleGraph() {
     vNodes.clear();
     vFlood.clear();
+    vWidth.clear();
     vRow.clear();
     vTargets.clear();
     VehicleFieldInvalidate();
@@ -333,6 +337,30 @@ bool VehicleNodePos(int node, Vec3* out) {
         return false;
     *out = vNodes[node];
     return true;
+}
+
+// The 39-package's graph accessors (additive; the loader above has
+// always read these fields off the file - it used to keep only the
+// flood id and drop the rest on the floor).
+int VehicleNodeDegree(int node) {
+    if (node < 0 || node >= (int)vNodes.size())
+        return -1;
+    return (int)(vRow[node + 1] - vRow[node]);
+}
+
+int VehicleNodeWidth(int node) {
+    if (node < 0 || node >= (int)vWidth.size())
+        return -1;
+    return (int)vWidth[node];
+}
+
+int VehicleNodeEdgeTo(int node, int i) {
+    if (node < 0 || node >= (int)vNodes.size() || i < 0)
+        return -1;
+    const uint32_t e = vRow[node] + (uint32_t)i;
+    if (e >= vRow[node + 1])
+        return -1;
+    return (int)vTargets[e];
 }
 
 bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut) {

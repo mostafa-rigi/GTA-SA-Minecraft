@@ -150,6 +150,16 @@ bool AtlasDoorFamRange(const char* fam, int& first, int& count) {
     return first >= 0;
 }
 
+int AtlasHeavenCount() { return (int)(sizeof(kAtlasHeavens) / sizeof(kAtlasHeavens[0])); }
+
+bool AtlasHeavenGet(int i, const char*& fam, Vec3& entry) {
+    if (i < 0 || i >= AtlasHeavenCount())
+        return false;
+    fam = kAtlasHeavens[i].fam;
+    entry = kAtlasHeavens[i].entry;
+    return true;
+}
+
 bool AtlasHeavenFamAt(const Vec3& pos, float r, const char*& famOut) {
     int best = -1;
     float bd = r * r;

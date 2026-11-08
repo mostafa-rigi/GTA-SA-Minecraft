@@ -52,5 +52,9 @@ bool AtlasDoorFamRange(const char* fam, int& first, int& count); // contiguous r
 // the heaven entries; on a hit, famOut names the family whose street doors
 // he must come back out of.
 bool AtlasHeavenFamAt(const Vec3& pos, float r, const char*& famOut);
+// The heaven records themselves, enumerated (the exit-camping law's
+// staging and its sims need to stand a man inside on purpose).
+int AtlasHeavenCount();
+bool AtlasHeavenGet(int i, const char*& fam, Vec3& entry);
 
 } // namespace mc

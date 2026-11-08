@@ -74,6 +74,19 @@ int VehicleEdgeCount();
 int VehicleNearestNode(const Vec3& at, float maxDist);
 // The world position of one road node. False for a bad index.
 bool VehicleNodePos(int node, Vec3* out);
+// How many directed edges leave one road node (its CSR row length);
+// -1 for a bad index or an unloaded graph. Degree 1 at the end of a
+// chain of degree-2 nodes is a dead end a car can be trapped in.
+int VehicleNodeDegree(int node);
+// The path-width byte the game's own node data carries for this node
+// (kept since the 39-package; the suite's own census is the warning
+// label: 96% of nodes carry 0, so no law may lean on it alone).
+// -1 for a bad index or an unloaded graph.
+int VehicleNodeWidth(int node);
+// The target node of the node's i-th outgoing edge (0-based), or -1
+// when there is no such edge. Lets a caller walk the road the way a
+// driver does, one junction at a time.
+int VehicleNodeEdgeTo(int node, int i);
 // A* over the road graph; fills world waypoints, and (when distOut is given)
 // the route's length in metres. False when no road route exists.
 bool VehicleRoute(const Vec3& from, const Vec3& to, std::vector<Vec3>* out, float* distOut);
