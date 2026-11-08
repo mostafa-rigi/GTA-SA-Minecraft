@@ -66,11 +66,18 @@ float sSpikeSum = 0.0f, sSpikeWt = 0.0f;
 // pursuit
 float sStartDist = 0.0f;
 bool sPursuitOpen = false;
-float sMinDist = 1e9f, sPrevDist = 1e9f, sPrevDistT = 0.0f;
+float sMinDist = 1e9f;
 bool sArrived = false;
 float sArriveT = 0.0f;
 bool sRam = false;
 float sRamClose = 0.0f;
+// the 5x re-grade's approach witness: the fastest 0.25 s closing seen
+// while the nearest pursuer stood in the (3.4, 30] m approach band -
+// at the new paces a contact crossing is a sub-sample event for the
+// old per-0.25 s centre reading, so the ram is graded on the approach
+// that produced a <=3.4 m pass, not on a sample that happened to land
+// inside the contact ball
+float sRamApproach = 0.0f, sWinD = -1.0f, sWinT = 0.0f;
 int sSirenOn = 0, sSirenN = 0;
 float sSampleT = 0.0f;
 // run-over
@@ -363,8 +370,14 @@ void PhaseSpike(float dt) {
     const float disp = (gCop.pos - sSpikeStart).Length();
     if (gCop.spikeDone || sPhaseT > 45.0f) {
         const float avg = sSpikeWt > 1.0f ? sSpikeSum / sSpikeWt : 0.0f;
-        Grade("spike", avg >= 4.0f && disp >= 60.0f, true,
-              "avg speed %.1f m/s over %.0f s, displacement %.0f m (bar: >=4 m/s, >=60 m)",
+        // the 5x re-grade: the spike rides the scaled city pace now
+        // (55/30), so the old 4 m/s bar (set when the spike cruised
+        // 11/6 and the live sheet averaged 4.2) is retired - the bar
+        // stands at 14, six-tenths of the 23.4 the fake world itself
+        // averaged on the first 5x run, and the numbers print beside
+        // it either way
+        Grade("spike", avg >= 14.0f && disp >= 60.0f, true,
+              "avg speed %.1f m/s over %.0f s, displacement %.0f m (bar: >=14 m/s, >=60 m)",
               avg, sSpikeWt, disp);
         GoPhase(PH_PURSUIT);
     } else if (sPhaseT > 90.0f) {
@@ -399,10 +412,12 @@ void PhasePursuit(float dt) {
         CopKnownSeed(); // the dispatcher's call: the car is reported
         sPursuitOpen = false;
         sMinDist = 1e9f;
-        sPrevDist = 1e9f;
-        sPrevDistT = 0.0f;
         sArrived = false;
         sRam = false;
+        sRamClose = 0.0f;
+        sRamApproach = 0.0f;
+        sWinD = -1.0f;
+        sWinT = 0.0f;
         sSirenOn = 0;
         sSirenN = 0;
         sSampleT = 0.0f;
@@ -433,19 +448,33 @@ void PhasePursuit(float dt) {
             sArrived = true;
             sArriveT = sPhaseT;
         }
-        // the ram: contact read off the bodies - centres within 3.4 m
-        // while the gap is closing at 5 m/s or better
-        sPrevDistT += dt;
-        if (sPrevDistT >= 0.25f) {
-            if (sPrevDist < 1e8f) {
-                const float closing = (sPrevDist - d) / sPrevDistT;
-                if (d <= 3.4f && closing >= 5.0f && !sRam) {
-                    sRam = true;
-                    sRamClose = closing;
-                }
+        // the ram, re-graded at the 5x law: contact is still read off
+        // the bodies (a pass through the 3.4 m centre ball), but the
+        // closing is priced on the APPROACH - the fastest 0.25 s
+        // closing window that ends inside the (3.4, 30] m band. At
+        // the new pace rows a unit crosses the contact ball in less
+        // than one old sample period, so the old "a sample inside the
+        // ball at >=5 m/s" reading graded the sampling, not the hit.
+        // The bar is 22 m/s of approach closing: twice the 11 m/s the
+        // live 1x sheet showed, the floor the 5x order names.
+        sWinT += dt;
+        if (sWinT >= 0.25f) {
+            // a window counts when its travel CROSSES the approach
+            // band (starts outside the contact ball, ends at or
+            // inside 30 m): at the fastest closings a whole window is
+            // spent crossing the band, and an ends-in-band rule would
+            // grade the sampling grid instead of the hit
+            if (sWinD > 3.4f && d <= 30.0f) {
+                const float closing = (sWinD - d) / sWinT;
+                if (closing > sRamApproach)
+                    sRamApproach = closing;
             }
-            sPrevDist = d;
-            sPrevDistT = 0.0f;
+            sWinD = d;
+            sWinT = 0.0f;
+        }
+        if (sMinDist <= 3.4f && sRamApproach >= 22.0f && !sRam) {
+            sRam = true;
+            sRamClose = sRamApproach;
         }
         sSampleT += dt;
         if (sSampleT >= 1.0f) {
@@ -459,12 +488,17 @@ void PhasePursuit(float dt) {
     }
     const bool doneEarly = sArrived && sRam && sPhaseT > 12.0f;
     if (doneEarly || sPhaseT > 70.0f) {
-        Grade("arrival", sArrived && sArriveT <= 45.0f && sStartDist >= 50.0f, true,
-              "from %.0f m to %.1f m in %.0f s (bar: <4 m within 45 s from >=50 m)",
+        // the arrival bar is tightened with the pace rows: 15 s -
+        // a third of the old 45, and under the 18 s the live 1x
+        // sheet itself achieved, so the bar bites the real host too;
+        // the fake world arrived in 2 s on the first 5x run, and the
+        // numbers print either way
+        Grade("arrival", sArrived && sArriveT <= 15.0f && sStartDist >= 50.0f, true,
+              "from %.0f m to %.1f m in %.0f s (bar: <4 m within 15 s from >=50 m)",
               sStartDist, sMinDist, sArrived ? sArriveT : sPhaseT);
         Grade("ram", sRam, true,
-              "contact at closing %.1f m/s (bar: centres <=3.4 m at >=5 m/s closing)",
-              sRamClose);
+              "closest centres %.1f m, approach closing %.1f m/s (bar: centres <=3.4 m at >=22 m/s approach)",
+              sMinDist, sRamApproach);
         const float ratio = sSirenN > 0 ? (float)sSirenOn / (float)sSirenN : 0.0f;
         Grade("siren", sSirenN >= 10 && ratio >= 0.95f, true,
               "siren on in %d/%d per-second samples (bar: >=95%%)", sSirenOn, sSirenN);
@@ -523,10 +557,17 @@ void PhaseRunover(float dt) {
     if (d < sRoMin)
         sRoMin = d;
     const float displaced = (pp - sPedStand).Length();
-    const bool hit = hp < sPedHealth0 - 1.0f || displaced > 1.0f;
-    if (sRoMin <= 3.5f || hit) {
+    // THE 5x RE-GRADE (the live sheet's soft spot, named by the user):
+    // a PASS requires the HIT itself - the man thrown off his spot
+    // (>2 m) or hurt. A unit that merely REACHED his neighbourhood
+    // used to pass on the 3.5 m centre reading alone while the man
+    // stood untouched (the 09:02 session: closest 3.5 m, displaced
+    // 0.0 m, health 100/100, PASS). Distance-only is a FAIL now; the
+    // closest-centre number still prints, as evidence, not as a bar.
+    const bool hit = hp < sPedHealth0 - 1.0f || displaced > 2.0f;
+    if (hit) {
         Grade("runover", true, true,
-              "closest centre %.1f m, ped displaced %.1f m, health %.0f of %.0f (bar: <=3.5 m or the hit itself)",
+              "closest centre %.1f m, ped displaced %.1f m, health %.0f of %.0f (bar: the hit itself - displaced >2 m or health lost)",
               sRoMin, displaced, hp, sPedHealth0);
         GoPhase(PH_RECOVERY);
         return;
@@ -545,7 +586,9 @@ void PhaseRunover(float dt) {
         return;
     }
     if (sPhaseT > 35.0f) {
-        Grade("runover", false, true, "never reached him in 35 s (closest %.1f m)", sRoMin);
+        Grade("runover", false, true,
+              "never HIT him in 35 s (closest %.1f m, displaced %.1f m, health %.0f of %.0f)",
+              sRoMin, displaced, hp, sPedHealth0);
         GoPhase(PH_RECOVERY);
     }
 }
@@ -579,18 +622,43 @@ void PhaseRecovery(float dt) {
         bool staged = false;
         Vec3 wallDir, wallAt;
         if (slot >= 0) {
-            const Vec3 base = gCops[slot].pos;
-            for (int i = 0; i < 16 && !staged; ++i) {
-                const float a = (float)i * (6.2831853f / 16.0f);
-                const Vec3 dir(std::sin(a), std::cos(a), 0.0f);
-                for (float probe = 3.0f; probe <= 14.0f; probe += 1.0f) {
-                    const Vec3 a0 = base + dir * (probe - 1.0f);
-                    const Vec3 a1 = base + dir * probe;
-                    if (TheHost().LineBlocked(a0, a1)) {
-                        wallDir = dir;
-                        wallAt = a1;
-                        staged = true;
-                        break;
+            // the probe hunts from a STAND of origins: the unit, the
+            // man's own spot, and a ring of points 5 m around the
+            // man's spot. The 5x update made the stand necessary: a
+            // unit that has just run the man down sits ON him, and a
+            // wall face passing near a probe origin is invisible to
+            // the probe - a radial segment can never straddle a line
+            // that passes through (or within its inner radius of)
+            // its own origin, however many directions it tries (the
+            // first 5x runs' sheets skipped this scenario on exactly
+            // that geometry, from both first origins). The ring
+            // stands the search off the face: its points sit at
+            // line-distances spread across the probe band, so at
+            // least one of them reads the face as an obstacle at
+            // range. The man's spot and its ring are bare points by
+            // now (he is retired) - no body stands there to
+            // false-positive the plain oracle
+            Vec3 origins[10];
+            origins[0] = gCops[slot].pos;
+            origins[1] = pedSpot;
+            for (int k = 0; k < 8; ++k) {
+                const float a = (float)k * (6.2831853f / 8.0f);
+                origins[2 + k] = pedSpot + Vec3(std::sin(a), std::cos(a), 0.0f) * 5.0f;
+            }
+            for (int oi = 0; oi < 10 && !staged; ++oi) {
+                const Vec3 base = origins[oi];
+                for (int i = 0; i < 16 && !staged; ++i) {
+                    const float a = (float)i * (6.2831853f / 16.0f);
+                    const Vec3 dir(std::sin(a), std::cos(a), 0.0f);
+                    for (float probe = 3.0f; probe <= 14.0f; probe += 1.0f) {
+                        const Vec3 a0 = base + dir * (probe - 1.0f);
+                        const Vec3 a1 = base + dir * probe;
+                        if (TheHost().LineBlocked(a0, a1)) {
+                            wallDir = dir;
+                            wallAt = a1;
+                            staged = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -843,9 +911,38 @@ void CopTestAbort() {
 
 bool CopTestRunning() { return sRunning; }
 
+bool AlreadyGraded(const char* name) {
+    for (int i = 0; i < sResultN; ++i)
+        if (std::strcmp(sResults[i].name, name) == 0)
+            return true;
+    return false;
+}
+
 void CopTestReset() {
     if (sGuard > 0)
         return; // our own summon/dismiss caused this reset
+    if (sRunning) {
+        // THE SHEET-SILENCE FIX (the 5x update): a world reset used to
+        // erase a running test whole - no bail-out verdict, no DONE,
+        // the sheet simply stopped (the live 09:02 session's tail).
+        // A reset under a live run is now a verdict, not a vanishing:
+        // every scenario the run had not graded is graded FAIL with
+        // the reason in its numbers (the roadblock keeps its honest
+        // uncounted form), the soak is graded as it stands, and
+        // Finish prints DONE and cleans up as always. The sheet must
+        // ALWAYS end in DONE.
+        Say("coptest: the world reset under a running test - grading what stands and finishing the sheet");
+        static const char* const kCounted[] = { "spike", "arrival", "ram", "siren",
+                                                "runover", "recovery", "player-felony", "bailout" };
+        for (const char* name : kCounted)
+            if (!AlreadyGraded(name))
+                Grade(name, false, true, "the run ended under it (world reset) before it could be graded");
+        if (!AlreadyGraded("roadblock"))
+            Grade("roadblock", false, false, "the run ended under it (world reset) - not graded");
+        Grade("soak", sWorstFreeze <= 5.0f, true,
+              "worst pursuing-unit freeze %.1f s (unit %d) (bar: <=5 s)", sWorstFreeze, sWorstSlot);
+        Finish();
+    }
     sRunning = false;
     sPhase = PH_NONE;
     sDecoyCar = -1;
